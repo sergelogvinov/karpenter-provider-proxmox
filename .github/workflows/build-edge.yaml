@@ -30,7 +30,7 @@ jobs:
         run: git fetch --prune --unshallow
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.7.0
+        uses: sigstore/cosign-installer@v3.8.0
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -58,3 +58,11 @@ jobs:
         env:
           USERNAME: ${{ github.repository_owner }}
           TAG: "edge"
+
+      - name: Clean old images
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: karpenter-provider-proxmox
+          package-type: container
+          delete-only-untagged-versions: 'true'
+        continue-on-error: true

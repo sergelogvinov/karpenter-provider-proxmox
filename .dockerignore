@@ -5,8 +5,10 @@
 #
 bin/
 charts/
+dist/
 docs/
 hack/
+vendor/
 Dockerfile
 
 # other
