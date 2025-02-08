@@ -16,6 +16,35 @@ limitations under the License.
 
 package main
 
-func main() {
+import (
+	"sigs.k8s.io/karpenter/pkg/controllers"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	"sigs.k8s.io/karpenter/pkg/operator"
 
+	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
+)
+
+func main() {
+	ctx, op := operator.NewOperator()
+	log := op.GetLogger()
+
+	log.Info("Karpenter Proxmox Provider version", "version", operator.Version)
+
+	instanceTypes, err := proxmox.ConstructInstanceTypes(ctx)
+	if err != nil {
+		log.Error(err, "failed constructing instance types")
+	}
+
+	cloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
+
+	op.WithControllers(ctx, controllers.NewControllers(
+		ctx,
+		op.Manager,
+		op.Clock,
+		op.GetClient(),
+		op.EventRecorder,
+		cloudProvider,
+		clusterState,
+	)...).Start(ctx)
 }

@@ -26,6 +26,8 @@ go.work.sum
 
 #
 /bin/
+/dist/
+/vendor/
 /karpenter-provider-proxmox*
 /kubeconfig
 /kubeconfig*

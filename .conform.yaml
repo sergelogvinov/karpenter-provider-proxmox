@@ -9,7 +9,6 @@ policies:
       body:
         required: true
       dco: true
-      gpg: false
       spellcheck:
         locale: US
       maximumOfOneCommit: false
@@ -33,10 +32,11 @@ policies:
     spec:
       skipPaths:
         - .git/
+        - vendor/
       includeSuffixes:
         - .go
       excludeSuffixes:
-        - .pb.go
+        - .deepcopy.go
       allowPrecedingComments: false
       header: |
         /*

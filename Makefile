@@ -1,3 +1,17 @@
+# Copyright 2025 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 REGISTRY ?= ghcr.io
 USERNAME ?= sergelogvinov
 PROJECT ?= karpenter-provider-proxmox
@@ -6,12 +20,12 @@ HELMREPO ?= $(REGISTRY)/$(USERNAME)/charts
 PLATFORM ?= linux/arm64,linux/amd64
 PUSH ?= false
 
-VERSION ?= $(shell git describe --dirty --tag --match='v*')
+VERSION ?= $(shell git describe --dirty --tag --match='v*' 2> /dev/null)
 SHA ?= $(shell git describe --match=none --always --abbrev=7 --dirty)
 TAG ?= $(VERSION)
 
 GO_LDFLAGS := -s -w
-GO_LDFLAGS += -X k8s.io/component-base/version.gitVersion=$(VERSION)
+GO_LDFLAGS += -X sigs.k8s.io/karpenter/pkg/operator.Version=$(VERSION)
 
 OS ?= $(shell go env GOOS)
 ARCH ?= $(shell go env GOARCH)
@@ -22,10 +36,12 @@ TESTARGS ?= "-v"
 BUILD_ARGS := --platform=$(PLATFORM)
 ifeq ($(PUSH),true)
 BUILD_ARGS += --push=$(PUSH)
-BUILD_ARGS += --output type=image,annotation-index.org.opencontainers.image.source="https://github.com/$(USERNAME)/$(PROJECT)",annotation-index.org.opencontainers.image.description="Proxmox VE CCM for Kubernetes"
+BUILD_ARGS += --output type=image,annotation-index.org.opencontainers.image.source="https://github.com/$(USERNAME)/$(PROJECT)",annotation-index.org.opencontainers.image.description="Karpenter Proxmox Provider"
 else
 BUILD_ARGS += --output type=docker
 endif
+
+CONTROLLER_GEN ?= controller-gen
 
 COSING_ARGS ?=
 
@@ -63,13 +79,44 @@ build-all-archs:
 clean: ## Clean
 	rm -rf bin
 
+.PHONY: tools
+tools:
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+
+.PHONY: init
+init:
+	kubebuilder init --domain proxmox.sinextra.dev --repo sergelogvinov/karpenter-provider-proxmox
+	kubebuilder create api --group karpenter.proxmox.sinextra.dev --version v1alpha1 --kind nodepools
+
+.PHONY: vendor
+vendor: ## update modules and populate local vendor directory
+	go mod tidy
+	go mod vendor
+	go mod verify
+
+.PHONY: generate
+generate: gen-objects manifests ## generate all controller-gen files
+
+.PHONY: gen-objects
+gen-objects: ## generate the controller-gen related objects
+	$(CONTROLLER_GEN) object paths="./..."
+
+.PHONY: manifests
+manifests: ## generate the controller-gen kubernetes manifests
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
+	@echo "Copying generated CRDs to Helm chart..."
+	@mkdir -p charts/karpenter-provider-proxmox/crds
+	@cp pkg/apis/crds/*.yaml charts/karpenter-provider-proxmox/crds/
+
 .PHONY: build
 build: ## Build
 	CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(GO_LDFLAGS)" \
 		-o bin/karpenter-provider-proxmox-$(ARCH) ./cmd/controller
 
 .PHONY: run
-run: build ## Run
+run: ## Run
+	go run ./cmd/controller
 
 .PHONY: lint
 lint: ## Lint Code
@@ -79,12 +126,16 @@ lint: ## Lint Code
 unit: ## Unit Tests
 	go test -tags=unit $(shell go list ./...) $(TESTARGS)
 
+.PHONY: conformance
+conformance:
+	docker run --rm -it -v $(PWD):/src -w /src ghcr.io/siderolabs/conform:latest enforce
+
 ############
 
 .PHONY: helm-unit
 helm-unit: ## Helm Unit Tests
 	@helm lint charts/karpenter-provider-proxmox
-	@helm template -f charts/karpenter-provider-proxmox/ci/values.yaml \
+	@helm template --include-crds -f charts/karpenter-provider-proxmox/ci/values.yaml \
 		karpenter-provider-proxmox charts/karpenter-provider-proxmox >/dev/null
 
 .PHONY: helm-login
@@ -102,11 +153,15 @@ helm-release: ## Helm Release
 
 .PHONY: docs
 docs:
-	yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
-	helm template -n kube-system karpenter-provider-proxmox \
+	# yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
+	helm template -n kube-system --include-crds karpenter-provider-proxmox \
 		-f charts/karpenter-provider-proxmox/values.edge.yaml \
 		--set-string image.tag=$(TAG) \
-		charts/karpenter-provider-proxmox > docs/deploy/cloud-controller-manager.yml
+		charts/karpenter-provider-proxmox > docs/deploy/karpenter-provider-proxmox.yml
+	helm template -n kube-system --include-crds karpenter-provider-proxmox \
+		-f charts/karpenter-provider-proxmox/values.edge.yaml \
+		--set-string image.tag=edge \
+		charts/karpenter-provider-proxmox > docs/deploy/karpenter-provider-proxmox-edge.yml
 	helm-docs --sort-values-order=file charts/karpenter-provider-proxmox
 
 release-update:

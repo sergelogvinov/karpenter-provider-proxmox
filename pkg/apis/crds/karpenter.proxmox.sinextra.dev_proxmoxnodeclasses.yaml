@@ -1,0 +1,181 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: proxmoxnodeclasses.karpenter.proxmox.sinextra.dev
+spec:
+  group: karpenter.proxmox.sinextra.dev
+  names:
+    kind: ProxmoxNodeClass
+    listKind: ProxmoxNodeClassList
+    plural: proxmoxnodeclasses
+    singular: proxmoxnodeclass
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ProxmoxNodeClass is the Schema for the ProxmoxNodeClass API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec defines the desired state of ProxmoxNodeClass
+            properties:
+              instanceRequirements:
+                description: |-
+                  InstanceRequirements defines requirements for automatic instance type selection
+                  Only used when InstanceProfile is not specified
+                properties:
+                  minimumCPU:
+                    description: MinimumCPU specifies the minimum number of CPUs required
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  minimumMemory:
+                    description: MinimumMemory specifies the minimum amount of memory
+                      in GiB
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
+              placementStrategy:
+                description: |-
+                  PlacementStrategy defines how nodes should be placed across zones and subnets
+                  Only used when Zone or Subnet is not specified
+                properties:
+                  zoneBalance:
+                    default: Balanced
+                    description: |-
+                      ZoneBalance determines how nodes are distributed across zones
+                      Valid values are:
+                      - "Balanced" (default) - Nodes are evenly distributed across zones
+                      - "AvailabilityFirst" - Prioritize zone availability over even distribution
+                    enum:
+                    - Balanced
+                    - AvailabilityFirst
+                    type: string
+                type: object
+              region:
+                description: Region is the Proxmox Cloud region where nodes will be
+                  created
+                type: string
+              tags:
+                additionalProperties:
+                  type: string
+                description: Tags to apply to the instances
+                type: object
+              template:
+                description: Template is the name of the template to use for nodes
+                type: string
+              zone:
+                description: |-
+                  Zone is the availability zone where nodes will be created
+                  If not specified, zones will be automatically selected based on placement strategy
+                type: string
+            required:
+            - template
+            type: object
+          status:
+            description: Status defines the observed state of ProxmoxNodeClass
+            properties:
+              conditions:
+                description: Conditions contains signals for health and readiness
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastValidationTime:
+                description: LastValidationTime is the last time the nodeclass was
+                  validated
+                format: date-time
+                type: string
+              selectedInstanceTypes:
+                description: |-
+                  SelectedInstanceTypes contains the list of instance types that meet the requirements
+                  Only populated when using automatic instance type selection
+                items:
+                  type: string
+                type: array
+              specHash:
+                description: SpecHash is a hash of the ProxmoxNodeClass spec
+                format: int64
+                type: integer
+              validationError:
+                description: ValidationError contains the error message from the last
+                  validation
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
