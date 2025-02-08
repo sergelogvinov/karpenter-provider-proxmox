@@ -1,0 +1,48 @@
+---
+# See https://docs.github.com/en/github/administering-a-repository/configuration-options-for-dependency-updates
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    commit-message:
+      prefix: "chore:"
+    open-pull-requests-limit: 8
+    rebase-strategy: disabled
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "08:00"
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    commit-message:
+      prefix: "chore:"
+    open-pull-requests-limit: 8
+    rebase-strategy: disabled
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "07:00"
+    groups:
+      k8s.io:
+        patterns:
+          - "k8s.io/api"
+          - "k8s.io/apimachinery"
+          - "k8s.io/apiserver"
+          - "k8s.io/client-go"
+          - "k8s.io/cloud-provider"
+          - "k8s.io/component-base"
+          - "k8s.io/component-helpers"
+          - "k8s.io/controller-manager"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    commit-message:
+      prefix: "chore:"
+    open-pull-requests-limit: 8
+    rebase-strategy: disabled
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "07:00"

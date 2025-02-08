@@ -1,0 +1,20 @@
+.vscode/
+.github/
+.git/
+**/.gitignore
+#
+bin/
+charts/
+docs/
+hack/
+Dockerfile
+
+# other
+*.md
+*.yml
+*.zip
+*.sql
+
+# cosign
+/cosign.key
+/cosign.pub
