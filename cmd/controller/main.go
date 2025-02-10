@@ -23,6 +23,7 @@ import (
 	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
 
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers"
 )
 
 func main() {
@@ -49,6 +50,14 @@ func main() {
 			op.EventRecorder,
 			cloudProvider,
 			clusterState,
+		)...).
+		WithControllers(ctx, controllers.NewControllers(
+			ctx,
+			op.Manager,
+			op.Clock,
+			op.GetClient(),
+			op.EventRecorder,
+			cloudProvider,
 		)...).
 		Start(ctx)
 }

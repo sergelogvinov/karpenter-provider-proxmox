@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: test
+  namespace: default
+  labels:
+    app: alpine
+spec:
+  podManagementPolicy: Parallel # default is OrderedReady
+  serviceName: test
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: alpine
+    spec:
+      terminationGracePeriodSeconds: 3
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsUser: 65534
+      # tolerations:
+      #   - effect: NoSchedule
+      #     key: node-role.kubernetes.io/control-plane
+      nodeSelector:
+        # node-role.kubernetes.io/control-plane: ""
+        # kubernetes.io/hostname: kube-21
+        # topology.kubernetes.io/zone: hvm-1
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - alpine
+              topologyKey: kubernetes.io/hostname
+      enableServiceLinks: false
+      containers:
+        - name: alpine
+          image: alpine
+          command: ["sleep", "1d"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 100Mi
+            limits:
+              cpu: 100m
+              memory: 100Mi
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: alpine

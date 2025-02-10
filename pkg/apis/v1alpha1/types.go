@@ -134,6 +134,7 @@ func (in *ProxmoxNodeClass) GetConditions() []status.Condition {
 			ObservedGeneration: c.ObservedGeneration,
 		})
 	}
+
 	return conditions
 }
 
@@ -153,6 +154,7 @@ func (in *ProxmoxNodeClass) SetConditions(conditions []status.Condition) {
 			ObservedGeneration: c.ObservedGeneration,
 		})
 	}
+
 	in.Status.Conditions = metav1Conditions
 }
 
