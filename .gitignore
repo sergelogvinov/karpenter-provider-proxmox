@@ -31,5 +31,5 @@ go.work.sum
 /karpenter-provider-proxmox*
 /kubeconfig
 /kubeconfig*
-/proxmox-config.yaml
+/cloud.yaml
 #

@@ -17,6 +17,15 @@ spec:
         - key: "kubernetes.io/arch"
           operator: In
           values: ["amd64"]
+        - key: "karpenter.proxmox.sinextra.dev/instance-family"
+          operator: In
+          values: ["c1"]
+        # - key: "karpenter.sh/capacity-type"
+        #   operator: In
+        #   values: ["spot", "on-demand", "reserved"]
+        # - key: "topology.kubernetes.io/zone"
+        #   operator: In
+        #   values: ["rnd-1", "rnd-2"]
 ---
 apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
 kind: ProxmoxNodeClass
@@ -24,4 +33,3 @@ metadata:
   name: default
 spec:
   template: talos
----

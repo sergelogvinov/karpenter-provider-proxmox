@@ -19,12 +19,115 @@ package proxmox
 import (
 	"context"
 	_ "embed"
+	"fmt"
+	"strings"
 
-	_ "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/options"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
 func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
-	return nil, nil
+	var instanceTypes []*cloudprovider.InstanceType
+
+	for _, cpu := range []int{1, 2, 4, 8, 16, 32} {
+		for _, memFactor := range []int{2, 3, 4} {
+			// Construct instance type details, then construct offerings.
+			name := makeGenericInstanceTypeName(cpu, memFactor)
+
+			mem := cpu * memFactor
+			opts := cloudprovider.InstanceType{
+				Name: name,
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
+					corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
+					corev1.ResourcePods:             resource.MustParse("110"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("30Gi"),
+				},
+				Overhead: &cloudprovider.InstanceTypeOverhead{
+					KubeReserved: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10m"),
+						corev1.ResourceMemory: resource.MustParse("64Mi"),
+					},
+					SystemReserved: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("10m"),
+						corev1.ResourceMemory: resource.MustParse("64Mi"),
+					},
+				},
+			}
+
+			price := priceFromResources(opts.Capacity)
+
+			opts.Offerings = []cloudprovider.Offering{}
+
+			opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
+				Price:     price,
+				Available: true,
+
+				Requirements: scheduling.NewRequirements(
+					// scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, karpv1.ArchitectureAmd64),
+					scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
+					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+					scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(name, ".")[0]),
+					scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", cpu)),
+					scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%dGi", mem)),
+				),
+			})
+
+			instanceTypes = append(instanceTypes, &opts)
+		}
+	}
+
+	return instanceTypes, nil
+}
+
+func instanceTypeByName(instanceTypes []*cloudprovider.InstanceType, name string) (*cloudprovider.InstanceType, error) {
+	for _, instanceType := range instanceTypes {
+		if instanceType.Name == name {
+			return instanceType, nil
+		}
+	}
+
+	return nil, fmt.Errorf("instance type not found")
+}
+
+func makeGenericInstanceTypeName(cpu, memFactor int) string {
+	var family string
+
+	switch memFactor {
+	case 2:
+		family = "c" // cpu
+	case 3:
+		family = "t"
+	case 4:
+		family = "s" // standard
+	case 8:
+		family = "m" // memory
+	case 16:
+		family = "x" // in-memory applications
+	default:
+		family = "e"
+	}
+
+	return fmt.Sprintf("%s1.%dVCPU-%dGB", family, cpu, cpu*memFactor)
+}
+
+func priceFromResources(resources corev1.ResourceList) float64 {
+	// Let's assume the price is electricity cost
+	price := 0.0
+	for k, v := range resources {
+		switch k {
+		case corev1.ResourceCPU:
+			price += 0.025 * v.AsApproximateFloat64()
+		case corev1.ResourceMemory:
+			price += 0.001 * v.AsApproximateFloat64() / (1e9)
+		}
+	}
+
+	return price
 }

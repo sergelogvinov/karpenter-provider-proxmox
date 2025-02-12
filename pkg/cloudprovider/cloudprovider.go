@@ -22,21 +22,23 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
-
-	"github.com/awslabs/operatorpkg/status"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
 const (
@@ -45,19 +47,21 @@ const (
 )
 
 type CloudProvider struct {
-	kubeClient    client.Client
-	instanceTypes []*cloudprovider.InstanceType
-	log           logr.Logger
+	kubeClient       client.Client
+	instanceTypes    []*cloudprovider.InstanceType
+	instanceProvider *instance.Provider
+	log              logr.Logger
 }
 
-func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType) *CloudProvider {
+func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType, instanceProvider *instance.Provider) *CloudProvider {
 	log := log.FromContext(ctx).WithName(CloudProviderName)
 	log.WithName("NewCloudProvider()").Info("Executed with params", "instanceTypes", instanceTypes)
 
 	return &CloudProvider{
-		kubeClient:    kubeClient,
-		instanceTypes: instanceTypes,
-		log:           log,
+		kubeClient:       kubeClient,
+		instanceTypes:    instanceTypes,
+		instanceProvider: instanceProvider,
+		log:              log,
 	}
 }
 
@@ -67,7 +71,30 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 	log := c.log.WithName("Create()")
 	log.Info("Executed with params", "nodePool", nodeClaim.Name, "spec", nodeClaim.Spec)
 
-	return nil, fmt.Errorf("not implemented")
+	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
+	}
+
+	instanceTypes, err := c.resolveInstanceTypes(ctx, nodeClaim, nodeClass)
+	if err != nil {
+		return nil, fmt.Errorf("resolving instance types, %w", err)
+	}
+
+	if len(instanceTypes) == 0 {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
+	}
+
+	log.Info("Successfully resolved instance types", "count", len(instanceTypes))
+
+	node, err := c.instanceProvider.Create(ctx, nodeClaim, nodeClass, instanceTypes)
+	if err != nil {
+		return nil, fmt.Errorf("creating instance, %w", err)
+	}
+
+	log.Info("Successfully created instance", "providerID", nodeClaim.Status.ProviderID)
+
+	return c.nodeToNodeClaim(ctx, node)
 }
 
 // Delete removes a NodeClaim from the cloudprovider by its provider id. Delete should return
@@ -77,7 +104,14 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 	log := c.log.WithName("Delete()")
 	log.Info("Executed with params", "nodePool", nodeClaim.Name)
 
-	return fmt.Errorf("not implemented")
+	providerID := nodeClaim.Status.ProviderID
+	if providerID == "" {
+		log.Info("providerID is empty")
+
+		return nil
+	}
+
+	return c.instanceProvider.Delete(ctx, nodeClaim)
 }
 
 // Get retrieves a NodeClaim from the cloudprovider by its provider id
@@ -85,7 +119,24 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Node
 	log := c.log.WithName("Get()")
 	log.Info("Executed with params", "providerID", providerID)
 
-	return nil, fmt.Errorf("not implemented")
+	if providerID == "" {
+		return nil, fmt.Errorf("providerID is empty")
+	}
+
+	if !strings.HasPrefix(providerID, ProxmoxProviderPrefix) {
+		return nil, fmt.Errorf("providerID does not have the correct prefix")
+	}
+
+	node, err := c.instanceProvider.Get(ctx, providerID)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil, cloudprovider.NewNodeClaimNotFoundError(err)
+		}
+
+		return nil, fmt.Errorf("getting instance, %w", err)
+	}
+
+	return c.nodeToNodeClaim(ctx, node)
 }
 
 // List retrieves all NodeClaims from the cloudprovider
@@ -104,7 +155,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 			continue
 		}
 
-		nc, err := c.toNodeClaim(&nodeList.Items[i])
+		nc, err := c.nodeToNodeClaim(ctx, &nodeList.Items[i])
 		if err != nil {
 			return nil, fmt.Errorf("converting nodeclaim, %w", err)
 		}
@@ -134,88 +185,9 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 	}
 	log.Info("Resolved NodeClass", "name", nodeClass.Name)
 
-	instanceTypes := []*cloudprovider.InstanceType{
-		{
-			Name: "t2.micro",
-			Offerings: []cloudprovider.Offering{
-				{
-					Price:     1,
-					Available: true,
-					Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-						scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "8VCPU-24GB"),
-						// scheduling.NewRequirement("topology.kubernetes.io/zone", corev1.NodeSelectorOpIn, "rnd-1", "rnd-2"),
-					),
-				},
-			},
-			Capacity: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("1"),
-				corev1.ResourceMemory: resource.MustParse("1Gi"),
-				corev1.ResourcePods:   resource.MustParse("110"),
-			},
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("10m"),
-					corev1.ResourceMemory: resource.MustParse("64Mi"),
-				},
-			},
-		},
-		{
-			Name: "t2.small",
-			Offerings: []cloudprovider.Offering{
-				{
-					Price:     1,
-					Available: true,
-					Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-						scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "8VCPU-24GB"),
-					),
-				},
-			},
-			Capacity: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("2"),
-				corev1.ResourceMemory: resource.MustParse("4Gi"),
-				corev1.ResourcePods:   resource.MustParse("110"),
-			},
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("10m"),
-					corev1.ResourceMemory: resource.MustParse("64Mi"),
-				},
-			},
-		},
-		{
-			Name: "8VCPU-24GB",
-			Offerings: []cloudprovider.Offering{
-				{
-					Price:     1,
-					Available: true,
-					Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-						scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, "linux"),
+	log.Info("Successfully retrieved instance types", "count", len(c.instanceTypes))
 
-						scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, "8VCPU-24GB"),
-						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "rnd-1", "rnd-2"),
-					),
-				},
-			},
-			Capacity: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("8"),
-				corev1.ResourceMemory: resource.MustParse("24Gi"),
-				corev1.ResourcePods:   resource.MustParse("110"),
-			},
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("10m"),
-					corev1.ResourceMemory: resource.MustParse("64Mi"),
-				},
-			},
-		},
-	}
-
-	log.Info("Successfully retrieved instance types", "count", len(instanceTypes))
-
-	return instanceTypes, nil
+	return c.instanceTypes, nil
 }
 
 // IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
@@ -242,4 +214,27 @@ func (c CloudProvider) Name() string {
 // NOTE: It returns a list where the first element should be the default NodeClass
 func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.ProxmoxNodeClass{}}
+}
+
+func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1alpha1.ProxmoxNodeClass, error) {
+	nodeClass := &v1alpha1.ProxmoxNodeClass{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Spec.NodeClassRef.Name}, nodeClass); err != nil {
+		return nil, err
+	}
+
+	// For the purposes of NodeClass CloudProvider resolution, we treat deleting NodeClasses as NotFound
+	if !nodeClass.DeletionTimestamp.IsZero() {
+		return nil, errors.NewNotFound(v1alpha1.SchemeGroupVersion.WithResource("proxmoxnodeclass").GroupResource(), nodeClass.Name)
+	}
+
+	return nodeClass, nil
+}
+
+func (c *CloudProvider) resolveInstanceTypes(_ context.Context, nodeClaim *karpv1.NodeClaim, _ *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
+	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+
+	return lo.Filter(c.instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		return len(i.Offerings.Compatible(reqs).Available()) > 0 &&
+			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
+	}), nil
 }

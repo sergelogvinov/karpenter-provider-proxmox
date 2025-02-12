@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"os"
+
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
 	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -24,6 +26,7 @@ import (
 
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 )
 
 func main() {
@@ -35,9 +38,18 @@ func main() {
 	instanceTypes, err := proxmox.ConstructInstanceTypes(ctx)
 	if err != nil {
 		log.Error(err, "failed constructing instance types")
+
+		os.Exit(1)
 	}
 
-	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), instanceTypes)
+	instanceProvider, err := instance.NewProvider()
+	if err != nil {
+		log.Error(err, "failed creating instance provider")
+
+		os.Exit(1)
+	}
+
+	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), instanceTypes, instanceProvider)
 	cloudProvider := metrics.Decorate(proxmoxCloudProvider)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 

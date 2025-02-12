@@ -17,43 +17,52 @@ limitations under the License.
 package proxmox
 
 import (
+	"context"
+	"strings"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-func addKwokAnnotation(annotations map[string]string) map[string]string {
-	ret := make(map[string]string, len(annotations)+1)
-	for k, v := range annotations {
-		ret[k] = v
+func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*karpv1.NodeClaim, error) {
+	nodeClaim := &karpv1.NodeClaim{}
+	labels := map[string]string{}
+	annotations := map[string]string{}
+
+	if typeLabel, ok := node.Labels[corev1.LabelInstanceTypeStable]; ok {
+		if instanceType, err := instanceTypeByName(c.instanceTypes, typeLabel); err == nil {
+			typeName := strings.Split(instanceType.Name, ".")
+
+			labels[corev1.LabelInstanceTypeStable] = instanceType.Name
+			labels[v1alpha1.LabelInstanceFamily] = typeName[0]
+			labels[v1alpha1.LabelInstanceCPUManufacturer] = "kvm64"
+
+			nodeClaim.Status.Capacity = instanceType.Capacity
+			nodeClaim.Status.Allocatable = instanceType.Allocatable()
+		} else {
+			labels[corev1.LabelInstanceTypeStable] = typeLabel
+			labels[v1alpha1.LabelInstanceFamily] = "e1"
+			labels[v1alpha1.LabelInstanceCPUManufacturer] = "kvm64"
+
+			nodeClaim.Status.Capacity = node.Status.Capacity
+			nodeClaim.Status.Allocatable = node.Status.Allocatable
+		}
+
+		labels[corev1.LabelArchStable] = node.Status.NodeInfo.Architecture
+		labels[corev1.LabelOSStable] = node.Status.NodeInfo.OperatingSystem
 	}
 
-	ret[v1alpha1.ProxmoxLabelKey] = v1alpha1.ProxmoxLabelValue
+	labels[corev1.LabelTopologyRegion] = node.Labels[corev1.LabelTopologyRegion]
+	labels[corev1.LabelTopologyZone] = node.Labels[corev1.LabelTopologyZone]
 
-	return ret
-}
+	nodeClaim.Name = node.Name
+	nodeClaim.Labels = labels
+	nodeClaim.Annotations = annotations
 
-func (c CloudProvider) toNodeClaim(node *corev1.Node) (*karpv1.NodeClaim, error) {
-	return &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        node.Name,
-			Labels:      node.Labels,
-			Annotations: addKwokAnnotation(node.Annotations),
-		},
-		Spec: karpv1.NodeClaimSpec{
-			Taints:        nil,
-			StartupTaints: nil,
-			Requirements:  nil,
-			Resources:     karpv1.ResourceRequirements{},
-			NodeClassRef:  nil,
-		},
-		Status: karpv1.NodeClaimStatus{
-			NodeName:    node.Name,
-			ProviderID:  node.Spec.ProviderID,
-			Capacity:    node.Status.Capacity,
-			Allocatable: node.Status.Allocatable,
-		},
-	}, nil
+	nodeClaim.Status.NodeName = node.Name
+	nodeClaim.Status.ProviderID = node.Spec.ProviderID
+
+	return nodeClaim, nil
 }
