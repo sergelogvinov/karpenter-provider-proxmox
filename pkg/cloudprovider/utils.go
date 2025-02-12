@@ -37,7 +37,8 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*
 
 			labels[corev1.LabelInstanceTypeStable] = instanceType.Name
 			labels[v1alpha1.LabelInstanceFamily] = typeName[0]
-			labels[v1alpha1.LabelInstanceCPUManufacturer] = "kvm64"
+			labels[v1alpha1.LabelInstanceCPUManufacturer] = node.Labels[v1alpha1.LabelInstanceCPUManufacturer]
+			labels[karpv1.CapacityTypeLabelKey] = node.Labels[karpv1.CapacityTypeLabelKey]
 
 			nodeClaim.Status.Capacity = instanceType.Capacity
 			nodeClaim.Status.Allocatable = instanceType.Allocatable()
@@ -45,6 +46,7 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*
 			labels[corev1.LabelInstanceTypeStable] = typeLabel
 			labels[v1alpha1.LabelInstanceFamily] = "e1"
 			labels[v1alpha1.LabelInstanceCPUManufacturer] = "kvm64"
+			labels[karpv1.CapacityTypeLabelKey] = karpv1.CapacityTypeOnDemand
 
 			nodeClaim.Status.Capacity = node.Status.Capacity
 			nodeClaim.Status.Allocatable = node.Status.Allocatable

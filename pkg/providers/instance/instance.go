@@ -18,6 +18,7 @@ package instance
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 
@@ -53,6 +54,8 @@ func NewProvider() (*Provider, error) {
 
 // Create an instance given the constraints.
 func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
+	instanceType := instanceTypes[0]
+
 	region := nodeClaim.Labels[corev1.LabelTopologyRegion]
 	if region == "" {
 		region = "region-1"
@@ -97,10 +100,23 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	vmr.SetNode(zone)
 	vmr.SetVmType("qemu")
 
-	cl.ResizeQemuDiskRaw(vmr, "scsi0", "30G")
+	if _, err := cl.ResizeQemuDiskRaw(vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024)); err != nil {
+		return nil, fmt.Errorf("failed to resize disk: %v", err)
+	}
 
+	config, err := cl.GetVmConfig(vmr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vm config: %v", err)
+	}
+
+	smbios1 := config["smbios1"].(string)
 	vmParams := map[string]interface{}{
-		"memory": "2048",
+		"memory": fmt.Sprintf("%d", instanceType.Capacity.Memory().Value()/1024/1024),
+		"cores":  instanceType.Capacity.Cpu().String(),
+		"smbios1": fmt.Sprintf("%s,serial=%s,sku=%s,base64=1", smbios1,
+			base64.StdEncoding.EncodeToString([]byte("h="+nodeClaim.Name)),
+			base64.StdEncoding.EncodeToString([]byte(instanceType.Name)),
+		),
 	}
 
 	_, err = cl.SetVmConfig(vmr, vmParams)
@@ -108,7 +124,9 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		return nil, fmt.Errorf("failed to update disk: %v, vmParams=%+v", err, vmParams)
 	}
 
-	instanceType := instanceTypes[0]
+	if _, err := cl.StartVm(vmr); err != nil {
+		return nil, fmt.Errorf("failed to start vm %d: %v", vmr.VmId(), err)
+	}
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -125,6 +143,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		},
 		Spec: corev1.NodeSpec{
 			ProviderID: ccmprovider.GetProviderID(region, vmr),
+			Taints:     []corev1.Taint{karpv1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
@@ -208,6 +227,10 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 
 	params := map[string]interface{}{}
 	params["purge"] = "1"
+
+	if _, err := cl.StopVm(vmr); err != nil {
+		return fmt.Errorf("failed to stop vm %d: %v", vmr.VmId(), err)
+	}
 
 	if _, err := cl.DeleteVmParams(vmr, params); err != nil {
 		return fmt.Errorf("failed to delete vm %d: %v", vmr.VmId(), err)

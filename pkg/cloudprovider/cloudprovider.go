@@ -71,6 +71,10 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 	log := c.log.WithName("Create()")
 	log.Info("Executed with params", "nodePool", nodeClaim.Name, "spec", nodeClaim.Spec)
 
+	if nodeClaim == nil {
+		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
+	}
+
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
@@ -92,7 +96,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 		return nil, fmt.Errorf("creating instance, %w", err)
 	}
 
-	log.Info("Successfully created instance", "providerID", nodeClaim.Status.ProviderID)
+	log.Info("Successfully created instance", "providerID", node.Spec.ProviderID)
 
 	return c.nodeToNodeClaim(ctx, node)
 }
@@ -103,6 +107,10 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	log := c.log.WithName("Delete()")
 	log.Info("Executed with params", "nodePool", nodeClaim.Name)
+
+	if nodeClaim == nil {
+		return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
+	}
 
 	providerID := nodeClaim.Status.ProviderID
 	if providerID == "" {
@@ -192,9 +200,22 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 
 // IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
 // it is tied to.
-func (c CloudProvider) IsDrifted(_ context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
+func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
 	log := c.log.WithName("IsDrifted()")
 	log.Info("Executed with params", "nodeClaim", nodeClaim.Name)
+
+	if nodeClaim == nil {
+		return "", cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
+	}
+
+	if nodeClaim.Spec.NodeClassRef == nil {
+		return "", nil
+	}
+
+	_, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
+	if err != nil {
+		return "", cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
+	}
 
 	return "", nil
 }
