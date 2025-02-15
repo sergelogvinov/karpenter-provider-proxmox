@@ -49,19 +49,6 @@ type PlacementStrategy struct {
 	ZoneBalance string `json:"zoneBalance,omitempty"`
 }
 
-// InstanceTypeRequirements defines criteria for automatic instance type selection
-type InstanceTypeRequirements struct {
-	// MinimumCPU specifies the minimum number of CPUs required
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MinimumCPU int32 `json:"minimumCPU,omitempty"`
-
-	// MinimumMemory specifies the minimum amount of memory in GiB
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	MinimumMemory int32 `json:"minimumMemory,omitempty"`
-}
-
 // ProxmoxNodeClassSpec defines the desired state of ProxmoxNodeClass
 type ProxmoxNodeClassSpec struct {
 	// Region is the Proxmox Cloud region where nodes will be created
@@ -73,23 +60,56 @@ type ProxmoxNodeClassSpec struct {
 	// +optional
 	Zone string `json:"zone,omitempty"`
 
-	// InstanceRequirements defines requirements for automatic instance type selection
-	// Only used when InstanceProfile is not specified
-	// +optional
-	InstanceRequirements *InstanceTypeRequirements `json:"instanceRequirements,omitempty"`
-
 	// Template is the name of the template to use for nodes
 	// +required
 	Template string `json:"template"`
 
-	// PlacementStrategy defines how nodes should be placed across zones and subnets
+	// BlockDevicesStorageID is the storage ID to create/clone the VM
+	// +required
+	BlockDevicesStorageID string `json:"blockDevicesStorageID,omitempty"`
+
+	// PlacementStrategy defines how nodes should be placed across zones
 	// Only used when Zone or Subnet is not specified
 	// +optional
 	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
 
-	// Tags to apply to the instances
+	// Tags to apply to the VMs
 	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
+
+	// MetadataOptions for the generated launch template of provisioned nodes.
+	// +kubebuilder:default={"Type":"template"}
+	// +optional
+	MetadataOptions *MetadataOptions `json:"metadataOptions,omitempty"`
+
+	// SecurityGroups to apply to the VMs
+	// +kubebuilder:validation:MaxItems:=10
+	// +optional
+	SecurityGroups []SecurityGroupsTerm `json:"securityGroups,omitempty"`
+}
+
+// MetadataOptions contains parameters for specifying the exposure of the
+// Instance Metadata Service to provisioned VMs.
+type MetadataOptions struct {
+	// If specified, the instance metadata will be exposed to the VMs by CDRom, HTTP
+	// or template. Template is the default. It means that the metadata will be stored in VM template.
+	// +kubebuilder:default=template
+	// +kubebuilder:validation:Enum:={template,cdrom,http}
+	// +optional
+	Type *string `json:"type,omitempty"`
+}
+
+// SecurityGroupsTerm defines a term to apply security groups
+type SecurityGroupsTerm struct {
+	// Interface is the network interface to apply the security group
+	// +kubebuilder:default=net0
+	// +kubebuilder:validation:Pattern:="net[0-9]+"
+	// +optional
+	Interface string `json:"interface,omitempty"`
+	// Name is the security group name in Proxmox.
+	// +kubebuilder:validation:MaxLength=30
+	// +required
+	Name string `json:"name,omitempty"`
 }
 
 // ProxmoxNodeClassStatus defines the observed state of ProxmoxNodeClass

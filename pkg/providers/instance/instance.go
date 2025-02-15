@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -100,6 +101,15 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	vmr.SetNode(zone)
 	vmr.SetVmType("qemu")
 
+	// FIXME: Defer delete vm if failed
+	defer func() {
+		if err != nil {
+			if _, err := cl.DeleteVm(vmr); err != nil {
+				fmt.Printf("failed to delete vm %d: %v", vmr.VmId(), err)
+			}
+		}
+	}()
+
 	if _, err := cl.ResizeQemuDiskRaw(vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024)); err != nil {
 		return nil, fmt.Errorf("failed to resize disk: %v", err)
 	}
@@ -114,7 +124,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		"memory": fmt.Sprintf("%d", instanceType.Capacity.Memory().Value()/1024/1024),
 		"cores":  instanceType.Capacity.Cpu().String(),
 		"smbios1": fmt.Sprintf("%s,serial=%s,sku=%s,base64=1", smbios1,
-			base64.StdEncoding.EncodeToString([]byte("h="+nodeClaim.Name)),
+			base64.StdEncoding.EncodeToString([]byte("h="+nodeClaim.Name+";i="+strconv.Itoa(id))),
 			base64.StdEncoding.EncodeToString([]byte(instanceType.Name)),
 		),
 	}
@@ -224,6 +234,14 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 	vmr := pxapi.NewVmRef(vmID)
 	vmr.SetNode(zone)
 	vmr.SetVmType("qemu")
+
+	if _, err := cl.GetVmInfo(vmr); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+
+		return fmt.Errorf("failed to get vm %d: %v", vmr.VmId(), err)
+	}
 
 	params := map[string]interface{}{}
 	params["purge"] = "1"

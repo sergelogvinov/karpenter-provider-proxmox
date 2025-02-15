@@ -14,11 +14,4 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package apis definition of the API group for Proxmox provider
-package apis
-
-//go:generate controller-gen crd object:headerFile="../../hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=crds
-const (
-	// Group is the API group for Proxmox provider
-	Group = "karpenter.proxmox.sinextra.dev"
-)
+package cloudcapacity

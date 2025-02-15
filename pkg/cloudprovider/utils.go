@@ -18,10 +18,12 @@ package proxmox
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
@@ -38,6 +40,7 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*
 			labels[corev1.LabelInstanceTypeStable] = instanceType.Name
 			labels[v1alpha1.LabelInstanceFamily] = typeName[0]
 			labels[v1alpha1.LabelInstanceCPUManufacturer] = node.Labels[v1alpha1.LabelInstanceCPUManufacturer]
+			labels[v1alpha1.LabelNodeViewer] = fmt.Sprintf("%f", instanceType.Offerings.Cheapest().Price)
 			labels[karpv1.CapacityTypeLabelKey] = node.Labels[karpv1.CapacityTypeLabelKey]
 
 			nodeClaim.Status.Capacity = instanceType.Capacity
@@ -62,6 +65,7 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*
 	nodeClaim.Name = node.Name
 	nodeClaim.Labels = labels
 	nodeClaim.Annotations = annotations
+	nodeClaim.CreationTimestamp = metav1.Time{Time: node.CreationTimestamp.Time}
 
 	nodeClaim.Status.NodeName = node.Name
 	nodeClaim.Status.ProviderID = node.Spec.ProviderID

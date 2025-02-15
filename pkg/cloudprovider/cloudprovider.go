@@ -150,7 +150,6 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Node
 // List retrieves all NodeClaims from the cloudprovider
 func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 	log := c.log.WithName("List()")
-	log.Info("Executed")
 
 	nodeList := &corev1.NodeList{}
 	if err := c.kubeClient.List(ctx, nodeList); err != nil {
@@ -171,7 +170,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 		nodeClaims = append(nodeClaims, nc)
 	}
 
-	log.Info("Successfully retrieved instance list", "count", len(nodeClaims))
+	log.V(1).Info("Successfully retrieved node claims list", "count", len(nodeClaims))
 
 	return nodeClaims, nil
 }
@@ -182,18 +181,16 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 // even those with no offerings available.
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	log := c.log.WithName("GetInstanceTypes()")
-	log.Info("Executed with params", "nodePool", nodePool.Name)
 
 	nodeClass := &v1alpha1.ProxmoxNodeClass{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		if errors.IsNotFound(err) {
-			log.Error(err, "Failed to resolve NodeClass")
+			log.Error(err, "Failed to resolve nodeClass")
 		}
 		return nil, err
 	}
-	log.Info("Resolved NodeClass", "name", nodeClass.Name)
 
-	log.Info("Successfully retrieved instance types", "count", len(c.instanceTypes))
+	log.V(1).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(c.instanceTypes))
 
 	return c.instanceTypes, nil
 }

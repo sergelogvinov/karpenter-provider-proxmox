@@ -17,6 +17,16 @@ The benefits of not fully utilizing all bare metal resources include:
 * `CPU pinning` – VMs CPUs pinned to specific CPU cores on the host.
 * `NUMA node affinity` – VMs can be placed on the same NUMA node for better performance.
 
+## In Scope
+
+* [x] Dynamic creation/termination
+* [x] VM template selection to create kubernetes node
+* [ ] The best placement strategy for VMs across zones
+* [ ] Firewall security groups
+* [ ] Meta/user data delivery by cdrom, or http endpoint
+* [ ] VM optimization: CPU pinning and NUMA node affinity
+* [ ] VM optimization: Network and storage performance
+
 ## Requirements
 
 - Kubernetes 1.30+
@@ -25,10 +35,85 @@ The benefits of not fully utilizing all bare metal resources include:
 
 ## Installation
 
+## Configuration
+
+Kerpenter Node Class configuration:
+
+```yaml
+apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
+kind: ProxmoxNodeClass
+metadata:
+  name: default
+spec:
+  # Proxmox VM template name (required)
+  # it must be pre-configured on Proxmox, resources like network, os image, etc.
+  template: talos
+
+  # Proxmox VM storage ID to create the VM (required)
+  blockDevicesStorageID: zfs
+
+  # PlacementStrategy defines how nodes should be placed across zones (optional)
+  placementStrategy: Balanced|AvailabilityFirst
+
+  # Proxmox zone and region (optional)
+  Region: region1
+  Zone: zone1
+
+  # Tags to apply to the VM on Proxmox Dashboard (optional)
+  tags:
+    - k8s
+    - karperter
+
+  metadataOptions:
+    # How delivery the metadata to the VM, options: template, cdrom or http endpoint
+    type: template|cdrom|http
+
+  # Firewall Security Groups to apply to the VM
+  securityGroups:
+    - name: kubernetes
+      interface: net0
+```
+
+Karpenter Node Pool configuration:
+For more information, see [Karpenter Node Pool](https://karpenter.sh/docs/concepts/nodepools/)
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  # Node pool name, it uses to create the node name for new VMs
+  name: default
+spec:
+  limits:
+    cpu: "64"
+    memory: 512Gi
+
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.proxmox.sinextra.dev
+        kind: ProxmoxNodeClass
+        name: default
+      requirements:
+        - key: "kubernetes.io/arch"
+          operator: In
+          values: ["amd64"]
+```
+
 ## Contributing
 
 Contributions are welcomed and appreciated!
 See [Contributing](CONTRIBUTING.md) for our guidelines.
+
+## Code of Conduct
+
+This [Code of Conduct](CODE_OF_CONDUCT.md) is adapted from the Contributor Covenant, version 1.4.
+
+## References
+
+* [Karpenter](https://karpenter.sh/)
+* [Proxmox VE](https://www.proxmox.com/en/proxmox-ve)
+* [Proxmox CCM](https://github.com/sergelogvinov/proxmox-cloud-controller-manager)
 
 ## License
 

@@ -111,7 +111,7 @@ build: ## Build
 
 .PHONY: run
 run: ## Run
-	go run ./cmd/controller -disable-leader-election
+	go run ./cmd/controller -disable-leader-election -log-level=debug
 
 .PHONY: lint
 lint: ## Lint Code

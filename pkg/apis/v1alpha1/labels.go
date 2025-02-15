@@ -29,6 +29,9 @@ const (
 	LabelInstanceCPU             = apis.Group + "/instance-cpu"              // 1, 2, 4, 8
 	LabelInstanceMemory          = apis.Group + "/instance-memory"           // 1Gi, 2Gi, 4Gi, 8Gi
 
+	// github.com/awslabs/eks-node-viewer label so that it shows up.
+	LabelNodeViewer = "eks-node-viewer/instance-price"
+
 	// Internal labels that are propagated to the node
 	ProxmoxLabelKey   = apis.Group + "/node"
 	ProxmoxLabelValue = "owned"
