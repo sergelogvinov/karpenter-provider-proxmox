@@ -104,6 +104,10 @@ manifests: ## generate the controller-gen kubernetes manifests
 	@mkdir -p charts/karpenter-provider-proxmox/crds
 	@cp pkg/apis/crds/*.yaml charts/karpenter-provider-proxmox/crds/
 
+.PHONY: install
+install: ## Install
+	kubectl replace -f charts/karpenter-provider-proxmox/crds/
+
 .PHONY: build
 build: ## Build
 	CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(GO_LDFLAGS)" \

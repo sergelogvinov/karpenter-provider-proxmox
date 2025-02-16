@@ -75,10 +75,10 @@ type ProxmoxNodeClassSpec struct {
 
 	// Tags to apply to the VMs
 	// +optional
-	Tags map[string]string `json:"tags,omitempty"`
+	Tags []string `json:"tags,omitempty"`
 
 	// MetadataOptions for the generated launch template of provisioned nodes.
-	// +kubebuilder:default={"Type":"template"}
+	// +kubebuilder:default={"type":"template"}
 	// +optional
 	MetadataOptions *MetadataOptions `json:"metadataOptions,omitempty"`
 

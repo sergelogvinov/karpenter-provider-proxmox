@@ -33,3 +33,7 @@ metadata:
   name: default
 spec:
   template: talos
+  blockDevicesStorageID: zfs
+  tags:
+    - talos-k8s-proxmox
+    - karperter

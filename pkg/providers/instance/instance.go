@@ -20,6 +20,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"math"
+	"sort"
+
 	"strconv"
 	"strings"
 
@@ -28,18 +31,22 @@ import (
 
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	cluster "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/cluster"
 	ccmprovider "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/provider"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type Provider struct {
-	Cluster *cluster.Cluster
+	cluster               *cluster.Cluster
+	cloudcapacityProvider *cloudcapacity.Provider
 }
 
-func NewProvider() (*Provider, error) {
+func NewProvider(cloudcapacityProvider *cloudcapacity.Provider) (*Provider, error) {
 	cfg, err := cluster.ReadCloudConfigFromFile("cloud.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %v", err)
@@ -50,12 +57,18 @@ func NewProvider() (*Provider, error) {
 		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
 	}
 
-	return &Provider{Cluster: cluster}, nil
+	return &Provider{
+		cluster:               cluster,
+		cloudcapacityProvider: cloudcapacityProvider,
+	}, nil
 }
 
 // Create an instance given the constraints.
 func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	instanceType := instanceTypes[0]
+
+	log.FromContext(ctx).V(1).Info("Labels", "nodeClaim", nodeClaim.Labels, "nodeClass", nodeClass.Labels)
 
 	region := nodeClaim.Labels[corev1.LabelTopologyRegion]
 	if region == "" {
@@ -64,10 +77,16 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
 	if zone == "" {
-		zone = "rnd-1"
+		zones := p.cloudcapacityProvider.GetAvailableZones(instanceType.Capacity)
+
+		if len(zones) == 0 {
+			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no capacity zone available"))
+		}
+
+		zone = zones[0]
 	}
 
-	cl, err := p.Cluster.GetProxmoxCluster(region)
+	cl, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
@@ -77,9 +96,23 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
-	template := pxapi.NewVmRef(1001)
-	template.SetNode(zone)
-	template.SetVmType("qemu")
+	vmrs, err := cl.GetVmRefsByName(nodeClass.Spec.Template)
+	if err != nil || len(vmrs) == 0 {
+		return nil, fmt.Errorf("failed to get vm template: %v", err)
+	}
+
+	var template *pxapi.VmRef
+
+	for _, vmr := range vmrs {
+		if vmr.Node() == zone {
+			template = vmr
+			break
+		}
+	}
+
+	if template == nil {
+		return nil, fmt.Errorf("failed to find template for zone %s", zone)
+	}
 
 	// Create a new VM
 	vm := map[string]interface{}{}
@@ -90,7 +123,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	vm["name"] = nodeClaim.Name
 	vm["description"] = fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name)
 	vm["full"] = true
-	vm["storage"] = "system"
+	vm["storage"] = nodeClass.Spec.BlockDevicesStorageID
 
 	_, err = cl.CloneQemuVm(template, vm)
 	if err != nil {
@@ -110,7 +143,8 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		}
 	}()
 
-	if _, err := cl.ResizeQemuDiskRaw(vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024)); err != nil {
+	_, err = cl.ResizeQemuDiskRaw(vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024))
+	if err != nil {
 		return nil, fmt.Errorf("failed to resize disk: %v", err)
 	}
 
@@ -129,12 +163,24 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		),
 	}
 
+	if len(nodeClass.Spec.Tags) > 0 {
+		vmParams["tags"] = strings.Join(nodeClass.Spec.Tags, ";")
+	}
+
+	err = applyInstanceOptimization(config, vmParams, instanceType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply instance optimization: %v", err)
+	}
+
+	log.FromContext(ctx).V(1).Info("Mudify VM", "vmParams", vmParams)
+
 	_, err = cl.SetVmConfig(vmr, vmParams)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update disk: %v, vmParams=%+v", err, vmParams)
 	}
 
-	if _, err := cl.StartVm(vmr); err != nil {
+	_, err = cl.StartVm(vmr)
+	if err != nil {
 		return nil, fmt.Errorf("failed to start vm %d: %v", vmr.VmId(), err)
 	}
 
@@ -149,7 +195,8 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 				v1alpha1.LabelInstanceFamily:          strings.Split(instanceType.Name, ".")[0],
 				v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
 			},
-			Annotations: map[string]string{},
+			Annotations:       map[string]string{},
+			CreationTimestamp: metav1.Now(),
 		},
 		Spec: corev1.NodeSpec{
 			ProviderID: ccmprovider.GetProviderID(region, vmr),
@@ -158,7 +205,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
 				Architecture:    karpv1.ArchitectureAmd64,
-				OperatingSystem: "linux",
+				OperatingSystem: string(corev1.Linux),
 			},
 		},
 	}
@@ -184,12 +231,12 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
 				Architecture:    karpv1.ArchitectureAmd64,
-				OperatingSystem: "linux",
+				OperatingSystem: string(corev1.Linux),
 			},
 		},
 	}
 
-	cl, err := p.Cluster.GetProxmoxCluster(region)
+	cl, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
@@ -221,7 +268,7 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 		zone = "rnd-1"
 	}
 
-	cl, err := p.Cluster.GetProxmoxCluster(region)
+	cl, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
 		return fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
@@ -252,6 +299,55 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 
 	if _, err := cl.DeleteVmParams(vmr, params); err != nil {
 		return fmt.Errorf("failed to delete vm %d: %v", vmr.VmId(), err)
+	}
+
+	return nil
+}
+
+func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements) []*cloudprovider.InstanceType {
+	// Order instance types so that we get the cheapest instance types of the available offerings
+	sort.Slice(instanceTypes, func(i, j int) bool {
+		iPrice := math.MaxFloat64
+		jPrice := math.MaxFloat64
+		if len(instanceTypes[i].Offerings.Available().Compatible(requirements)) > 0 {
+			iPrice = instanceTypes[i].Offerings.Available().Compatible(requirements).Cheapest().Price
+		}
+		if len(instanceTypes[j].Offerings.Available().Compatible(requirements)) > 0 {
+			jPrice = instanceTypes[j].Offerings.Available().Compatible(requirements).Cheapest().Price
+		}
+		if iPrice == jPrice {
+			return instanceTypes[i].Name < instanceTypes[j].Name
+		}
+		return iPrice < jPrice
+	})
+
+	return instanceTypes
+}
+
+func applyInstanceOptimization(config map[string]interface{}, vmParams map[string]interface{}, instanceType *cloudprovider.InstanceType) error {
+	// Network optimization, set queues to the number of vCPUs
+	for i := 0; i <= 10; i++ {
+		net, ok := config[fmt.Sprintf("net%d", i)].(string)
+		if ok && net != "" {
+			options := map[string]string{}
+
+			params := strings.Split(net, ",")
+			for _, param := range params {
+				kv := strings.Split(param, "=")
+				if len(kv) == 2 && options[kv[0]] == "" {
+					options[kv[0]] = kv[1]
+				}
+			}
+
+			options["queues"] = instanceType.Capacity.Cpu().String()
+
+			opt := make([]string, 0, len(options))
+			for k := range options {
+				opt = append(opt, fmt.Sprintf("%s=%s", k, options[k]))
+			}
+
+			vmParams[fmt.Sprintf("net%d", i)] = strings.Join(opt, ",")
+		}
 	}
 
 	return nil

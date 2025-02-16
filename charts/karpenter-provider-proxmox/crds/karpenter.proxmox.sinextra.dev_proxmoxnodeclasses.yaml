@@ -45,7 +45,7 @@ spec:
                 type: string
               metadataOptions:
                 default:
-                  Type: template
+                  type: template
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
@@ -103,10 +103,10 @@ spec:
                 maxItems: 10
                 type: array
               tags:
-                additionalProperties:
-                  type: string
                 description: Tags to apply to the VMs
-                type: object
+                items:
+                  type: string
+                type: array
               template:
                 description: Template is the name of the template to use for nodes
                 type: string

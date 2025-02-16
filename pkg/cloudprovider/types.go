@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	corev1 "k8s.io/api/core/v1"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -32,7 +33,7 @@ import (
 )
 
 // ConstructInstanceTypes create many instance types based on the embedded instance type data
-func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType, error) {
+func ConstructInstanceTypes(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provider) ([]*cloudprovider.InstanceType, error) {
 	var instanceTypes []*cloudprovider.InstanceType
 
 	for _, cpu := range []int{1, 2, 4, 8, 16, 32} {
@@ -50,33 +51,12 @@ func ConstructInstanceTypes(ctx context.Context) ([]*cloudprovider.InstanceType,
 					corev1.ResourceEphemeralStorage: resource.MustParse("30Gi"),
 				},
 				Overhead: &cloudprovider.InstanceTypeOverhead{
-					KubeReserved: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("10m"),
-						corev1.ResourceMemory: resource.MustParse("64Mi"),
-					},
-					SystemReserved: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("10m"),
-						corev1.ResourceMemory: resource.MustParse("64Mi"),
-					},
+					KubeReserved:   KubeReservedResources(int64(cpu), float64(mem)),
+					SystemReserved: SystemReservedResources(),
 				},
 			}
 
-			price := priceFromResources(opts.Capacity)
-
-			opts.Offerings = []cloudprovider.Offering{}
-
-			opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
-				Price:     price,
-				Available: true,
-
-				Requirements: scheduling.NewRequirements(
-					scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
-					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
-					scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(name, ".")[0]),
-					scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, fmt.Sprintf("%d", cpu)),
-					scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, fmt.Sprintf("%dGi", mem)),
-				),
-			})
+			createOfferings(cloudcapacityProvider, &opts)
 
 			instanceTypes = append(instanceTypes, &opts)
 		}
@@ -129,4 +109,44 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	}
 
 	return price
+}
+
+func SystemReservedResources() corev1.ResourceList {
+	return corev1.ResourceList{
+		corev1.ResourceCPU:    resource.Quantity{},
+		corev1.ResourceMemory: resource.Quantity{},
+	}
+}
+
+func KubeReservedResources(_ int64, _ float64) corev1.ResourceList {
+	resources := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("10m"),
+		corev1.ResourceMemory: resource.MustParse("64Mi"),
+	}
+
+	return resources
+}
+
+func createOfferings(cloudcapacityProvider *cloudcapacity.Provider, opts *cloudprovider.InstanceType) {
+	region := "region-1"
+	zones := cloudcapacityProvider.Zones()
+	price := priceFromResources(opts.Capacity)
+
+	opts.Offerings = []cloudprovider.Offering{}
+
+	for _, zone := range zones {
+		available := cloudcapacityProvider.Fit(zone, opts.Capacity)
+
+		opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
+			Price:     price,
+			Available: available,
+			Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
+				scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+				scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(opts.Name, ".")[0]),
+			),
+		})
+	}
 }

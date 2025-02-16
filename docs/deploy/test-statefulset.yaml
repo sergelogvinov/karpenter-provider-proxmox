@@ -51,10 +51,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 2100Mi
+              memory: 3100Mi
             limits:
-              cpu: 1
-              memory: 3Gi
+              cpu: 2
+              memory: 4Gi
   updateStrategy:
     type: RollingUpdate
   selector:

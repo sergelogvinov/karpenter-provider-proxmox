@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -47,21 +48,27 @@ const (
 )
 
 type CloudProvider struct {
-	kubeClient       client.Client
-	instanceTypes    []*cloudprovider.InstanceType
-	instanceProvider *instance.Provider
-	log              logr.Logger
+	kubeClient            client.Client
+	instanceTypes         []*cloudprovider.InstanceType
+	instanceProvider      *instance.Provider
+	cloudcapacityProvider *cloudcapacity.Provider
+	log                   logr.Logger
 }
 
-func NewCloudProvider(ctx context.Context, kubeClient client.Client, instanceTypes []*cloudprovider.InstanceType, instanceProvider *instance.Provider) *CloudProvider {
+func NewCloudProvider(ctx context.Context,
+	kubeClient client.Client,
+	instanceTypes []*cloudprovider.InstanceType,
+	instanceProvider *instance.Provider,
+	cloudcapacityProvider *cloudcapacity.Provider) *CloudProvider {
 	log := log.FromContext(ctx).WithName(CloudProviderName)
 	log.WithName("NewCloudProvider()").Info("Executed with params", "instanceTypes", instanceTypes)
 
 	return &CloudProvider{
-		kubeClient:       kubeClient,
-		instanceTypes:    instanceTypes,
-		instanceProvider: instanceProvider,
-		log:              log,
+		kubeClient:            kubeClient,
+		instanceTypes:         instanceTypes,
+		instanceProvider:      instanceProvider,
+		cloudcapacityProvider: cloudcapacityProvider,
+		log:                   log,
 	}
 }
 
@@ -189,6 +196,14 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 		}
 		return nil, err
 	}
+
+	c.cloudcapacityProvider.Sync(ctx)
+	instanceTypes, err := ConstructInstanceTypes(ctx, c.cloudcapacityProvider)
+	if err != nil {
+		return nil, fmt.Errorf("constructing instance types, %w", err)
+	}
+
+	c.instanceTypes = instanceTypes
 
 	log.V(1).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(c.instanceTypes))
 
