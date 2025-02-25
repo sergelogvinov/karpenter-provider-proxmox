@@ -113,15 +113,15 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 
 func SystemReservedResources() corev1.ResourceList {
 	return corev1.ResourceList{
-		corev1.ResourceCPU:    resource.Quantity{},
-		corev1.ResourceMemory: resource.Quantity{},
+		corev1.ResourceCPU:    resource.MustParse("10m"),
+		corev1.ResourceMemory: resource.MustParse("128Mi"),
 	}
 }
 
 func KubeReservedResources(_ int64, _ float64) corev1.ResourceList {
 	resources := corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse("10m"),
-		corev1.ResourceMemory: resource.MustParse("64Mi"),
+		corev1.ResourceCPU:    resource.MustParse("200m"),
+		corev1.ResourceMemory: resource.MustParse("256Mi"),
 	}
 
 	return resources

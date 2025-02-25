@@ -68,15 +68,21 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	instanceType := instanceTypes[0]
 
-	log.FromContext(ctx).V(1).Info("Labels", "nodeClaim", nodeClaim.Labels, "nodeClass", nodeClass.Labels)
+	log.FromContext(ctx).V(1).Info("Requirements", "nodeClaim", nodeClaim.Spec.Requirements, "nodeClass", nodeClass.Spec)
 
-	region := nodeClaim.Labels[corev1.LabelTopologyRegion]
+	region := nodeClass.Spec.Region
 	if region == "" {
-		region = "region-1"
+		requestedRegion := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyRegion)
+		if len(requestedRegion.Values()) == 0 {
+			region = "region-1"
+		} else {
+			region = requestedRegion.Any()
+		}
 	}
 
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-	if zone == "" {
+	requestedZones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone)
+	zone := requestedZones.Any()
+	if len(requestedZones.Values()) == 0 || zone == "" {
 		zones := p.cloudcapacityProvider.GetAvailableZones(instanceType.Capacity)
 
 		if len(zones) == 0 {
