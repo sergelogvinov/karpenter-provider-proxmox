@@ -1,7 +1,6 @@
 module github.com/sergelogvinov/karpenter-provider-proxmox
 
 go 1.23.5
-
 require (
 	github.com/Telmate/proxmox-api-go v0.0.0-20241127232213-af1f4e86b570
 	github.com/awslabs/operatorpkg v0.0.0-20250204024900-5fbad4f6c503
@@ -14,7 +13,7 @@ require (
 	k8s.io/client-go v0.32.1
 	k8s.io/utils v0.0.0-20241210054802-24370beab758
 	sigs.k8s.io/controller-runtime v0.20.1
-	sigs.k8s.io/karpenter v1.2.0
+	sigs.k8s.io/karpenter v1.2.2
 )
 
 require (
