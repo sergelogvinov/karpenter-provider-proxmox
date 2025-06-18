@@ -22,18 +22,18 @@ import (
 	"fmt"
 	"math"
 	"sort"
-
 	"strconv"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	cluster "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/cluster"
 	ccmprovider "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/provider"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -332,7 +332,7 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 
 func applyInstanceOptimization(config map[string]interface{}, vmParams map[string]interface{}, instanceType *cloudprovider.InstanceType) error {
 	// Network optimization, set queues to the number of vCPUs
-	for i := 0; i <= 10; i++ {
+	for i := range 10 {
 		net, ok := config[fmt.Sprintf("net%d", i)].(string)
 		if ok && net != "" {
 			options := map[string]string{}

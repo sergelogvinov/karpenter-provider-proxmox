@@ -23,11 +23,11 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis"
+
 	corev1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
-
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis"
 )
 
 func init() {

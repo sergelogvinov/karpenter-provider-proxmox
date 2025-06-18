@@ -20,15 +20,15 @@ package main
 import (
 	"os"
 
-	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
-	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
-	"sigs.k8s.io/karpenter/pkg/controllers/state"
-	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
-
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
+	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
+	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
 )
 
 func main() {

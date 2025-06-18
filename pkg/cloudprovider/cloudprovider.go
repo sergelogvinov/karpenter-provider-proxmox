@@ -26,16 +26,16 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/samber/lo"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -55,11 +55,13 @@ type CloudProvider struct {
 	log                   logr.Logger
 }
 
-func NewCloudProvider(ctx context.Context,
+func NewCloudProvider(
+	ctx context.Context,
 	kubeClient client.Client,
 	instanceTypes []*cloudprovider.InstanceType,
 	instanceProvider *instance.Provider,
-	cloudcapacityProvider *cloudcapacity.Provider) *CloudProvider {
+	cloudcapacityProvider *cloudcapacity.Provider,
+) *CloudProvider {
 	log := log.FromContext(ctx).WithName(CloudProviderName)
 	log.WithName("NewCloudProvider()").Info("Executed with params", "instanceTypes", instanceTypes)
 
@@ -163,7 +165,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 		return nil, fmt.Errorf("listing nodes, %w", err)
 	}
 
-	var nodeClaims []*karpv1.NodeClaim
+	nodeClaims := []*karpv1.NodeClaim{}
 	for i, node := range nodeList.Items {
 		if !strings.HasPrefix(node.Spec.ProviderID, ProxmoxProviderPrefix) {
 			continue
