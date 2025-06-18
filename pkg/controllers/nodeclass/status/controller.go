@@ -20,17 +20,18 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/awslabs/operatorpkg/reasonable"
+	"github.com/awslabs/operatorpkg/status"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/awslabs/operatorpkg/reasonable"
-	"github.com/awslabs/operatorpkg/status"
-
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 )
 
 const (
@@ -107,10 +108,22 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
+// Register registers the controller with the manager
+func (c *Controller) Register(_ context.Context, m manager.Manager) error {
+	return controllerruntime.NewControllerManagedBy(m).
+		Named(c.Name()).
+		For(&v1alpha1.ProxmoxNodeClass{}).
+		WithOptions(controller.Options{
+			RateLimiter:             reasonable.RateLimiter(),
+			MaxConcurrentReconciles: 1,
+		}).
+		Complete(c)
+}
+
 // validateNodeClass performs validation of the ProxmoxNodeClass configuration
 func (c *Controller) validateNodeClass(_ context.Context, nc *v1alpha1.ProxmoxNodeClass) error {
 	if nc.Spec.Template == "" {
-		return fmt.Errorf("Template is required")
+		return fmt.Errorf("template is required")
 	}
 
 	return nil
@@ -140,16 +153,4 @@ func (c *Controller) updateCondition(nodeClass *v1alpha1.ProxmoxNodeClass, condi
 
 	// Append new condition if not found
 	nodeClass.Status.Conditions = append(nodeClass.Status.Conditions, newCondition)
-}
-
-// Register registers the controller with the manager
-func (c *Controller) Register(_ context.Context, m manager.Manager) error {
-	return controllerruntime.NewControllerManagedBy(m).
-		Named(c.Name()).
-		For(&v1alpha1.ProxmoxNodeClass{}).
-		WithOptions(controller.Options{
-			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: 1,
-		}).
-		Complete(c)
 }

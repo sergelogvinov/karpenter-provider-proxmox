@@ -24,9 +24,10 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	corev1 "k8s.io/api/core/v1"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -100,7 +101,7 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	// Let's assume the price is electricity cost
 	price := 0.0
 	for k, v := range resources {
-		switch k {
+		switch k { //nolint:exhaustive
 		case corev1.ResourceCPU:
 			price += 0.025 * v.AsApproximateFloat64()
 		case corev1.ResourceMemory:

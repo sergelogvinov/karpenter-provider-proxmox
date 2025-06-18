@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"github.com/awslabs/operatorpkg/status"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -167,7 +168,7 @@ func (in *ProxmoxNodeClass) SetConditions(conditions []status.Condition) {
 		}
 		metav1Conditions = append(metav1Conditions, metav1.Condition{
 			Type:               c.Type,
-			Status:             metav1.ConditionStatus(c.Status),
+			Status:             c.Status,
 			LastTransitionTime: c.LastTransitionTime,
 			Reason:             c.Reason,
 			Message:            c.Message,
