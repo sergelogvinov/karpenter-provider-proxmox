@@ -9,9 +9,9 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/samber/lo v1.51.0
 	github.com/sergelogvinov/proxmox-cloud-controller-manager v0.7.0
-	k8s.io/api v0.33.1
-	k8s.io/apimachinery v0.33.1
-	k8s.io/client-go v0.33.1
+	k8s.io/api v0.33.2
+	k8s.io/apimachinery v0.33.2
+	k8s.io/client-go v0.33.2
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	sigs.k8s.io/controller-runtime v0.21.0
 	sigs.k8s.io/karpenter v1.2.0
