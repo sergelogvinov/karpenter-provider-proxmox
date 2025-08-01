@@ -4,17 +4,17 @@ go 1.24.4
 
 require (
 	github.com/Telmate/proxmox-api-go v0.0.0-20241127232213-af1f4e86b570
-	github.com/awslabs/operatorpkg v0.0.0-20250616190804-f562c7d91bac
+	github.com/awslabs/operatorpkg v0.0.0-20250624064700-e9977193119b
 	github.com/go-logr/logr v1.4.3
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/samber/lo v1.51.0
 	github.com/sergelogvinov/proxmox-cloud-controller-manager v0.7.0
-	k8s.io/api v0.33.1
-	k8s.io/apimachinery v0.33.1
-	k8s.io/client-go v0.33.1
+	k8s.io/api v0.33.2
+	k8s.io/apimachinery v0.33.2
+	k8s.io/client-go v0.33.2
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	sigs.k8s.io/controller-runtime v0.21.0
-	sigs.k8s.io/karpenter v1.2.0
+	sigs.k8s.io/karpenter v1.6.1
 )
 
 require (
@@ -53,7 +53,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/exp v0.0.0-20241217172543-b2144cdd0a67 // indirect
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.15.0 // indirect
@@ -66,14 +66,14 @@ require (
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apiextensions-apiserver v0.33.1 // indirect
-	k8s.io/cloud-provider v0.33.1 // indirect
-	k8s.io/component-base v0.33.1 // indirect
-	k8s.io/csi-translation-lib v0.33.1 // indirect
+	k8s.io/apiextensions-apiserver v0.33.2 // indirect
+	k8s.io/cloud-provider v0.33.2 // indirect
+	k8s.io/component-base v0.33.2 // indirect
+	k8s.io/csi-translation-lib v0.33.2 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250610211856-8b98d1ed966a // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
+	sigs.k8s.io/yaml v1.5.0 // indirect
 )
