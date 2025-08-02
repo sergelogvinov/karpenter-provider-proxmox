@@ -9,7 +9,7 @@ jobs:
   build-publish:
     name: "Check release docs"
     runs-on: ubuntu-latest
-    if:  startsWith(github.head_ref, 'release-')
+    if: startsWith(github.head_ref, 'release-')
     permissions:
       contents: read
       packages: write

@@ -166,6 +166,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 	}
 
 	nodeClaims := []*karpv1.NodeClaim{}
+
 	for i, node := range nodeList.Items {
 		if !strings.HasPrefix(node.Spec.ProviderID, ProxmoxProviderPrefix) {
 			continue
@@ -196,10 +197,12 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 		if errors.IsNotFound(err) {
 			log.Error(err, "Failed to resolve nodeClass")
 		}
+
 		return nil, err
 	}
 
 	c.cloudcapacityProvider.Sync(ctx)
+
 	instanceTypes, err := ConstructInstanceTypes(ctx, c.cloudcapacityProvider)
 	if err != nil {
 		return nil, fmt.Errorf("constructing instance types, %w", err)

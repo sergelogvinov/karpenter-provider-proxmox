@@ -29,7 +29,8 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	cluster "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/cluster"
+	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 	ccmprovider "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/provider"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,17 +43,17 @@ import (
 )
 
 type Provider struct {
-	cluster               *cluster.Cluster
+	cluster               *pxpool.ProxmoxPool
 	cloudcapacityProvider *cloudcapacity.Provider
 }
 
-func NewProvider(cloudcapacityProvider *cloudcapacity.Provider) (*Provider, error) {
-	cfg, err := cluster.ReadCloudConfigFromFile("cloud.yaml")
+func NewProvider(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provider) (*Provider, error) {
+	cfg, err := providerconfig.ReadCloudConfigFromFile("cloud.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}
 
-	cluster, err := cluster.NewCluster(&cfg, nil)
+	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
 	}
@@ -97,12 +98,12 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
 
-	id, err := cl.GetNextID(50000)
+	id, err := cl.GetNextID(ctx, 50000)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
-	vmrs, err := cl.GetVmRefsByName(nodeClass.Spec.Template)
+	vmrs, err := cl.GetVmRefsByName(ctx, nodeClass.Spec.Template)
 	if err != nil || len(vmrs) == 0 {
 		return nil, fmt.Errorf("failed to get vm template: %v", err)
 	}
@@ -110,7 +111,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	var template *pxapi.VmRef
 
 	for _, vmr := range vmrs {
-		if vmr.Node() == zone {
+		if string(vmr.Node()) == zone {
 			template = vmr
 			break
 		}
@@ -131,7 +132,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	vm["full"] = true
 	vm["storage"] = nodeClass.Spec.BlockDevicesStorageID
 
-	_, err = cl.CloneQemuVm(template, vm)
+	_, err = cl.CloneQemuVm(ctx, template, vm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vm: %v", err)
 	}
@@ -143,18 +144,18 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	// FIXME: Defer delete vm if failed
 	defer func() {
 		if err != nil {
-			if _, err := cl.DeleteVm(vmr); err != nil {
+			if _, err := cl.DeleteVm(ctx, vmr); err != nil {
 				fmt.Printf("failed to delete vm %d: %v", vmr.VmId(), err)
 			}
 		}
 	}()
 
-	_, err = cl.ResizeQemuDiskRaw(vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024))
+	_, err = cl.ResizeQemuDiskRaw(ctx, vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to resize disk: %v", err)
 	}
 
-	config, err := cl.GetVmConfig(vmr)
+	config, err := cl.GetVmConfig(ctx, vmr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vm config: %v", err)
 	}
@@ -185,7 +186,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		return nil, fmt.Errorf("failed to update disk: %v, vmParams=%+v", err, vmParams)
 	}
 
-	_, err = cl.StartVm(vmr)
+	_, err = cl.StartVm(ctx, vmr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start vm %d: %v", vmr.VmId(), err)
 	}
@@ -247,7 +248,7 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
 
-	vmInfo, err := cl.GetVmInfo(vmr)
+	vmInfo, err := cl.GetVmInfo(ctx, vmr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get vm: %v", err)
 	}
@@ -255,7 +256,7 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 	node.ObjectMeta.Name = vmInfo["name"].(string)
 	node.ObjectMeta.Labels = map[string]string{
 		corev1.LabelTopologyRegion:            region,
-		corev1.LabelTopologyZone:              vmr.Node(),
+		corev1.LabelTopologyZone:              string(vmr.Node()),
 		karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
 		v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
 	}
@@ -288,7 +289,7 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 	vmr.SetNode(zone)
 	vmr.SetVmType("qemu")
 
-	if _, err := cl.GetVmInfo(vmr); err != nil {
+	if _, err := cl.GetVmInfo(ctx, vmr); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			return nil
 		}
@@ -299,11 +300,11 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 	params := map[string]interface{}{}
 	params["purge"] = "1"
 
-	if _, err := cl.StopVm(vmr); err != nil {
+	if _, err := cl.StopVm(ctx, vmr); err != nil {
 		return fmt.Errorf("failed to stop vm %d: %v", vmr.VmId(), err)
 	}
 
-	if _, err := cl.DeleteVmParams(vmr, params); err != nil {
+	if _, err := cl.DeleteVmParams(ctx, vmr, params); err != nil {
 		return fmt.Errorf("failed to delete vm %d: %v", vmr.VmId(), err)
 	}
 
@@ -315,15 +316,19 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 	sort.Slice(instanceTypes, func(i, j int) bool {
 		iPrice := math.MaxFloat64
 		jPrice := math.MaxFloat64
+
 		if len(instanceTypes[i].Offerings.Available().Compatible(requirements)) > 0 {
 			iPrice = instanceTypes[i].Offerings.Available().Compatible(requirements).Cheapest().Price
 		}
+
 		if len(instanceTypes[j].Offerings.Available().Compatible(requirements)) > 0 {
 			jPrice = instanceTypes[j].Offerings.Available().Compatible(requirements).Cheapest().Price
 		}
+
 		if iPrice == jPrice {
 			return instanceTypes[i].Name < instanceTypes[j].Name
 		}
+
 		return iPrice < jPrice
 	})
 

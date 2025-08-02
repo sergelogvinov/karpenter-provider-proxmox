@@ -53,7 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	instanceProvider, err := instance.NewProvider(cloudcapacityProvider)
+	instanceProvider, err := instance.NewProvider(ctx, cloudcapacityProvider)
 	if err != nil {
 		log.Error(err, "failed creating instance provider")
 
