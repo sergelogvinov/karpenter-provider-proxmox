@@ -134,12 +134,12 @@ func createOfferings(cloudcapacityProvider *cloudcapacity.Provider, opts *cloudp
 	zones := cloudcapacityProvider.Zones()
 	price := priceFromResources(opts.Capacity)
 
-	opts.Offerings = []cloudprovider.Offering{}
+	opts.Offerings = []*cloudprovider.Offering{}
 
 	for _, zone := range zones {
 		available := cloudcapacityProvider.Fit(zone, opts.Capacity)
 
-		opts.Offerings = append(opts.Offerings, cloudprovider.Offering{
+		opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
 			Price:     price,
 			Available: available,
 			Requirements: scheduling.NewRequirements(
