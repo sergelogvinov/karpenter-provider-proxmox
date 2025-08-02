@@ -49,6 +49,7 @@ func NewController(kubeClient client.Client) (*Controller, error) {
 	if kubeClient == nil {
 		return nil, fmt.Errorf("kubeClient cannot be nil")
 	}
+
 	return &Controller{
 		kubeClient: kubeClient,
 	}, nil
@@ -69,6 +70,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if nc.Status.Conditions == nil {
 		nc.Status.Conditions = []metav1.Condition{}
 	}
+
 	if nc.Status.SelectedInstanceTypes == nil {
 		nc.Status.SelectedInstanceTypes = []string{}
 	}
@@ -81,6 +83,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if err := c.kubeClient.Status().Patch(ctx, nc, patch); err != nil {
 			return reconcile.Result{}, err
 		}
+
 		return reconcile.Result{}, err
 	}
 
@@ -100,6 +103,7 @@ func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		nc.StatusConditions().SetTrue(status.ConditionReady)
 
 		c.updateCondition(nc, ConditionTypeAutoPlacement, metav1.ConditionTrue, "InstanceTypeSelectionSucceeded", "Instance type selection completed successfully")
+
 		if err := c.kubeClient.Status().Update(ctx, nc); err != nil {
 			return reconcile.Result{}, fmt.Errorf("updating nodeclass status: %w", err)
 		}
@@ -147,6 +151,7 @@ func (c *Controller) updateCondition(nodeClass *v1alpha1.ProxmoxNodeClass, condi
 			if existingCond.Status != status {
 				nodeClass.Status.Conditions[i] = newCondition
 			}
+
 			return
 		}
 	}

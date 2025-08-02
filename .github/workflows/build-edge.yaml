@@ -6,11 +6,11 @@ on:
     branches:
       - main
     paths:
-      - 'go.mod'
-      - 'go.sum'
-      - 'cmd/**'
-      - 'pkg/**'
-      - 'Dockerfile'
+      - "go.mod"
+      - "go.sum"
+      - "cmd/**"
+      - "pkg/**"
+      - "Dockerfile"
 
 jobs:
   build-publish:
@@ -64,5 +64,5 @@ jobs:
         with:
           package-name: karpenter-provider-proxmox
           package-type: container
-          delete-only-untagged-versions: 'true'
+          delete-only-untagged-versions: "true"
         continue-on-error: true

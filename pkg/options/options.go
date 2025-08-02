@@ -47,8 +47,10 @@ func (o *Options) Parse(fs *options.FlagSet, args ...string) error {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
+
 		return fmt.Errorf("parsing flags, %w", err)
 	}
+
 	return nil
 }
 
@@ -65,5 +67,6 @@ func FromContext(ctx context.Context) *Options {
 	if retval == nil {
 		return nil
 	}
+
 	return retval.(*Options)
 }

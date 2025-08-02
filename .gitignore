@@ -32,4 +32,7 @@ go.work.sum
 /kubeconfig
 /kubeconfig*
 /cloud.yaml
-#
+
+# IDEs and editors
+/.idea
+/.vscode/

@@ -166,6 +166,7 @@ func (in *ProxmoxNodeClass) SetConditions(conditions []status.Condition) {
 		if c.LastTransitionTime.IsZero() {
 			continue
 		}
+
 		metav1Conditions = append(metav1Conditions, metav1.Condition{
 			Type:               c.Type,
 			Status:             c.Status,

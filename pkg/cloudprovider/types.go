@@ -100,6 +100,7 @@ func makeGenericInstanceTypeName(cpu, memFactor int) string {
 func priceFromResources(resources corev1.ResourceList) float64 {
 	// Let's assume the price is electricity cost
 	price := 0.0
+
 	for k, v := range resources {
 		switch k { //nolint:exhaustive
 		case corev1.ResourceCPU:

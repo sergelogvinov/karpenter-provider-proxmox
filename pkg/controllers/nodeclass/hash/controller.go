@@ -43,6 +43,7 @@ func NewController(kubeClient client.Client) (*Controller, error) {
 	if kubeClient == nil {
 		return nil, fmt.Errorf("kubeClient cannot be nil")
 	}
+
 	return &Controller{
 		kubeClient: kubeClient,
 	}, nil

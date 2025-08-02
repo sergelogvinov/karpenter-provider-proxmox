@@ -20,7 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	cluster "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/cluster"
+	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -29,7 +30,7 @@ import (
 )
 
 type Provider struct {
-	cluster       *cluster.Cluster
+	cluster       *pxpool.ProxmoxPool
 	capacityZones map[string]NodeCapacity
 }
 
@@ -44,12 +45,12 @@ type NodeCapacity struct {
 }
 
 func NewProvider(ctx context.Context) (*Provider, error) {
-	cfg, err := cluster.ReadCloudConfigFromFile("cloud.yaml")
+	cfg, err := providerconfig.ReadCloudConfigFromFile("cloud.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}
 
-	cluster, err := cluster.NewCluster(&cfg, nil)
+	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
 	}
@@ -65,7 +66,7 @@ func (p *Provider) Sync(ctx context.Context) error {
 		return fmt.Errorf("failed to get proxmox cluster: %v", err)
 	}
 
-	data, err := cl.GetNodeList()
+	data, err := cl.GetNodeList(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get node list: %v", err)
 	}
@@ -88,7 +89,7 @@ func (p *Provider) Sync(ctx context.Context) error {
 
 		name := node["node"].(string)
 
-		vms, err := cl.GetResourceList("vm")
+		vms, err := cl.GetResourceList(ctx, "vm")
 		if err != nil {
 			return fmt.Errorf("error get resources %v", err)
 		}
