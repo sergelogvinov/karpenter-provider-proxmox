@@ -16,7 +16,7 @@ jobs:
   build-publish:
     name: "Build image and publish"
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -59,10 +59,10 @@ jobs:
           USERNAME: ${{ github.repository_owner }}
           TAG: "edge"
 
-      - name: Clean old images
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: karpenter-provider-proxmox
-          package-type: container
-          delete-only-untagged-versions: "true"
-        continue-on-error: true
+      # - name: Clean old images
+      #   uses: actions/delete-package-versions@v5
+      #   with:
+      #     package-name: karpenter-provider-proxmox
+      #     package-type: container
+      #     delete-only-untagged-versions: "true"
+      #   continue-on-error: true
