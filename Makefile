@@ -152,7 +152,7 @@ helm-release: ## Helm Release
 
 .PHONY: docs
 docs:
-	# yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
+	yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
 	helm template -n kube-system --include-crds karpenter-provider-proxmox \
 		-f charts/karpenter-provider-proxmox/values.edge.yaml \
 		--set-string image.tag=$(TAG) \

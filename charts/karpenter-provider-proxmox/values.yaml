@@ -1,0 +1,174 @@
+# Default values for proxmox-csi-plugin.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  # -- Proxmox Karpenter image.
+  repository: ghcr.io/sergelogvinov/karpenter-provider-proxmox
+  # -- Always or IfNotPresent
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Controller pods priorityClassName.
+priorityClassName: system-cluster-critical
+
+# -- Pods Service Account.
+# ref: https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# -- Log verbosity level.
+# Can be one of 'debug', 'info', or 'error'
+logVerbosityLevel: info
+
+# -- Proxmox cluster config stored in secrets.
+existingConfigSecret: ~
+# -- Proxmox cluster config stored in secrets key.
+existingConfigSecretKey: config.yaml
+
+# -- Proxmox cluster config path.
+configFile: /etc/proxmox/config.yaml
+
+# -- Proxmox cluster config.
+# ref: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/install.md
+config:
+  clusters: []
+  #   - url: https://cluster-api-1.exmple.com:8006/api2/json
+  #     insecure: false
+  #     token_id: "login!name"
+  #     token_secret: "secret"
+  #     region: cluster-1
+
+# -- Add additional init containers for the CSI controller pods.
+# ref: https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+initContainers:
+  []
+  # - name: loadbalancer
+  #   restartPolicy: Always
+  #   image: ghcr.io/sergelogvinov/haproxy:2.8.3-alpine3.18
+  #   imagePullPolicy: IfNotPresent
+  #   env:
+  #     - name: SVC
+  #       value: "proxmox.domain.com"
+  #     - name: PORT
+  #       value: "8006"
+  #   securityContext:
+  #     runAsUser: 99
+  #     runAsGroup: 99
+  #   resources:
+  #     limits:
+  #       cpu: 50m
+  #       memory: 64Mi
+  #     requests:
+  #       cpu: 50m
+  #       memory: 32Mi
+
+# -- hostAliases Deployment pod host aliases
+# ref: https://kubernetes.io/docs/tasks/network/customize-hosts-file-for-pods/
+hostAliases:
+  []
+  # - ip: 127.0.0.1
+  #   hostnames:
+  #     - proxmox.domain.com
+
+# -- Annotations for controller pod.
+# ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
+podAnnotations: {}
+
+# -- Labels for controller pod.
+# ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+podLabels: {}
+
+# -- Controller Security Context.
+# ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+
+# -- Controller Container Security Context.
+# ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-pod
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+  readOnlyRootFilesystem: true
+
+# -- Controller deployment update strategy type.
+# ref: https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#updating-a-deployment
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# -- Prometheus metrics
+metrics:
+  # -- Enable Prometheus metrics.
+  enabled: false
+  # -- Prometheus metrics port.
+  port: 8080
+
+  type: annotation
+
+# -- Node labels for controller assignment.
+# ref: https://kubernetes.io/docs/user-guide/node-selection/
+nodeSelector:
+  {}
+  # node-role.kubernetes.io/control-plane: ""
+
+# -- Tolerations for controller assignment.
+# ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
+tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+    operator: Exists
+  - effect: NoSchedule
+    key: node.cloudprovider.kubernetes.io/uninitialized
+    operator: Exists
+
+# -- Affinity for controller assignment.
+# ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
+affinity: {}
+
+# -- Any extra environments for talos-cloud-controller-manager
+extraEnvs:
+  []
+  # - name: KUBERNETES_SERVICE_HOST
+  #   value: 127.0.0.1
+
+# -- Any extra arguments for talos-cloud-controller-manager
+extraArgs:
+  []
+  # - --cluster-name=kubernetes
+
+# -- Additional volumes for Pods
+extraVolumes:
+  []
+  # - name: ca
+  #   secret:
+  #     secretName: my-ca
+
+# -- Additional volume mounts for Pods
+extraVolumeMounts:
+  []
+  # - mountPath: /etc/ssl/certs/ca-certificates.crt
+  #   name: ca
+  #   subPath: ca.crt
