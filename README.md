@@ -35,9 +35,11 @@ The benefits of not fully utilizing all bare metal resources include:
 
 ## Installation
 
+For details about how to install and deploy the Karpenter, see [Installation instruction](docs/install.md).
+
 ## Configuration
 
-Kerpenter Node Class configuration:
+Karpenter Node Class configuration:
 
 ```yaml
 apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
@@ -75,7 +77,6 @@ spec:
 ```
 
 Karpenter Node Pool configuration:
-For more information, see [Karpenter Node Pool](https://karpenter.sh/docs/concepts/nodepools/)
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -99,6 +100,8 @@ spec:
           operator: In
           values: ["amd64"]
 ```
+
+For more information, see [Karpenter Node Pool](https://karpenter.sh/docs/concepts/nodepools/)
 
 ## Contributing
 
