@@ -1,0 +1,27 @@
+extraEnvs:
+  - name: KUBERNETES_SERVICE_HOST
+    value: 127.0.0.1
+
+config:
+  clusters:
+    - url: https://cluster-api-1.exmple.com:8006/api2/json
+      insecure: false
+      token_id: "login!name"
+      token_secret: "secret"
+      region: cluster-1
+
+extraVolumes:
+  - name: ca
+    secret:
+      secretName: ca-certificates
+
+extraVolumeMounts:
+  - mountPath: /etc/ssl/certs/ca-certificates.crt
+    name: ca
+    subPath: ca.crt
+
+nodeSelector:
+  node-role.kubernetes.io/control-plane: ""
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    effect: NoSchedule
