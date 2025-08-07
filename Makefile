@@ -115,7 +115,7 @@ build: ## Build
 
 .PHONY: run
 run: ## Run
-	go run ./cmd/controller -disable-leader-election -log-level=debug
+	go run ./cmd/controller -cloud-config=cloud.yaml -disable-leader-election -log-level=debug -health-probe-port=8081 -metrics-port=8080
 
 .PHONY: lint
 lint: ## Lint Code

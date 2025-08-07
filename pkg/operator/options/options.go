@@ -23,32 +23,45 @@ import (
 	"fmt"
 	"os"
 
-	"sigs.k8s.io/karpenter/pkg/operator/options"
+	coreoptions "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
+const (
+	cloudConfigEnvVarName = "CLOUD_CONFIG"
+	cloudConfigFlagName   = "cloud-config"
+
+	instanceTypesFilePathEnvVarName = "INSTANCE_TYPES_FILE_PATH"
+	instanceTypesFilePathFlagName   = "instance-types-file-path"
+)
+
 func init() {
-	options.Injectables = append(options.Injectables, &Options{})
+	coreoptions.Injectables = append(coreoptions.Injectables, &Options{})
 }
 
 type optionsKey struct{}
 
-// Options contains all CLI flags / env vars for the KWOK cloudprovider.
 type Options struct {
+	CloudConfigPath       string
 	InstanceTypesFilePath string
 }
 
-func (o *Options) AddFlags(fs *options.FlagSet) {
-	fs.StringVar(&o.InstanceTypesFilePath, "instance-types-file-path", env.WithDefaultString("INSTANCE_TYPES_FILE_PATH", ""), "Path to a custom instance-types file")
+func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
+	fs.StringVar(&o.CloudConfigPath, cloudConfigFlagName, env.WithDefaultString(cloudConfigEnvVarName, ""), "Path to the cloud config file.")
+	fs.StringVar(&o.InstanceTypesFilePath, instanceTypesFilePathFlagName, env.WithDefaultString(instanceTypesFilePathEnvVarName, ""), "Path to a custom instance-types file")
 }
 
-func (o *Options) Parse(fs *options.FlagSet, args ...string) error {
+func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
 
 		return fmt.Errorf("parsing flags, %w", err)
+	}
+
+	if err := o.Validate(); err != nil {
+		return fmt.Errorf("validating options, %w", err)
 	}
 
 	return nil

@@ -22,6 +22,7 @@ import (
 
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
@@ -32,7 +33,7 @@ import (
 )
 
 func main() {
-	ctx, op := coreoperator.NewOperator()
+	ctx, op := operator.NewOperator(coreoperator.NewOperator())
 	log := op.GetLogger()
 
 	log.Info("Karpenter Proxmox Provider version", "version", coreoperator.Version)
