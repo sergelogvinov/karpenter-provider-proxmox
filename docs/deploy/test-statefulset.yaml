@@ -35,8 +35,8 @@ spec:
                     operator: In
                     values:
                       - alpine
-              # topologyKey: kubernetes.io/hostname
-              topologyKey: topology.kubernetes.io/zone
+              topologyKey: kubernetes.io/hostname
+              # topologyKey: topology.kubernetes.io/zone
       enableServiceLinks: false
       containers:
         - name: alpine
@@ -50,12 +50,12 @@ spec:
               drop: ["ALL"]
             runAsNonRoot: true
           resources:
-            requests:
-              cpu: 200m
-              memory: 4100Mi
             limits:
               cpu: 2
               memory: 5Gi
+            requests:
+              cpu: 200m
+              memory: 4100Mi
   updateStrategy:
     type: RollingUpdate
   selector:

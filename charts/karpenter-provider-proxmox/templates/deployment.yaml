@@ -47,26 +47,70 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
+            - -cloud-config=/etc/proxmox/config.yaml
             - -log-level={{ .Values.logVerbosityLevel }}
             - -leader-election-name=proxmox-karpenter-leader-election
+          {{- if .Values.metrics.enabled }}
             - -metrics-port=8080
+          {{- end }}
+            - -health-probe-port=8081
           {{- with .Values.extraArgs }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.extraEnvs }}
           env:
+          {{- with .Values.extraEnvs }}
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.metrics.enabled }}
+            - name: METRICS_PORT
+              value: "{{ .Values.metrics.port }}"
+          {{- end }}
+            - name: SYSTEM_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MEMORY_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: {{ .Chart.Name }}
+                  divisor: "0"
+                  resource: limits.memory
+            - name: FEATURE_GATES
+              value: "ReservedCapacity={{ .Values.settings.featureGates.reservedCapacity }},SpotToSpotConsolidation={{ .Values.settings.featureGates.spotToSpotConsolidation }},NodeRepair={{ .Values.settings.featureGates.nodeRepair }}"
+          {{- with .Values.settings.batchMaxDuration }}
+            - name: BATCH_MAX_DURATION
+              value: "{{ tpl (toString .) $ }}"
+          {{- end }}
+          {{- with .Values.settings.batchIdleDuration }}
+            - name: BATCH_IDLE_DURATION
+              value: "{{ tpl (toString .) $ }}"
+          {{- end }}
+          {{- with .Values.settings.preferencePolicy }}
+            - name: PREFERENCE_POLICY
+              value: "{{ . }}"
+          {{- end }}
+          {{- with .Values.settings.minValuesPolicy }}
+            - name: MIN_VALUES_POLICY
+              value: "{{ . }}"
+          {{- end }}
+          {{- with .Values.settings.vmMemoryOverheadPercent }}
+            - name: VM_MEMORY_OVERHEAD_PERCENT
+              value: "{{ tpl (toString .) $ }}"
+          {{- end }}
           ports:
+            - name: http
+              containerPort: 8081
+              protocol: TCP
+          {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: 8080
               protocol: TCP
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: metrics
-              scheme: HTTPS
-            initialDelaySeconds: 20
+              port: http
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
           resources:

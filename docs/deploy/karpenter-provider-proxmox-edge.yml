@@ -1087,7 +1087,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1100,7 +1100,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1151,7 +1151,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1172,7 +1172,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1192,7 +1192,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1213,7 +1213,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1259,7 +1259,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.1
+    helm.sh/chart: karpenter-provider-proxmox-0.0.2
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1304,19 +1304,42 @@ spec:
           image: "ghcr.io/sergelogvinov/karpenter-provider-proxmox:edge"
           imagePullPolicy: Always
           args:
+            - -cloud-config=/etc/proxmox/config.yaml
             - -log-level=debug
             - -leader-election-name=proxmox-karpenter-leader-election
-            - -metrics-port=8080
+            - -health-probe-port=8081
+          env:
+            - name: SYSTEM_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: MEMORY_LIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: karpenter-provider-proxmox
+                  divisor: "0"
+                  resource: limits.memory
+            - name: FEATURE_GATES
+              value: "ReservedCapacity=true,SpotToSpotConsolidation=false,NodeRepair=false"
+            - name: BATCH_MAX_DURATION
+              value: "10s"
+            - name: BATCH_IDLE_DURATION
+              value: "1s"
+            - name: PREFERENCE_POLICY
+              value: "Respect"
+            - name: MIN_VALUES_POLICY
+              value: "Strict"
+            - name: VM_MEMORY_OVERHEAD_PERCENT
+              value: "0.075"
           ports:
-            - name: metrics
-              containerPort: 8080
+            - name: http
+              containerPort: 8081
               protocol: TCP
           livenessProbe:
             httpGet:
               path: /healthz
-              port: metrics
-              scheme: HTTPS
-            initialDelaySeconds: 20
+              port: http
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 5
           resources:

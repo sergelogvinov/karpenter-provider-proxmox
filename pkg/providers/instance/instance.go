@@ -28,6 +28,7 @@ import (
 	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
@@ -48,7 +49,7 @@ type Provider struct {
 }
 
 func NewProvider(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provider) (*Provider, error) {
-	cfg, err := providerconfig.ReadCloudConfigFromFile("cloud.yaml")
+	cfg, err := providerconfig.ReadCloudConfigFromFile(options.FromContext(ctx).CloudConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}

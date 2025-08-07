@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
@@ -45,7 +46,7 @@ type NodeCapacity struct {
 }
 
 func NewProvider(ctx context.Context) (*Provider, error) {
-	cfg, err := providerconfig.ReadCloudConfigFromFile("cloud.yaml")
+	cfg, err := providerconfig.ReadCloudConfigFromFile(options.FromContext(ctx).CloudConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}
