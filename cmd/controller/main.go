@@ -18,13 +18,9 @@ limitations under the License.
 package main
 
 import (
-	"os"
-
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
 	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
@@ -38,30 +34,8 @@ func main() {
 
 	log.Info("Karpenter Proxmox Provider version", "version", coreoperator.Version)
 
-	cloudcapacityProvider, err := cloudcapacity.NewProvider(ctx)
-	if err != nil {
-		log.Error(err, "failed creating instance provider")
+	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), op.InstanceTypes, op.InstanceProvider, op.CapacityProvider)
 
-		os.Exit(1)
-	}
-
-	cloudcapacityProvider.Sync(ctx)
-
-	instanceTypes, err := proxmox.ConstructInstanceTypes(ctx, cloudcapacityProvider)
-	if err != nil {
-		log.Error(err, "failed constructing instance types")
-
-		os.Exit(1)
-	}
-
-	instanceProvider, err := instance.NewProvider(ctx, cloudcapacityProvider)
-	if err != nil {
-		log.Error(err, "failed creating instance provider")
-
-		os.Exit(1)
-	}
-
-	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), instanceTypes, instanceProvider, cloudcapacityProvider)
 	cloudProvider := metrics.Decorate(proxmoxCloudProvider)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
 
