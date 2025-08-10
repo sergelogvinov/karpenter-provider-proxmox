@@ -251,6 +251,12 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 
 	vmInfo, err := cl.GetVmInfo(ctx, vmr)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			log.FromContext(ctx).Error(err, "vm is not found")
+
+			return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
+		}
+
 		return nil, fmt.Errorf("failed to get vm: %v", err)
 	}
 
@@ -292,7 +298,9 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 
 	if _, err := cl.GetVmInfo(ctx, vmr); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			return nil
+			log.FromContext(ctx).Error(err, "vm is not found")
+
+			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 		}
 
 		return fmt.Errorf("failed to get vm %d: %v", vmr.VmId(), err)
