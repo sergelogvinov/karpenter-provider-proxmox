@@ -51,7 +51,7 @@ func NewProvider(ctx context.Context) (*Provider, error) {
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}
 
-	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters, nil)
+	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
 	}
@@ -60,101 +60,72 @@ func NewProvider(ctx context.Context) (*Provider, error) {
 }
 
 func (p *Provider) Sync(ctx context.Context) error {
-	region := "region-1"
-
-	cl, err := p.cluster.GetProxmoxCluster(region)
-	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster: %v", err)
-	}
-
-	data, err := cl.GetNodeList(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get node list: %v", err)
-	}
-
-	if data["data"] == nil {
-		return fmt.Errorf("failed to parce node list: %v", err)
-	}
+	log := log.FromContext(ctx).WithName("cloudcapacity")
 
 	capacityZones := make(map[string]NodeCapacity)
 
-	for _, item := range data["data"].([]interface{}) {
-		node, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		if st, ok := node["status"].(string); !ok || st != "online" {
-			continue
-		}
-
-		name := node["node"].(string)
-
-		vms, err := cl.GetResourceList(ctx, "vm")
+	for _, region := range p.cluster.GetRegions() {
+		cl, err := p.cluster.GetProxmoxCluster(region)
 		if err != nil {
-			return fmt.Errorf("error get resources %v", err)
+			return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 		}
 
-		cpuUsage := 0.0
-		memUsage := 0.0
-
-		for vmii := range vms {
-			vm, ok := vms[vmii].(map[string]interface{})
-			if !ok {
-				return fmt.Errorf("failed to cast response to map, vm: %v", vm)
-			}
-
-			if vm["type"].(string) != "qemu" { //nolint:errcheck
-				continue
-			}
-
-			if nodeName, ok := vm["node"].(string); !ok || nodeName != name {
-				continue
-			}
-
-			if vmStatus, ok := vm["status"].(string); !ok || vmStatus != "running" {
-				continue
-			}
-
-			cpu, ok := vm["maxcpu"].(float64)
-			if !ok {
-				continue
-			}
-
-			cpuUsage += cpu
-
-			mem, ok := vm["maxmem"].(float64)
-			if !ok {
-				continue
-			}
-
-			memUsage += mem
+		ns, err := cl.Nodes(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get nodes for region %s: %v", region, err)
 		}
 
-		cpu, ok := node["maxcpu"].(float64)
-		if !ok {
-			continue
-		}
+		for _, item := range ns {
+			log.V(3).Info("Capacity of zones", "region", region, "node", item.Node, "nodeStatus", item.Status)
 
-		mem, ok := node["maxmem"].(float64)
-		if !ok {
-			continue
-		}
+			if item.Status != "online" {
+				continue
+			}
 
-		capacityZones[name] = NodeCapacity{
-			Name: name,
-			Capacity: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%f", cpu)),
-				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%f", mem)),
-			},
-			Allocatable: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%f", cpu-cpuUsage)),
-				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%f", mem-memUsage)),
-			},
+			node, err := cl.Node(ctx, item.Node)
+			if err != nil {
+				return fmt.Errorf("cannot find node with name %s in region %s: %w", item.Node, region, err)
+			}
+
+			vms, err := node.VirtualMachines(ctx)
+			if err != nil {
+				return fmt.Errorf("cannot list vms for node %s in region %s: %w", item.Node, region, err)
+			}
+
+			var (
+				cpuUsage int
+				memUsage uint64
+			)
+
+			for _, vm := range vms {
+				if vm.Status != "running" {
+					continue
+				}
+
+				log.V(2).Info("Capacity of zones", "region", region, "node", item.Node, "vm", vm.VMID, "status", vm.Status, "cpu", vm.CPUs, "mem", vm.MaxMem)
+
+				cpuUsage += vm.CPUs
+				memUsage += vm.MaxMem
+			}
+
+			cpu := item.MaxCPU - cpuUsage
+			mem := item.MaxMem - memUsage
+
+			capacityZones[item.Node] = NodeCapacity{
+				Name: item.Node,
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", item.MaxCPU)),
+					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", item.MaxMem)),
+				},
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
+					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
+				},
+			}
 		}
 	}
 
-	log.FromContext(ctx).V(1).Info("Capacity of zones", "capacityZones", capacityZones)
+	log.Info("Capacity of zones", "capacityZones", capacityZones)
 
 	p.capacityZones = capacityZones
 

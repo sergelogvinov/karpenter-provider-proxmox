@@ -20,16 +20,13 @@ package proxmoxpool
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"fmt"
 	"net/http"
-	"net/url"
-	"os"
-	"strings"
 
-	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
+	proxmox "github.com/luthermonson/go-proxmox"
 
-	v1 "k8s.io/api/core/v1"
+	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
+
 	"k8s.io/klog/v2"
 )
 
@@ -44,62 +41,79 @@ type ProxmoxCluster struct {
 	Region      string `yaml:"region,omitempty"`
 }
 
-// ProxmoxPool is a Proxmox client.
+// ProxmoxPool is a Proxmox client pool of proxmox clusters.
 type ProxmoxPool struct {
-	clients map[string]*pxapi.Client
+	clients map[string]*goproxmox.APIClient
 }
 
 // NewProxmoxPool creates a new Proxmox cluster client.
-func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster, hClient *http.Client) (*ProxmoxPool, error) {
+func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool, error) {
 	clusters := len(config)
 	if clusters > 0 {
-		proxmox := make(map[string]*pxapi.Client, clusters)
+		clients := make(map[string]*goproxmox.APIClient, clusters)
 
 		for _, cfg := range config {
-			tlsconf := &tls.Config{InsecureSkipVerify: true}
-			if !cfg.Insecure {
-				tlsconf = nil
+			options := []proxmox.Option{}
+
+			if cfg.Insecure {
+				httpTr := &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				}
+
+				options = append(options, proxmox.WithHTTPClient(&http.Client{Transport: httpTr}))
 			}
 
-			pClient, err := pxapi.NewClient(cfg.URL, hClient, os.Getenv("PM_HTTP_HEADERS"), tlsconf, "", 600)
+			if cfg.Username != "" && cfg.Password != "" {
+				options = append(options, proxmox.WithCredentials(&proxmox.Credentials{
+					Username: cfg.Username,
+					Password: cfg.Password,
+				}))
+			} else if cfg.TokenID != "" && cfg.TokenSecret != "" {
+				options = append(options, proxmox.WithAPIToken(cfg.TokenID, cfg.TokenSecret))
+			}
+
+			pxClient, err := goproxmox.NewAPIClient(ctx, cfg.URL, options...)
 			if err != nil {
 				return nil, err
 			}
 
-			if cfg.Username != "" && cfg.Password != "" {
-				if err := pClient.Login(ctx, cfg.Username, cfg.Password, ""); err != nil {
-					return nil, err
-				}
-			} else {
-				pClient.SetAPIToken(cfg.TokenID, cfg.TokenSecret)
-			}
-
-			proxmox[cfg.Region] = pClient
+			clients[cfg.Region] = pxClient
 		}
 
 		return &ProxmoxPool{
-			clients: proxmox,
+			clients: clients,
 		}, nil
 	}
 
 	return nil, fmt.Errorf("no Proxmox clusters found")
 }
 
+// GetProxmoxCluster returns supported regions.
+func (c *ProxmoxPool) GetRegions() []string {
+	regions := make([]string, 0, len(c.clients))
+
+	for region := range c.clients {
+		regions = append(regions, region)
+	}
+
+	return regions
+}
+
 // CheckClusters checks if the Proxmox connection is working.
 func (c *ProxmoxPool) CheckClusters(ctx context.Context) error {
-	for region, pClient := range c.clients {
-		if _, err := pClient.GetVersion(ctx); err != nil {
+	for region, pxClient := range c.clients {
+		if _, err := pxClient.Version(ctx); err != nil {
 			return fmt.Errorf("failed to initialized proxmox client in region %s, error: %v", region, err)
 		}
 
-		vmlist, err := pClient.GetVmList(ctx)
+		pxCluster, err := pxClient.Cluster(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to get list of VMs in region %s, error: %v", region, err)
+			return fmt.Errorf("failed to get cluster info in region %s, error: %v", region, err)
 		}
 
-		vms, ok := vmlist["data"].([]interface{})
-		if !ok {
-			return fmt.Errorf("failed to cast response to list of VMs in region %s, error: %v", region, err)
+		vms, err := pxCluster.Resources(ctx, "vm")
+		if err != nil {
+			return fmt.Errorf("failed to get list of VMs in region %s, error: %v", region, err)
 		}
 
 		if len(vms) > 0 {
@@ -113,7 +127,7 @@ func (c *ProxmoxPool) CheckClusters(ctx context.Context) error {
 }
 
 // GetProxmoxCluster returns a Proxmox cluster client in a given region.
-func (c *ProxmoxPool) GetProxmoxCluster(region string) (*pxapi.Client, error) {
+func (c *ProxmoxPool) GetProxmoxCluster(region string) (*goproxmox.APIClient, error) {
 	if c.clients[region] != nil {
 		return c.clients[region], nil
 	}
@@ -122,142 +136,142 @@ func (c *ProxmoxPool) GetProxmoxCluster(region string) (*pxapi.Client, error) {
 }
 
 // FindVMByNode find a VM by kubernetes node resource in all Proxmox clusters.
-func (c *ProxmoxPool) FindVMByNode(ctx context.Context, node *v1.Node) (*pxapi.VmRef, string, error) {
-	for region, px := range c.clients {
-		vmrs, err := px.GetVmRefsByName(ctx, node.Name)
-		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
-				continue
-			}
+// func (c *ProxmoxPool) FindVMByNode(ctx context.Context, node *v1.Node) (*pxapi.VmRef, string, error) {
+// 	for region, px := range c.clients {
+// 		vmrs, err := px.GetVmRefsByName(ctx, node.Name)
+// 		if err != nil {
+// 			if strings.Contains(err.Error(), "not found") {
+// 				continue
+// 			}
 
-			return nil, "", err
-		}
+// 			return nil, "", err
+// 		}
 
-		for _, vmr := range vmrs {
-			config, err := px.GetVmConfig(ctx, vmr)
-			if err != nil {
-				return nil, "", err
-			}
+// 		for _, vmr := range vmrs {
+// 			config, err := px.GetVmConfig(ctx, vmr)
+// 			if err != nil {
+// 				return nil, "", err
+// 			}
 
-			if c.GetVMUUID(config) == node.Status.NodeInfo.SystemUUID {
-				return vmr, region, nil
-			}
-		}
-	}
+// 			if c.GetVMUUID(config) == node.Status.NodeInfo.SystemUUID {
+// 				return vmr, region, nil
+// 			}
+// 		}
+// 	}
 
-	return nil, "", fmt.Errorf("vm '%s' not found", node.Name)
-}
+// 	return nil, "", fmt.Errorf("vm '%s' not found", node.Name)
+// }
 
-// FindVMByName find a VM by name in all Proxmox clusters.
-func (c *ProxmoxPool) FindVMByName(ctx context.Context, name string) (*pxapi.VmRef, string, error) {
-	for region, px := range c.clients {
-		vmr, err := px.GetVmRefByName(ctx, name)
-		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
-				continue
-			}
+// // FindVMByName find a VM by name in all Proxmox clusters.
+// func (c *ProxmoxPool) FindVMByName(ctx context.Context, name string) (*pxapi.VmRef, string, error) {
+// 	for region, px := range c.clients {
+// 		vmr, err := px.GetVmRefByName(ctx, name)
+// 		if err != nil {
+// 			if strings.Contains(err.Error(), "not found") {
+// 				continue
+// 			}
 
-			return nil, "", err
-		}
+// 			return nil, "", err
+// 		}
 
-		return vmr, region, nil
-	}
+// 		return vmr, region, nil
+// 	}
 
-	return nil, "", fmt.Errorf("vm '%s' not found", name)
-}
+// 	return nil, "", fmt.Errorf("vm '%s' not found", name)
+// }
 
-// FindVMByUUID find a VM by uuid in all Proxmox clusters.
-func (c *ProxmoxPool) FindVMByUUID(ctx context.Context, uuid string) (*pxapi.VmRef, string, error) {
-	for region, px := range c.clients {
-		vms, err := px.GetResourceList(ctx, "vm")
-		if err != nil {
-			return nil, "", fmt.Errorf("error get resources %v", err)
-		}
+// // FindVMByUUID find a VM by uuid in all Proxmox clusters.
+// func (c *ProxmoxPool) FindVMByUUID(ctx context.Context, uuid string) (*pxapi.VmRef, string, error) {
+// 	for region, px := range c.clients {
+// 		vms, err := px.GetResourceList(ctx, "vm")
+// 		if err != nil {
+// 			return nil, "", fmt.Errorf("error get resources %v", err)
+// 		}
 
-		for vmii := range vms {
-			vm, ok := vms[vmii].(map[string]interface{})
-			if !ok {
-				return nil, "", fmt.Errorf("failed to cast response to map, vm: %v", vm)
-			}
+// 		for vmii := range vms {
+// 			vm, ok := vms[vmii].(map[string]interface{})
+// 			if !ok {
+// 				return nil, "", fmt.Errorf("failed to cast response to map, vm: %v", vm)
+// 			}
 
-			if vm["type"].(string) != "qemu" { //nolint:errcheck
-				continue
-			}
+// 			if vm["type"].(string) != "qemu" { //nolint:errcheck
+// 				continue
+// 			}
 
-			vmr := pxapi.NewVmRef(int(vm["vmid"].(float64))) //nolint:errcheck
-			vmr.SetNode(vm["node"].(string))                 //nolint:errcheck
-			vmr.SetVmType("qemu")
+// 			vmr := pxapi.NewVmRef(int(vm["vmid"].(float64))) //nolint:errcheck
+// 			vmr.SetNode(vm["node"].(string))                 //nolint:errcheck
+// 			vmr.SetVmType("qemu")
 
-			config, err := px.GetVmConfig(ctx, vmr)
-			if err != nil {
-				return nil, "", err
-			}
+// 			config, err := px.GetVmConfig(ctx, vmr)
+// 			if err != nil {
+// 				return nil, "", err
+// 			}
 
-			if config["smbios1"] != nil {
-				if c.getSMBSetting(config, "uuid") == uuid {
-					return vmr, region, nil
-				}
-			}
-		}
-	}
+// 			if config["smbios1"] != nil {
+// 				if c.getSMBSetting(config, "uuid") == uuid {
+// 					return vmr, region, nil
+// 				}
+// 			}
+// 		}
+// 	}
 
-	return nil, "", fmt.Errorf("vm with uuid '%s' not found", uuid)
-}
+// 	return nil, "", fmt.Errorf("vm with uuid '%s' not found", uuid)
+// }
 
-// GetVMName returns the VM name.
-func (c *ProxmoxPool) GetVMName(vmInfo map[string]interface{}) string {
-	if vmInfo["name"] != nil {
-		return vmInfo["name"].(string) //nolint:errcheck
-	}
+// // GetVMName returns the VM name.
+// func (c *ProxmoxPool) GetVMName(vmInfo map[string]interface{}) string {
+// 	if vmInfo["name"] != nil {
+// 		return vmInfo["name"].(string) //nolint:errcheck
+// 	}
 
-	return ""
-}
+// 	return ""
+// }
 
-// GetVMUUID returns the VM UUID.
-func (c *ProxmoxPool) GetVMUUID(vmInfo map[string]interface{}) string {
-	if vmInfo["smbios1"] != nil {
-		return c.getSMBSetting(vmInfo, "uuid")
-	}
+// // GetVMUUID returns the VM UUID.
+// func (c *ProxmoxPool) GetVMUUID(vmInfo map[string]interface{}) string {
+// 	if vmInfo["smbios1"] != nil {
+// 		return c.getSMBSetting(vmInfo, "uuid")
+// 	}
 
-	return ""
-}
+// 	return ""
+// }
 
-// GetVMSKU returns the VM instance type name.
-func (c *ProxmoxPool) GetVMSKU(vmInfo map[string]interface{}) string {
-	if vmInfo["smbios1"] != nil {
-		return c.getSMBSetting(vmInfo, "sku")
-	}
+// // GetVMSKU returns the VM instance type name.
+// func (c *ProxmoxPool) GetVMSKU(vmInfo map[string]interface{}) string {
+// 	if vmInfo["smbios1"] != nil {
+// 		return c.getSMBSetting(vmInfo, "sku")
+// 	}
 
-	return ""
-}
+// 	return ""
+// }
 
-func (c *ProxmoxPool) getSMBSetting(vmInfo map[string]interface{}, name string) string {
-	smbios, ok := vmInfo["smbios1"].(string)
-	if !ok {
-		return ""
-	}
+// func (c *ProxmoxPool) getSMBSetting(vmInfo map[string]interface{}, name string) string {
+// 	smbios, ok := vmInfo["smbios1"].(string)
+// 	if !ok {
+// 		return ""
+// 	}
 
-	for _, l := range strings.Split(smbios, ",") {
-		if l == "" || l == "base64=1" {
-			continue
-		}
+// 	for _, l := range strings.Split(smbios, ",") {
+// 		if l == "" || l == "base64=1" {
+// 			continue
+// 		}
 
-		parsedParameter, err := url.ParseQuery(l)
-		if err != nil {
-			return ""
-		}
+// 		parsedParameter, err := url.ParseQuery(l)
+// 		if err != nil {
+// 			return ""
+// 		}
 
-		for k, v := range parsedParameter {
-			if k == name {
-				decodedString, err := base64.StdEncoding.DecodeString(v[0])
-				if err != nil {
-					decodedString = []byte(v[0])
-				}
+// 		for k, v := range parsedParameter {
+// 			if k == name {
+// 				decodedString, err := base64.StdEncoding.DecodeString(v[0])
+// 				if err != nil {
+// 					decodedString = []byte(v[0])
+// 				}
 
-				return string(decodedString)
-			}
-		}
-	}
+// 				return string(decodedString)
+// 			}
+// 		}
+// 	}
 
-	return ""
-}
+// 	return ""
+// }
