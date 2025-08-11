@@ -34,7 +34,7 @@ func main() {
 
 	log.Info("Karpenter Proxmox Provider version", "version", coreoperator.Version)
 
-	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), op.InstanceTypes, op.InstanceProvider, op.CapacityProvider)
+	proxmoxCloudProvider := proxmox.NewCloudProvider(ctx, op.GetClient(), op.InstanceProvider, op.InstanceTypeProvider, op.CloudCapacityProvider)
 
 	cloudProvider := metrics.Decorate(proxmoxCloudProvider)
 	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
@@ -56,6 +56,7 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			op.CloudCapacityProvider,
 		)...).
 		Start(ctx)
 }

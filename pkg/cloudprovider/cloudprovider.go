@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -49,26 +50,25 @@ const (
 
 type CloudProvider struct {
 	kubeClient            client.Client
-	instanceTypes         []*cloudprovider.InstanceType
 	instanceProvider      *instance.Provider
-	cloudcapacityProvider *cloudcapacity.Provider
+	instanceTypeProvider  instancetype.Provider
+	cloudcapacityProvider cloudcapacity.Provider
 	log                   logr.Logger
 }
 
 func NewCloudProvider(
 	ctx context.Context,
 	kubeClient client.Client,
-	instanceTypes []*cloudprovider.InstanceType,
 	instanceProvider *instance.Provider,
-	cloudcapacityProvider *cloudcapacity.Provider,
+	instanceTypeProvider instancetype.Provider,
+	cloudcapacityProvider cloudcapacity.Provider,
 ) *CloudProvider {
 	log := log.FromContext(ctx).WithName(CloudProviderName)
-	log.WithName("NewCloudProvider()").Info("Executed with params", "instanceTypes", instanceTypes)
 
 	return &CloudProvider{
 		kubeClient:            kubeClient,
-		instanceTypes:         instanceTypes,
 		instanceProvider:      instanceProvider,
+		instanceTypeProvider:  instanceTypeProvider,
 		cloudcapacityProvider: cloudcapacityProvider,
 		log:                   log,
 	}
@@ -203,16 +203,14 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 
 	c.cloudcapacityProvider.Sync(ctx)
 
-	instanceTypes, err := ConstructInstanceTypes(ctx, c.cloudcapacityProvider)
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
 		return nil, fmt.Errorf("constructing instance types, %w", err)
 	}
 
-	c.instanceTypes = instanceTypes
+	log.V(1).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(instanceTypes))
 
-	log.V(1).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(c.instanceTypes))
-
-	return c.instanceTypes, nil
+	return instanceTypes, nil
 }
 
 // IsDrifted returns whether a NodeClaim has drifted from the provisioning requirements
@@ -268,10 +266,15 @@ func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeC
 	return nodeClass, nil
 }
 
-func (c *CloudProvider) resolveInstanceTypes(_ context.Context, nodeClaim *karpv1.NodeClaim, _ *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
+func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 
-	return lo.Filter(c.instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+	return lo.Filter(instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		return len(i.Offerings.Compatible(reqs).Available()) > 0 &&
 			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
 	}), nil

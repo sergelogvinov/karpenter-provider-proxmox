@@ -53,7 +53,7 @@ func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool
 		clients := make(map[string]*goproxmox.APIClient, clusters)
 
 		for _, cfg := range config {
-			options := []proxmox.Option{}
+			options := []proxmox.Option{proxmox.WithUserAgent("Karpenter v1.0")}
 
 			if cfg.Insecure {
 				httpTr := &http.Transport{

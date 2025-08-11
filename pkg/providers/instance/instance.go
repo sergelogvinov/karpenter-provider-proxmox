@@ -26,7 +26,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
@@ -42,23 +41,13 @@ import (
 
 type Provider struct {
 	cluster               *pxpool.ProxmoxPool
-	cloudcapacityProvider *cloudcapacity.Provider
+	cloudCapacityProvider cloudcapacity.Provider
 }
 
-func NewProvider(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provider) (*Provider, error) {
-	cfg, err := providerconfig.ReadCloudConfigFromFile(options.FromContext(ctx).CloudConfigPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %v", err)
-	}
-
-	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
-	}
-
+func NewProvider(ctx context.Context, cluster *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) (*Provider, error) {
 	return &Provider{
 		cluster:               cluster,
-		cloudcapacityProvider: cloudcapacityProvider,
+		cloudCapacityProvider: cloudCapacityProvider,
 	}, nil
 }
 
@@ -85,7 +74,8 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 	requestedZones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone)
 	zone := requestedZones.Any()
 	if len(requestedZones.Values()) == 0 || zone == "" {
-		zones := p.cloudcapacityProvider.GetAvailableZones(instanceType.Capacity)
+		// FIXME: use best offering in zones based on placementStrategy
+		zones := p.cloudCapacityProvider.GetAvailableZonesInRegion(region, instanceType.Capacity)
 
 		if len(zones) == 0 {
 			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no capacity zone available"))
@@ -106,7 +96,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 
 	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.Template)
 	if err != nil {
-		return nil, fmt.Errorf("could not list vm resources: %w", err)
+		return nil, fmt.Errorf("could not find vm template: %w", err)
 	}
 
 	vmOptions := goproxmox.VMCloneRequest{
