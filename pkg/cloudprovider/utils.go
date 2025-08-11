@@ -29,13 +29,13 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-func (c *CloudProvider) nodeToNodeClaim(_ context.Context, node *corev1.Node) (*karpv1.NodeClaim, error) {
+func (c *CloudProvider) nodeToNodeClaim(ctx context.Context, node *corev1.Node) (*karpv1.NodeClaim, error) {
 	nodeClaim := &karpv1.NodeClaim{}
 	labels := map[string]string{}
 	annotations := map[string]string{}
 
 	if typeLabel, ok := node.Labels[corev1.LabelInstanceTypeStable]; ok {
-		if instanceType, err := instanceTypeByName(c.instanceTypes, typeLabel); err == nil {
+		if instanceType, err := c.instanceTypeProvider.Get(ctx, typeLabel); err == nil {
 			typeName := strings.Split(instanceType.Name, ".")
 
 			labels[corev1.LabelInstanceTypeStable] = instanceType.Name

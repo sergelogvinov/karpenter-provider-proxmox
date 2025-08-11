@@ -23,6 +23,8 @@ import (
 
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
+	controllerscloudcapacity "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 
 	"k8s.io/utils/clock"
 
@@ -35,6 +37,7 @@ import (
 func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
+	cloudCapacityProvider cloudcapacity.Provider,
 ) []controller.Controller {
 	controllers := make([]controller.Controller, 0)
 
@@ -46,6 +49,11 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	// Add nodeclass status controller
 	if statusCtrl, err := nodeclaasstatus.NewController(kubeClient); err == nil {
 		controllers = append(controllers, statusCtrl)
+	}
+
+	// Add cloudCapacity controller
+	if cloudCapacityCtrl, err := controllerscloudcapacity.NewController(cloudCapacityProvider); err == nil {
+		controllers = append(controllers, cloudCapacityCtrl)
 	}
 
 	return controllers

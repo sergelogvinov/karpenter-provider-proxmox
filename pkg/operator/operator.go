@@ -20,13 +20,14 @@ import (
 	"context"
 	"os"
 
-	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
+	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/operator"
 )
 
@@ -36,32 +37,42 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	CapacityProvider *cloudcapacity.Provider
-	// InstanceTypeProvider *[]cloudprovider.InstanceType
-	InstanceProvider *instance.Provider
-	InstanceTypes    []*cloudprovider.InstanceType
+	ProxmoxPool           *pxpool.ProxmoxPool
+	CloudCapacityProvider cloudcapacity.Provider
+	InstanceTypeProvider  instancetype.Provider
+	InstanceProvider      *instance.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	log.FromContext(ctx).Info("Initializing Karpenter Proxmox Provider Operator", "cloud-config", options.FromContext(ctx).CloudConfigPath)
 
-	cloudcapacityProvider, err := cloudcapacity.NewProvider(ctx)
+	cfg, err := providerconfig.ReadCloudConfigFromFile(options.FromContext(ctx).CloudConfigPath)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to read cloud config")
+
+		os.Exit(1)
+	}
+
+	pxPool, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "failed to create proxmox cluster client")
+
+		os.Exit(1)
+	}
+
+	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating cloud capacity provider")
 
 		os.Exit(1)
 	}
 
-	cloudcapacityProvider.Sync(ctx)
+	cloudCapacityProvider.UpdateNodeCapacity(ctx)
+	cloudCapacityProvider.Sync(ctx)
 
-	instanceTypes, err := proxmox.ConstructInstanceTypes(ctx, cloudcapacityProvider)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed constructing instance types")
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
 
-		os.Exit(1)
-	}
-
-	instanceProvider, err := instance.NewProvider(ctx, cloudcapacityProvider)
+	instanceProvider, err := instance.NewProvider(ctx, pxPool, cloudCapacityProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")
 
@@ -69,9 +80,10 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	return ctx, &Operator{
-		Operator:         operator,
-		CapacityProvider: cloudcapacityProvider,
-		InstanceTypes:    instanceTypes,
-		InstanceProvider: instanceProvider,
+		Operator:              operator,
+		ProxmoxPool:           pxPool,
+		CloudCapacityProvider: cloudCapacityProvider,
+		InstanceTypeProvider:  instanceTypeProvider,
+		InstanceProvider:      instanceProvider,
 	}
 }
