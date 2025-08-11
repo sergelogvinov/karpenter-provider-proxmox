@@ -33,6 +33,9 @@ const (
 
 	instanceTypesFilePathEnvVarName = "INSTANCE_TYPES_FILE_PATH"
 	instanceTypesFilePathFlagName   = "instance-types-file-path"
+
+	proxmoxVMIDEnvVarName = "PROXMOX_VMID"
+	proxmoxVMIDFlagName   = "proxmox-vmid"
 )
 
 func init() {
@@ -44,11 +47,13 @@ type optionsKey struct{}
 type Options struct {
 	CloudConfigPath       string
 	InstanceTypesFilePath string
+	ProxmoxVMID           int
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.CloudConfigPath, cloudConfigFlagName, env.WithDefaultString(cloudConfigEnvVarName, ""), "Path to the cloud config file.")
-	fs.StringVar(&o.InstanceTypesFilePath, instanceTypesFilePathFlagName, env.WithDefaultString(instanceTypesFilePathEnvVarName, ""), "Path to a custom instance-types file")
+	fs.StringVar(&o.InstanceTypesFilePath, instanceTypesFilePathFlagName, env.WithDefaultString(instanceTypesFilePathEnvVarName, ""), "Path to a custom instance-types file.")
+	fs.IntVar(&o.ProxmoxVMID, proxmoxVMIDFlagName, env.WithDefaultInt(proxmoxVMIDEnvVarName, 20000), "This value is used as the minimum ID when creating a VM.")
 }
 
 func (o *Options) Parse(fs *coreoptions.FlagSet, args ...string) error {

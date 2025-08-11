@@ -18,21 +18,18 @@ package instance
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
-
-	pxapi "github.com/Telmate/proxmox-api-go/proxmox"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
+	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
-	ccmprovider "github.com/sergelogvinov/proxmox-cloud-controller-manager/pkg/provider"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,7 +51,7 @@ func NewProvider(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provi
 		return nil, fmt.Errorf("failed to read config: %v", err)
 	}
 
-	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters, nil)
+	cluster, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create proxmox cluster client: %v", err)
 	}
@@ -67,15 +64,18 @@ func NewProvider(ctx context.Context, cloudcapacityProvider *cloudcapacity.Provi
 
 // Create an instance given the constraints.
 func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
+	log := log.FromContext(ctx).WithName("instance.Create()")
+
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	instanceType := instanceTypes[0]
 
-	log.FromContext(ctx).V(1).Info("Requirements", "nodeClaim", nodeClaim.Spec.Requirements, "nodeClass", nodeClass.Spec)
+	log.V(1).Info("Requirements", "nodeClaim", nodeClaim.Spec.Requirements, "nodeClass", nodeClass.Spec)
 
 	region := nodeClass.Spec.Region
 	if region == "" {
 		requestedRegion := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyRegion)
 		if len(requestedRegion.Values()) == 0 {
+			// FIXME: need to try all regions
 			region = "region-1"
 		} else {
 			region = requestedRegion.Any()
@@ -94,102 +94,53 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 		zone = zones[0]
 	}
 
-	cl, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
+		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
-	id, err := cl.GetNextID(ctx, 50000)
+	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
-	vmrs, err := cl.GetVmRefsByName(ctx, nodeClass.Spec.Template)
-	if err != nil || len(vmrs) == 0 {
-		return nil, fmt.Errorf("failed to get vm template: %v", err)
-	}
-
-	var template *pxapi.VmRef
-
-	for _, vmr := range vmrs {
-		if string(vmr.Node()) == zone {
-			template = vmr
-			break
-		}
-	}
-
-	if template == nil {
-		return nil, fmt.Errorf("failed to find template for zone %s", zone)
-	}
-
-	// Create a new VM
-	vm := map[string]interface{}{}
-	vm["vmid"] = template.VmId()
-	vm["node"] = template.Node()
-	vm["newid"] = id
-
-	vm["name"] = nodeClaim.Name
-	vm["description"] = fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name)
-	vm["full"] = true
-	vm["storage"] = nodeClass.Spec.BlockDevicesStorageID
-
-	_, err = cl.CloneQemuVm(ctx, template, vm)
+	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.Template)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create vm: %v", err)
+		return nil, fmt.Errorf("could not list vm resources: %w", err)
 	}
 
-	vmr := pxapi.NewVmRef(id)
-	vmr.SetNode(zone)
-	vmr.SetVmType("qemu")
+	vmOptions := goproxmox.VMCloneRequest{
+		NewID:       newID,
+		Node:        zone,
+		Name:        nodeClaim.Name,
+		Description: fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name),
+		Full:        1,
+		Storage:     nodeClass.Spec.BlockDevicesStorageID,
+		DiskSize:    fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024),
 
-	// FIXME: Defer delete vm if failed
+		CPU:          int(instanceType.Capacity.Cpu().Value()),
+		Memory:       uint32(instanceType.Capacity.Memory().Value() / 1024 / 1024),
+		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
+		InstanceType: instanceType.Name,
+	}
+
 	defer func() {
 		if err != nil {
-			if _, err := cl.DeleteVm(ctx, vmr); err != nil {
-				fmt.Printf("failed to delete vm %d: %v", vmr.VmId(), err)
+			if err := px.DeleteVMByID(ctx, zone, newID); err != nil {
+				fmt.Printf("failed to delete vm %d in region %s: %v", newID, region, err)
 			}
 		}
 	}()
 
-	_, err = cl.ResizeQemuDiskRaw(ctx, vmr, "scsi0", fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024))
+	newID, err = px.CloneVM(ctx, vmTemplateID, vmOptions)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resize disk: %v", err)
+		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
 	}
 
-	config, err := cl.GetVmConfig(ctx, vmr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get vm config: %v", err)
-	}
+	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)
 
-	smbios1 := config["smbios1"].(string)
-	vmParams := map[string]interface{}{
-		"memory": fmt.Sprintf("%d", instanceType.Capacity.Memory().Value()/1024/1024),
-		"cores":  instanceType.Capacity.Cpu().String(),
-		"smbios1": fmt.Sprintf("%s,serial=%s,sku=%s,base64=1", smbios1,
-			base64.StdEncoding.EncodeToString([]byte("h="+nodeClaim.Name+";i="+strconv.Itoa(id))),
-			base64.StdEncoding.EncodeToString([]byte(instanceType.Name)),
-		),
-	}
-
-	if len(nodeClass.Spec.Tags) > 0 {
-		vmParams["tags"] = strings.Join(nodeClass.Spec.Tags, ";")
-	}
-
-	err = applyInstanceOptimization(config, vmParams, instanceType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to apply instance optimization: %v", err)
-	}
-
-	log.FromContext(ctx).V(1).Info("Mudify VM", "vmParams", vmParams)
-
-	_, err = cl.SetVmConfig(vmr, vmParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update disk: %v, vmParams=%+v", err, vmParams)
-	}
-
-	_, err = cl.StartVm(ctx, vmr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start vm %d: %v", vmr.VmId(), err)
+	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
+		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
 	}
 
 	node := &corev1.Node{
@@ -207,7 +158,7 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 			CreationTimestamp: metav1.Now(),
 		},
 		Spec: corev1.NodeSpec{
-			ProviderID: ccmprovider.GetProviderID(region, vmr),
+			ProviderID: provider.GetProviderID(region, newID),
 			Taints:     []corev1.Taint{karpv1.UnregisteredNoExecuteTaint},
 		},
 		Status: corev1.NodeStatus{
@@ -222,7 +173,9 @@ func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, node
 }
 
 func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {
-	vmr, region, err := ccmprovider.ParseProviderID(providerID)
+	log := log.FromContext(ctx).WithName("instance.Get()")
+
+	vmid, region, err := provider.ParseProviderID(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse providerID: %v", err)
 	}
@@ -244,34 +197,37 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 		},
 	}
 
-	cl, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox cluster: %v", err)
+		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
-	vmInfo, err := cl.GetVmInfo(ctx, vmr)
+	vm, err := px.FindVMByID(ctx, uint64(vmid))
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			log.FromContext(ctx).Error(err, "vm is not found")
-
+		if err == goproxmox.ErrVirtualMachineNotFound {
 			return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 		}
 
 		return nil, fmt.Errorf("failed to get vm: %v", err)
 	}
 
-	node.ObjectMeta.Name = vmInfo["name"].(string)
+	node.ObjectMeta.Name = vm.Name
 	node.ObjectMeta.Labels = map[string]string{
 		corev1.LabelTopologyRegion:            region,
-		corev1.LabelTopologyZone:              string(vmr.Node()),
+		corev1.LabelTopologyZone:              vm.Node,
 		karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
 		v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
 	}
+
+	log.V(1).Info("Get instance", "node", node.Name, "providerID", providerID, "vm", vm)
 
 	return node, nil
 }
 
 func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
+	log := log.FromContext(ctx).WithName("instance.Delete()")
+
+	// FIXME: Get region and zone from nodeClaim
 	region := nodeClaim.Labels[corev1.LabelTopologyRegion]
 	if region == "" {
 		region = "region-1"
@@ -282,39 +238,29 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 		zone = "rnd-1"
 	}
 
-	cl, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster: %v", err)
+		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
-	vmID, err := ccmprovider.GetVMID(nodeClaim.Status.ProviderID)
+	vmID, err := provider.GetVMID(nodeClaim.Status.ProviderID)
 	if err != nil {
 		return fmt.Errorf("failed to get vm id from providerID: %v", err)
 	}
 
-	vmr := pxapi.NewVmRef(vmID)
-	vmr.SetNode(zone)
-	vmr.SetVmType("qemu")
-
-	if _, err := cl.GetVmInfo(ctx, vmr); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			log.FromContext(ctx).Error(err, "vm is not found")
-
+	vm, err := px.FindVMByID(ctx, uint64(vmID))
+	if err != nil {
+		if err == goproxmox.ErrVirtualMachineNotFound {
 			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
 		}
 
-		return fmt.Errorf("failed to get vm %d: %v", vmr.VmId(), err)
+		return fmt.Errorf("failed to get vm: %v", err)
 	}
 
-	params := map[string]interface{}{}
-	params["purge"] = "1"
+	log.V(1).Info("Delete instance", "nodeClaim", nodeClaim.Name, "vm", vm.VMID, "region", region, "zone", zone)
 
-	if _, err := cl.StopVm(ctx, vmr); err != nil {
-		return fmt.Errorf("failed to stop vm %d: %v", vmr.VmId(), err)
-	}
-
-	if _, err := cl.DeleteVmParams(ctx, vmr, params); err != nil {
-		return fmt.Errorf("failed to delete vm %d: %v", vmr.VmId(), err)
+	if err = px.DeleteVMByID(ctx, zone, vmID); err != nil {
+		return fmt.Errorf("cannot delete vm with id %d: %w", vmID, err)
 	}
 
 	return nil
@@ -342,33 +288,4 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 	})
 
 	return instanceTypes
-}
-
-func applyInstanceOptimization(config map[string]interface{}, vmParams map[string]interface{}, instanceType *cloudprovider.InstanceType) error {
-	// Network optimization, set queues to the number of vCPUs
-	for i := range 10 {
-		net, ok := config[fmt.Sprintf("net%d", i)].(string)
-		if ok && net != "" {
-			options := map[string]string{}
-
-			params := strings.Split(net, ",")
-			for _, param := range params {
-				kv := strings.Split(param, "=")
-				if len(kv) == 2 && options[kv[0]] == "" {
-					options[kv[0]] = kv[1]
-				}
-			}
-
-			options["queues"] = instanceType.Capacity.Cpu().String()
-
-			opt := make([]string, 0, len(options))
-			for k := range options {
-				opt = append(opt, fmt.Sprintf("%s=%s", k, options[k]))
-			}
-
-			vmParams[fmt.Sprintf("net%d", i)] = strings.Join(opt, ",")
-		}
-	}
-
-	return nil
 }
