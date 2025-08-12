@@ -21,12 +21,13 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/go-logr/logr"
-	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	cloudproviderevents "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider/events"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
@@ -39,8 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
-	"sigs.k8s.io/karpenter/pkg/utils/resources"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
 const (
@@ -49,17 +49,21 @@ const (
 )
 
 type CloudProvider struct {
-	kubeClient            client.Client
-	instanceProvider      *instance.Provider
+	kubeClient client.Client
+	recorder   events.Recorder
+
+	instanceProvider      instance.Provider
 	instanceTypeProvider  instancetype.Provider
 	cloudcapacityProvider cloudcapacity.Provider
-	log                   logr.Logger
+
+	log logr.Logger
 }
 
 func NewCloudProvider(
 	ctx context.Context,
 	kubeClient client.Client,
-	instanceProvider *instance.Provider,
+	recorder events.Recorder,
+	instanceProvider instance.Provider,
 	instanceTypeProvider instancetype.Provider,
 	cloudcapacityProvider cloudcapacity.Provider,
 ) *CloudProvider {
@@ -67,6 +71,7 @@ func NewCloudProvider(
 
 	return &CloudProvider{
 		kubeClient:            kubeClient,
+		recorder:              recorder,
 		instanceProvider:      instanceProvider,
 		instanceTypeProvider:  instanceTypeProvider,
 		cloudcapacityProvider: cloudcapacityProvider,
@@ -78,14 +83,14 @@ func NewCloudProvider(
 // NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodeClaim, error) {
 	log := c.log.WithName("Create()")
-	log.Info("Executed with params", "nodePool", nodeClaim.Name, "spec", nodeClaim.Spec)
-
-	if nodeClaim == nil {
-		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
-	}
+	log.Info("Executed with params", "nodeClaim", nodeClaim.Name, "spec", nodeClaim.Spec)
 
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
+		if errors.IsNotFound(err) {
+			c.recorder.Publish(cloudproviderevents.NodeClaimFailedToResolveNodeClass(nodeClaim))
+		}
+
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
 	}
 
@@ -107,7 +112,12 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 
 	log.Info("Successfully created instance", "providerID", node.Spec.ProviderID)
 
-	return c.nodeToNodeClaim(ctx, node)
+	instanceType, err := c.resolveInstanceTypeFromNode(ctx, node)
+	if err != nil {
+		log.Error(err, "Failed to resolve instance type from node", "node", node.Name)
+	}
+
+	return c.nodeToNodeClaim(ctx, instanceType, node)
 }
 
 // Delete removes a NodeClaim from the cloudprovider by its provider id. Delete should return
@@ -115,15 +125,17 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 // Karpenter will keep retrying until Delete returns a NodeClaimNotFound error.
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	log := c.log.WithName("Delete()")
-	log.Info("Executed with params", "nodePool", nodeClaim.Name)
-
-	if nodeClaim == nil {
-		return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
-	}
+	log.Info("Executed with params", "nodePool", nodeClaim.Name, "providerID", nodeClaim.Status.ProviderID)
 
 	providerID := nodeClaim.Status.ProviderID
 	if providerID == "" {
 		log.Info("providerID is empty")
+
+		return nil
+	}
+
+	if !strings.HasPrefix(providerID, ProxmoxProviderPrefix) {
+		log.Info("providerID does not have the correct prefix")
 
 		return nil
 	}
@@ -153,7 +165,12 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Node
 		return nil, fmt.Errorf("getting instance, %w", err)
 	}
 
-	return c.nodeToNodeClaim(ctx, node)
+	instanceType, err := c.resolveInstanceTypeFromNode(ctx, node)
+	if err != nil {
+		log.Error(err, "Failed to resolve instance type from node", "node", node.Name)
+	}
+
+	return c.nodeToNodeClaim(ctx, instanceType, node)
 }
 
 // List retrieves all NodeClaims from the cloudprovider
@@ -167,20 +184,27 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 
 	nodeClaims := []*karpv1.NodeClaim{}
 
-	for i, node := range nodeList.Items {
+	for _, node := range nodeList.Items {
 		if !strings.HasPrefix(node.Spec.ProviderID, ProxmoxProviderPrefix) {
 			continue
 		}
 
-		nc, err := c.nodeToNodeClaim(ctx, &nodeList.Items[i])
+		instanceType, err := c.resolveInstanceTypeFromNode(ctx, &node)
 		if err != nil {
-			return nil, fmt.Errorf("converting nodeclaim, %w", err)
+			log.V(1).Info("Failed to resolve instance type from node", "node", node.Name, "error", err)
+		}
+
+		nc, err := c.nodeToNodeClaim(ctx, instanceType, &node)
+		if err != nil {
+			log.Error(err, "Failed to convert nodeclaim from node", "node", node.Name)
+
+			continue
 		}
 
 		nodeClaims = append(nodeClaims, nc)
 	}
 
-	log.V(1).Info("Successfully retrieved node claims list", "count", len(nodeClaims))
+	log.V(4).Info("Successfully retrieved node claims list", "count", len(nodeClaims))
 
 	return nodeClaims, nil
 }
@@ -192,23 +216,23 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	log := c.log.WithName("GetInstanceTypes()")
 
-	nodeClass := &v1alpha1.ProxmoxNodeClass{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
+	nodeClass, err := c.resolveNodeClassFromNodePool(ctx, nodePool)
+	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Error(err, "Failed to resolve nodeClass")
+			c.recorder.Publish(cloudproviderevents.NodePoolFailedToResolveNodeClass(nodePool))
+
+			log.Error(err, "Failed to resolve nodeClass for nodePool", "nodePool", nodePool.Name)
 		}
 
-		return nil, err
+		return nil, fmt.Errorf("resolving node class, %w", err)
 	}
-
-	c.cloudcapacityProvider.Sync(ctx)
 
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
 		return nil, fmt.Errorf("constructing instance types, %w", err)
 	}
 
-	log.V(1).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(instanceTypes))
+	log.V(4).Info("Resolved instance types", "nodePool", nodePool.Name, "nodeclass", nodeClass.Name, "count", len(instanceTypes))
 
 	return instanceTypes, nil
 }
@@ -217,28 +241,36 @@ func (c CloudProvider) GetInstanceTypes(ctx context.Context, nodePool *karpv1.No
 // it is tied to.
 func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim) (cloudprovider.DriftReason, error) {
 	log := c.log.WithName("IsDrifted()")
-	log.Info("Executed with params", "nodeClaim", nodeClaim.Name)
 
-	if nodeClaim == nil {
-		return "", cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("nodeClaim is nil"))
-	}
-
-	if nodeClaim.Spec.NodeClassRef == nil {
-		return "", nil
-	}
-
-	_, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
+	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
-		return "", cloudprovider.NewInsufficientCapacityError(fmt.Errorf("resolving node class, %w", err))
+		if errors.IsNotFound(err) {
+			c.recorder.Publish(cloudproviderevents.NodeClaimFailedToResolveNodeClass(nodeClaim))
+
+			log.Error(err, "Failed to resolve nodeClass for nodeClaim", "nodeClaim", nodeClaim.Name)
+		}
+
+		return "", client.IgnoreNotFound(err)
 	}
 
-	return "", nil
+	return c.isNodeClassDrifted(ctx, nodeClaim, nodeClass)
 }
 
 // RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
 // to monitor on the node.
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	return []cloudprovider.RepairPolicy{}
+	return []cloudprovider.RepairPolicy{
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionFalse,
+			TolerationDuration: 15 * time.Minute,
+		},
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionUnknown,
+			TolerationDuration: 15 * time.Minute,
+		},
+	}
 }
 
 // Name returns the CloudProvider implementation name.
@@ -252,30 +284,30 @@ func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	return []status.Object{&v1alpha1.ProxmoxNodeClass{}}
 }
 
-func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1alpha1.ProxmoxNodeClass, error) {
-	nodeClass := &v1alpha1.ProxmoxNodeClass{}
-	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Spec.NodeClassRef.Name}, nodeClass); err != nil {
-		return nil, err
+func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.ProxmoxNodeClass, error) {
+	ref := nodePool.Spec.Template.Spec.NodeClassRef
+	if ref == nil {
+		return nil, fmt.Errorf("nodePool missing NodeClassRef")
 	}
 
-	// For the purposes of NodeClass CloudProvider resolution, we treat deleting NodeClasses as NotFound
-	if !nodeClass.DeletionTimestamp.IsZero() {
-		return nil, errors.NewNotFound(v1alpha1.SchemeGroupVersion.WithResource("proxmoxnodeclass").GroupResource(), nodeClass.Name)
+	nodeClass := &v1alpha1.ProxmoxNodeClass{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: ref.Name}, nodeClass); err != nil {
+		return nil, err
 	}
 
 	return nodeClass, nil
 }
 
-func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
-	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
-	if err != nil {
+func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1alpha1.ProxmoxNodeClass, error) {
+	ref := nodeClaim.Spec.NodeClassRef
+	if ref == nil {
+		return nil, fmt.Errorf("nodeClaim missing NodeClassRef")
+	}
+
+	nodeClass := &v1alpha1.ProxmoxNodeClass{}
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: ref.Name}, nodeClass); err != nil {
 		return nil, err
 	}
 
-	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-
-	return lo.Filter(instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
-		return len(i.Offerings.Compatible(reqs).Available()) > 0 &&
-			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
-	}), nil
+	return nodeClass, nil
 }

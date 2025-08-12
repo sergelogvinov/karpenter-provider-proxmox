@@ -18,8 +18,10 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"sort"
 	"strings"
 
@@ -39,130 +41,75 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-type Provider struct {
+type Provider interface {
+	Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error)
+	Get(ctx context.Context, providerID string) (*corev1.Node, error)
+	Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
+}
+
+type DefaultProvider struct {
 	cluster               *pxpool.ProxmoxPool
 	cloudCapacityProvider cloudcapacity.Provider
 }
 
-func NewProvider(ctx context.Context, cluster *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) (*Provider, error) {
-	return &Provider{
+func NewProvider(ctx context.Context, cluster *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) (*DefaultProvider, error) {
+	return &DefaultProvider{
 		cluster:               cluster,
 		cloudCapacityProvider: cloudCapacityProvider,
 	}, nil
 }
 
 // Create an instance given the constraints.
-func (p *Provider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
+func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
 	log := log.FromContext(ctx).WithName("instance.Create()")
-
-	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
-	instanceType := instanceTypes[0]
-
 	log.V(1).Info("Requirements", "nodeClaim", nodeClaim.Spec.Requirements, "nodeClass", nodeClass.Spec)
 
-	region := nodeClass.Spec.Region
-	if region == "" {
-		requestedRegion := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyRegion)
-		if len(requestedRegion.Values()) == 0 {
-			// FIXME: need to try all regions
-			region = "region-1"
-		} else {
-			region = requestedRegion.Any()
-		}
-	}
+	var errs []error
 
-	requestedZones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone)
-	zone := requestedZones.Any()
-	if len(requestedZones.Values()) == 0 || zone == "" {
-		// FIXME: use best offering in zones based on placementStrategy
-		zones := p.cloudCapacityProvider.GetAvailableZonesInRegion(region, instanceType.Capacity)
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
+	for _, instanceType := range instanceTypes {
+		regions := []string{}
 
-		if len(zones) == 0 {
-			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no capacity zone available"))
-		}
-
-		zone = zones[0]
-	}
-
-	px, err := p.cluster.GetProxmoxCluster(region)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
-	}
-
-	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next id: %v", err)
-	}
-
-	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.Template)
-	if err != nil {
-		return nil, fmt.Errorf("could not find vm template: %w", err)
-	}
-
-	vmOptions := goproxmox.VMCloneRequest{
-		NewID:       newID,
-		Node:        zone,
-		Name:        nodeClaim.Name,
-		Description: fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name),
-		Full:        1,
-		Storage:     nodeClass.Spec.BlockDevicesStorageID,
-		DiskSize:    fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024),
-
-		CPU:          int(instanceType.Capacity.Cpu().Value()),
-		Memory:       uint32(instanceType.Capacity.Memory().Value() / 1024 / 1024),
-		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
-		InstanceType: instanceType.Name,
-	}
-
-	defer func() {
-		if err != nil {
-			if err := px.DeleteVMByID(ctx, zone, newID); err != nil {
-				fmt.Printf("failed to delete vm %d in region %s: %v", newID, region, err)
+		if nodeClass.Spec.Region == "" {
+			requestedRegion := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyRegion)
+			if len(requestedRegion.Values()) == 0 {
+				regions = p.cloudCapacityProvider.Regions()
+			} else {
+				regions = requestedRegion.Values()
 			}
 		}
-	}()
 
-	newID, err = px.CloneVM(ctx, vmTemplateID, vmOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
+		for _, region := range regions {
+			requestedZones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone)
+			zones := requestedZones.Values()
+			if len(zones) == 0 {
+				zones = p.cloudCapacityProvider.GetAvailableZonesInRegion(region, instanceType.Capacity)
+			}
+
+			if len(zones) == 0 {
+				log.Error(fmt.Errorf("no zones available"), "No zones available in region", "region", region, "instanceType", instanceType.Name)
+
+				continue
+			}
+
+			for _, zone := range p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, zones) {
+				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, instanceType, region, zone)
+				if err != nil {
+					log.Error(err, "Failed to create instance", "nodeClaim", nodeClaim.Name, "instanceType", instanceType.Name, "region", region, "zone", zone)
+					errs = append(errs, err)
+
+					continue
+				}
+
+				return node, nil
+			}
+		}
 	}
 
-	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)
-
-	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
-		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
-	}
-
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: nodeClaim.Name,
-			Labels: map[string]string{
-				corev1.LabelTopologyRegion:            region,
-				corev1.LabelTopologyZone:              zone,
-				corev1.LabelInstanceTypeStable:        instanceType.Name,
-				karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
-				v1alpha1.LabelInstanceFamily:          strings.Split(instanceType.Name, ".")[0],
-				v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
-			},
-			Annotations:       map[string]string{},
-			CreationTimestamp: metav1.Now(),
-		},
-		Spec: corev1.NodeSpec{
-			ProviderID: provider.GetProviderID(region, newID),
-			Taints:     []corev1.Taint{karpv1.UnregisteredNoExecuteTaint},
-		},
-		Status: corev1.NodeStatus{
-			NodeInfo: corev1.NodeSystemInfo{
-				Architecture:    karpv1.ArchitectureAmd64,
-				OperatingSystem: string(corev1.Linux),
-			},
-		},
-	}
-
-	return node, nil
+	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
 }
 
-func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {
+func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {
 	log := log.FromContext(ctx).WithName("instance.Get()")
 
 	vmid, region, err := provider.ParseProviderID(providerID)
@@ -214,7 +161,7 @@ func (p *Provider) Get(ctx context.Context, providerID string) (*corev1.Node, er
 	return node, nil
 }
 
-func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
+func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	log := log.FromContext(ctx).WithName("instance.Delete()")
 
 	// FIXME: Get region and zone from nodeClaim
@@ -254,6 +201,124 @@ func (p *Provider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) erro
 	}
 
 	return nil
+}
+
+func (p *DefaultProvider) instanceCreate(ctx context.Context,
+	nodeClaim *karpv1.NodeClaim,
+	nodeClass *v1alpha1.ProxmoxNodeClass,
+	instanceType *cloudprovider.InstanceType,
+	region string,
+	zone string,
+) (*corev1.Node, error) {
+	log := log.FromContext(ctx).WithName("instance.instanceCreate()")
+
+	px, err := p.cluster.GetProxmoxCluster(region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+	}
+
+	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next id: %v", err)
+	}
+
+	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.Template)
+	if err != nil {
+		return nil, fmt.Errorf("could not find vm template: %w", err)
+	}
+
+	vmOptions := goproxmox.VMCloneRequest{
+		NewID:       newID,
+		Node:        zone,
+		Name:        nodeClaim.Name,
+		Description: fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name),
+		Full:        1,
+		Storage:     nodeClass.Spec.BlockDevicesStorageID,
+		DiskSize:    fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024),
+
+		CPU:          int(instanceType.Capacity.Cpu().Value()),
+		Memory:       uint32(instanceType.Capacity.Memory().Value() / 1024 / 1024),
+		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
+		InstanceType: instanceType.Name,
+	}
+
+	defer func() {
+		if err != nil {
+			if newID == 0 {
+				return
+			}
+
+			if defErr := px.DeleteVMByID(ctx, zone, newID); defErr != nil {
+				fmt.Printf("failed to delete vm %d in region %s: %v", newID, region, defErr)
+			}
+		}
+	}()
+
+	newID, err = px.CloneVM(ctx, vmTemplateID, vmOptions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
+	}
+
+	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)
+
+	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
+		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
+	}
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeClaim.Name,
+			Labels: map[string]string{
+				corev1.LabelTopologyRegion:            region,
+				corev1.LabelTopologyZone:              zone,
+				corev1.LabelInstanceTypeStable:        instanceType.Name,
+				karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
+				v1alpha1.LabelInstanceFamily:          strings.Split(instanceType.Name, ".")[0],
+				v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
+			},
+			Annotations:       map[string]string{},
+			CreationTimestamp: metav1.Now(),
+		},
+		Spec: corev1.NodeSpec{
+			ProviderID: provider.GetProviderID(region, newID),
+			Taints:     []corev1.Taint{karpv1.UnregisteredNoExecuteTaint},
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				Architecture:    karpv1.ArchitectureAmd64,
+				OperatingSystem: string(corev1.Linux),
+			},
+		},
+	}
+
+	return node, nil
+}
+
+func (p *DefaultProvider) sortBestZoneByPlacementStrategy(placementStrategy *v1alpha1.PlacementStrategy, region string, zones []string) []string {
+	if len(zones) == 1 {
+		return zones
+	}
+
+	strategy := placementStrategy
+	if strategy == nil {
+		strategy = &v1alpha1.PlacementStrategy{
+			ZoneBalance: v1alpha1.PlacementStrategyBalanced,
+		}
+	}
+
+	switch strategy.ZoneBalance {
+	case v1alpha1.PlacementStrategyAvailabilityFirst:
+		// Sort zones randomly to prioritize availability
+		sortedZones := make([]string, len(zones))
+		for i, v := range rand.Perm(len(zones)) {
+			sortedZones[v] = zones[i]
+		}
+
+		return sortedZones
+	default:
+		// Sort zones by CPU load
+		return p.cloudCapacityProvider.SortZonesByCPULoad(region, zones)
+	}
 }
 
 func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements) []*cloudprovider.InstanceType {

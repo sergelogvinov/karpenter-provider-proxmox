@@ -21,7 +21,7 @@ The benefits of not fully utilizing all bare metal resources include:
 
 * [x] Dynamic creation/termination
 * [x] VM template selection to create kubernetes node
-* [ ] The best placement strategy for VMs across zones
+* [x] The best placement strategy for VMs across zones
 * [ ] Firewall security groups
 * [ ] Meta/user data delivery by cdrom, or http endpoint
 * [ ] VM optimization: CPU pinning and NUMA node affinity
@@ -57,14 +57,13 @@ spec:
   # PlacementStrategy defines how nodes should be placed across zones (optional)
   placementStrategy: Balanced|AvailabilityFirst
 
-  # Proxmox zone and region (optional)
+  # Proxmox region (optional)
   Region: region1
-  Zone: zone1
 
   # Tags to apply to the VM on Proxmox Dashboard (optional)
   tags:
     - k8s
-    - karperter
+    - karpenter
 
   metadataOptions:
     # How delivery the metadata to the VM, options: template, cdrom or http endpoint

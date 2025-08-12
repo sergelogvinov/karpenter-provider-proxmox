@@ -74,23 +74,27 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 		}
 	}
 
-	p.cloudCapacityProvider.Sync(ctx)
-
 	p.muInstanceTypes.RLock()
 	defer p.muInstanceTypes.RUnlock()
+
+	regions := p.cloudCapacityProvider.Regions()
+	if nodeClass.Spec.Region != "" {
+		regions = []string{nodeClass.Spec.Region}
+	}
 
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for _, item := range p.instanceTypesInfo {
 		instanceType := &cloudprovider.InstanceType{
-			Name:     item.Name,
-			Capacity: item.Capacity.DeepCopy(),
+			Name:         item.Name,
+			Requirements: computeRequirements(item.Name, item.Offerings, regions),
+			Capacity:     item.Capacity.DeepCopy(),
 			Overhead: &cloudprovider.InstanceTypeOverhead{
 				KubeReserved:   item.Overhead.KubeReserved.DeepCopy(),
 				SystemReserved: item.Overhead.SystemReserved.DeepCopy(),
 			},
 		}
 
-		createOfferings(p.cloudCapacityProvider, instanceType)
+		createOfferings(p.cloudCapacityProvider, instanceType, regions)
 
 		instanceTypes = append(instanceTypes, instanceType)
 	}
@@ -105,15 +109,16 @@ func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.
 	for _, item := range p.instanceTypesInfo {
 		if item.Name == name {
 			instanceType := &cloudprovider.InstanceType{
-				Name:     item.Name,
-				Capacity: item.Capacity.DeepCopy(),
+				Name:         item.Name,
+				Requirements: computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
+				Capacity:     item.Capacity.DeepCopy(),
 				Overhead: &cloudprovider.InstanceTypeOverhead{
 					KubeReserved:   item.Overhead.KubeReserved.DeepCopy(),
 					SystemReserved: item.Overhead.SystemReserved.DeepCopy(),
 				},
 			}
 
-			createOfferings(p.cloudCapacityProvider, instanceType)
+			createOfferings(p.cloudCapacityProvider, instanceType, p.cloudCapacityProvider.Regions())
 
 			return instanceType, nil
 		}
@@ -157,8 +162,6 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 }
 
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
-	p.cloudCapacityProvider.Sync(ctx)
-
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
 
@@ -218,14 +221,13 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	return price
 }
 
-func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudprovider.InstanceType) {
-	for _, region := range cloudcapacityProvider.Regions() {
-		price := priceFromResources(opts.Capacity)
+func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudprovider.InstanceType, regions []string) {
+	opts.Offerings = []*cloudprovider.Offering{}
+	price := priceFromResources(opts.Capacity)
 
-		opts.Offerings = []*cloudprovider.Offering{}
-
+	for _, region := range regions {
 		for _, zone := range cloudcapacityProvider.Zones(region) {
-			available := cloudcapacityProvider.FitInZone(zone, opts.Capacity)
+			available := cloudcapacityProvider.FitInZone(region, zone, opts.Capacity)
 
 			opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
 				Price:     price,
@@ -240,4 +242,26 @@ func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudpr
 			})
 		}
 	}
+}
+
+func computeRequirements(instanceTypeName string, offerings []*cloudprovider.Offering, regions []string) scheduling.Requirements {
+	requirements := scheduling.NewRequirements(
+		// Well Known Upstream
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, instanceTypeName),
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, string(karpv1.ArchitectureAmd64)),
+		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
+		scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, regions...),
+		// scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpDoesNotExist),
+
+		// Well Known to Karpenter
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+
+		// Well Known to Proxmox
+		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(instanceTypeName, ".")[0]),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUManufacturer, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpDoesNotExist),
+	)
+
+	return requirements
 }
