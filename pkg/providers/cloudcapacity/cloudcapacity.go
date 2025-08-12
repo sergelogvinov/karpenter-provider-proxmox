@@ -19,6 +19,8 @@ package cloudcapacity
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -36,18 +38,17 @@ type Provider interface {
 	UpdateNodeCapacity(ctx context.Context) error
 	UpdateNodeLoad(ctx context.Context) error
 
-	Sync(context.Context) error
-
 	Regions() []string
 	Zones(region string) []string
 
 	GetAvailableZonesInRegion(region string, req corev1.ResourceList) []string
-	FitInZone(zone string, req corev1.ResourceList) bool
+	FitInZone(region, zone string, req corev1.ResourceList) bool
+
+	SortZonesByCPULoad(region string, zones []string) []string
 }
 
 type DefaultProvider struct {
-	pool          *pxpool.ProxmoxPool
-	capacityZones map[string]NodeCapacity
+	pool *pxpool.ProxmoxPool
 
 	muCapacityInfo sync.RWMutex
 	capacityInfo   map[string]NodeCapacityInfo
@@ -207,25 +208,9 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 			info.CPULoad = int(item.CPU * 100)
 			p.capacityInfo[key] = info
 
-			log.V(1).Info("Syncing capacity for region", "region", region, "node", item.Node, "cpuLoad", info.CPULoad)
+			log.V(4).Info("Syncing capacity for region", "region", region, "node", item.Node, "cpuLoad", info.CPULoad)
 		}
 	}
-
-	return nil
-}
-
-func (p *DefaultProvider) Sync(ctx context.Context) error {
-	capacityZones := make(map[string]NodeCapacity)
-
-	for _, info := range p.capacityInfo {
-		capacityZones[info.Name] = NodeCapacity{
-			Name:        info.Name,
-			Capacity:    info.Capacity.DeepCopy(),
-			Allocatable: info.Allocatable.DeepCopy(),
-		}
-	}
-
-	p.capacityZones = capacityZones
 
 	return nil
 }
@@ -268,13 +253,39 @@ func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.Re
 	return zones
 }
 
-func (p *DefaultProvider) FitInZone(zone string, req corev1.ResourceList) bool {
-	capacity, ok := p.capacityZones[zone]
-	if !ok {
-		return false
+func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList) bool {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	for _, info := range p.capacityInfo {
+		if info.Region == region && info.Name == zone {
+			return info.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && info.Allocatable.Memory().Cmp(*req.Memory()) >= 0
+		}
 	}
 
-	return capacity.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && capacity.Allocatable.Memory().Cmp(*req.Memory()) >= 0
+	return false
+}
+
+func (p *DefaultProvider) SortZonesByCPULoad(region string, zones []string) []string {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	if len(zones) <= 1 {
+		return zones
+	}
+
+	sortedZones := make([]string, 0, len(zones))
+	for _, zone := range zones {
+		if slices.Contains(p.zoneList[region], zone) {
+			sortedZones = append(sortedZones, zone)
+		}
+	}
+
+	sort.Slice(sortedZones, func(i, j int) bool {
+		return p.capacityInfo[fmt.Sprintf("%s/%s", region, sortedZones[i])].CPULoad < p.capacityInfo[fmt.Sprintf("%s/%s", region, sortedZones[j])].CPULoad
+	})
+
+	return sortedZones
 }
 
 func nodeAllocatable(ctx context.Context, node *proxmox.Node, maxCPU, maxMem uint64) (corev1.ResourceList, error) {

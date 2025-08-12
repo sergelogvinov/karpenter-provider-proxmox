@@ -61,9 +61,8 @@ spec:
                     type: string
                 type: object
               placementStrategy:
-                description: |-
-                  PlacementStrategy defines how nodes should be placed across zones
-                  Only used when Zone or Subnet is not specified
+                description: PlacementStrategy defines how nodes should be placed
+                  across zones
                 properties:
                   zoneBalance:
                     default: Balanced
@@ -109,11 +108,6 @@ spec:
                 type: array
               template:
                 description: Template is the name of the template to use for nodes
-                type: string
-              zone:
-                description: |-
-                  Zone is the availability zone where nodes will be created
-                  If not specified, zones will be automatically selected based on placement strategy
                 type: string
             required:
             - blockDevicesStorageID
@@ -191,10 +185,6 @@ spec:
                 items:
                   type: string
                 type: array
-              specHash:
-                description: SpecHash is a hash of the ProxmoxNodeClass spec
-                format: int64
-                type: integer
               validationError:
                 description: ValidationError contains the error message from the last
                   validation

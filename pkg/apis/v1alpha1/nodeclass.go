@@ -17,9 +17,22 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+const (
+	// Placement strategy
+	PlacementStrategyAvailabilityFirst = "AvailabilityFirst"
+	PlacementStrategyBalanced          = "Balanced"
+
+	// Version of the hash for ProxmoxNodeClass
+	ProxmoxNodeClassHashVersion = "v1"
 )
 
 // ProxmoxNodeClass is the Schema for the ProxmoxNodeClass API
@@ -56,23 +69,13 @@ type ProxmoxNodeClassSpec struct {
 	// +optional
 	Region string `json:"region"`
 
-	// Zone is the availability zone where nodes will be created
-	// If not specified, zones will be automatically selected based on placement strategy
-	// +optional
-	Zone string `json:"zone,omitempty"`
-
-	// Template is the name of the template to use for nodes
-	// +required
-	Template string `json:"template"`
-
 	// BlockDevicesStorageID is the storage ID to create/clone the VM
 	// +required
 	BlockDevicesStorageID string `json:"blockDevicesStorageID,omitempty"`
 
-	// PlacementStrategy defines how nodes should be placed across zones
-	// Only used when Zone or Subnet is not specified
-	// +optional
-	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
+	// Template is the name of the template to use for nodes
+	// +required
+	Template string `json:"template"`
 
 	// Tags to apply to the VMs
 	// +optional
@@ -87,6 +90,10 @@ type ProxmoxNodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
 	SecurityGroups []SecurityGroupsTerm `json:"securityGroups,omitempty"`
+
+	// PlacementStrategy defines how nodes should be placed across zones
+	// +optional
+	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
 }
 
 // MetadataOptions contains parameters for specifying the exposure of the
@@ -115,10 +122,6 @@ type SecurityGroupsTerm struct {
 
 // ProxmoxNodeClassStatus defines the observed state of ProxmoxNodeClass
 type ProxmoxNodeClassStatus struct {
-	// SpecHash is a hash of the ProxmoxNodeClass spec
-	// +optional
-	SpecHash uint64 `json:"specHash,omitempty"`
-
 	// LastValidationTime is the last time the nodeclass was validated
 	// +optional
 	LastValidationTime metav1.Time `json:"lastValidationTime,omitempty"`
@@ -178,6 +181,14 @@ func (in *ProxmoxNodeClass) SetConditions(conditions []status.Condition) {
 	}
 
 	in.Status.Conditions = metav1Conditions
+}
+
+func (in *ProxmoxNodeClass) Hash() string {
+	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})))
 }
 
 // ProxmoxNodeClassList contains a list of ProxmoxNodeClass

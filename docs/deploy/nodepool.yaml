@@ -26,6 +26,28 @@ spec:
         - key: "topology.kubernetes.io/zone"
           operator: In
           values: ["rnd-1", "rnd-2"]
+# ---
+# apiVersion: karpenter.sh/v1
+# kind: NodePool
+# metadata:
+#   name: default-2
+# spec:
+#   limits:
+#     cpu: "32"
+#     memory: 128Gi
+#   template:
+#     spec:
+#       nodeClassRef:
+#         group: karpenter.proxmox.sinextra.dev
+#         kind: ProxmoxNodeClass
+#         name: default-not-found
+#       requirements:
+#         - key: "kubernetes.io/arch"
+#           operator: In
+#           values: ["amd64"]
+#         - key: "karpenter.proxmox.sinextra.dev/instance-family"
+#           operator: In
+#           values: ["c1"]
 ---
 apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
 kind: ProxmoxNodeClass
@@ -36,4 +58,5 @@ spec:
   blockDevicesStorageID: zfs
   tags:
     - talos-k8s-proxmox
-    - karperter
+    - karpenter
+    # - test

@@ -18,19 +18,20 @@ package hash
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+
+	"k8s.io/apimachinery/pkg/api/equality"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 // Controller computes a hash of the ProxmoxNodeClass spec and stores it in the status
@@ -40,10 +41,6 @@ type Controller struct {
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client) (*Controller, error) {
-	if kubeClient == nil {
-		return nil, fmt.Errorf("kubeClient cannot be nil")
-	}
-
 	return &Controller{
 		kubeClient: kubeClient,
 	}, nil
@@ -54,27 +51,17 @@ func (c *Controller) Name() string {
 }
 
 // Reconcile executes a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	nc := &v1alpha1.ProxmoxNodeClass{}
-	if err := c.kubeClient.Get(ctx, req.NamespacedName, nc); err != nil {
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
+func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, "nodeclass.hash")
 
-	// Compute hash of the spec
-	hash, err := hashstructure.Hash(nc.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
-		SlicesAsSets:    true,
-		IgnoreZeroValue: true,
-		ZeroNil:         true,
+	nodeClassCopy := nodeClass.DeepCopy()
+	nodeClassCopy.Annotations = lo.Assign(nodeClass.Annotations, map[string]string{
+		v1alpha1.AnnotationProxmoxNodeClassHash:        nodeClass.Hash(),
+		v1alpha1.AnnotationProxmoxNodeClassHashVersion: v1alpha1.ProxmoxNodeClassHashVersion,
 	})
-	if err != nil {
-		return reconcile.Result{}, err
-	}
 
-	// Update status if hash changed
-	if nc.Status.SpecHash != hash {
-		patch := client.MergeFrom(nc.DeepCopy())
-		nc.Status.SpecHash = hash
-		if err := c.kubeClient.Status().Patch(ctx, nc, patch); err != nil {
+	if !equality.Semantic.DeepEqual(nodeClass, nodeClassCopy) {
+		if err := c.kubeClient.Patch(ctx, nodeClassCopy, client.MergeFrom(nodeClass)); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
@@ -87,12 +74,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
 		For(&v1alpha1.ProxmoxNodeClass{}).
-		WithEventFilter(predicate.NewPredicateFuncs(func(object client.Object) bool {
-			return true // Only reconcile on spec changes
-		})).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
-			MaxConcurrentReconciles: 1,
+			MaxConcurrentReconciles: 10,
 		}).
-		Complete(c)
+		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }

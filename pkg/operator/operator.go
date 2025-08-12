@@ -40,7 +40,7 @@ type Operator struct {
 	ProxmoxPool           *pxpool.ProxmoxPool
 	CloudCapacityProvider cloudcapacity.Provider
 	InstanceTypeProvider  instancetype.Provider
-	InstanceProvider      *instance.Provider
+	InstanceProvider      instance.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -68,9 +68,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	cloudCapacityProvider.UpdateNodeCapacity(ctx)
-	cloudCapacityProvider.Sync(ctx)
 
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
+	instanceTypeProvider.UpdateInstanceTypes(ctx)
 
 	instanceProvider, err := instance.NewProvider(ctx, pxPool, cloudCapacityProvider)
 	if err != nil {

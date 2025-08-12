@@ -19,7 +19,8 @@ package proxmox
 import (
 	"context"
 	"fmt"
-	"strings"
+
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
@@ -27,38 +28,67 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
-func (c *CloudProvider) nodeToNodeClaim(ctx context.Context, node *corev1.Node) (*karpv1.NodeClaim, error) {
+func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
+	if err != nil {
+		return nil, err
+	}
+
+	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+
+	// for _, instanceType := range instanceTypes {
+	// 	zones := []string{}
+	// 	for _, req := range instanceType.Offerings {
+	// 		zones = append(zones, req.Zone())
+	// 	}
+	// 	c.log.V(1).Info("Compatible instance types", "name", instanceType.Name, "compatible", instanceType.Offerings.Compatible(reqs).Available(), "zones", zones)
+	// }
+
+	return lo.Filter(instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
+		return len(i.Offerings.Compatible(reqs).Available()) > 0 &&
+			resources.Fits(nodeClaim.Spec.Resources.Requests, i.Allocatable())
+	}), nil
+}
+
+func (c *CloudProvider) resolveInstanceTypeFromNode(ctx context.Context, node *corev1.Node) (*cloudprovider.InstanceType, error) {
+	if typeLabel, ok := node.Labels[corev1.LabelInstanceTypeStable]; ok {
+		instanceType, err := c.instanceTypeProvider.Get(ctx, typeLabel)
+		if err == nil {
+			return instanceType, nil
+		}
+	}
+
+	return nil, fmt.Errorf("instanceType not found for node %s", node.Name)
+}
+
+func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudprovider.InstanceType, node *corev1.Node) (*karpv1.NodeClaim, error) {
 	nodeClaim := &karpv1.NodeClaim{}
 	labels := map[string]string{}
 	annotations := map[string]string{}
 
-	if typeLabel, ok := node.Labels[corev1.LabelInstanceTypeStable]; ok {
-		if instanceType, err := c.instanceTypeProvider.Get(ctx, typeLabel); err == nil {
-			typeName := strings.Split(instanceType.Name, ".")
-
-			labels[corev1.LabelInstanceTypeStable] = instanceType.Name
-			labels[v1alpha1.LabelInstanceFamily] = typeName[0]
-			labels[v1alpha1.LabelInstanceCPUManufacturer] = node.Labels[v1alpha1.LabelInstanceCPUManufacturer]
-			labels[v1alpha1.LabelNodeViewer] = fmt.Sprintf("%f", instanceType.Offerings.Cheapest().Price)
-			labels[karpv1.CapacityTypeLabelKey] = node.Labels[karpv1.CapacityTypeLabelKey]
-
-			nodeClaim.Status.Capacity = instanceType.Capacity
-			nodeClaim.Status.Allocatable = instanceType.Allocatable()
-		} else {
-			labels[corev1.LabelInstanceTypeStable] = typeLabel
-			labels[v1alpha1.LabelInstanceFamily] = "e1"
-			labels[v1alpha1.LabelInstanceCPUManufacturer] = "kvm64"
-			labels[karpv1.CapacityTypeLabelKey] = karpv1.CapacityTypeOnDemand
-
-			nodeClaim.Status.Capacity = node.Status.Capacity
-			nodeClaim.Status.Allocatable = node.Status.Allocatable
+	if instanceType != nil {
+		for key, req := range instanceType.Requirements {
+			if req.Len() == 1 {
+				labels[key] = req.Values()[0]
+			}
 		}
 
-		labels[corev1.LabelArchStable] = node.Status.NodeInfo.Architecture
-		labels[corev1.LabelOSStable] = node.Status.NodeInfo.OperatingSystem
+		nodeClaim.Status.Capacity = instanceType.Capacity
+		nodeClaim.Status.Allocatable = instanceType.Allocatable()
+	} else {
+		labels[karpv1.CapacityTypeLabelKey] = karpv1.CapacityTypeOnDemand
+
+		nodeClaim.Status.Capacity = node.Status.Capacity
+		nodeClaim.Status.Allocatable = node.Status.Allocatable
 	}
+
+	labels[corev1.LabelArchStable] = node.Status.NodeInfo.Architecture
+	labels[corev1.LabelOSStable] = node.Status.NodeInfo.OperatingSystem
 
 	labels[corev1.LabelTopologyRegion] = node.Labels[corev1.LabelTopologyRegion]
 	labels[corev1.LabelTopologyZone] = node.Labels[corev1.LabelTopologyZone]

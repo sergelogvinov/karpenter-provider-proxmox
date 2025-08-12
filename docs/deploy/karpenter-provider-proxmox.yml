@@ -63,9 +63,8 @@ spec:
                     type: string
                 type: object
               placementStrategy:
-                description: |-
-                  PlacementStrategy defines how nodes should be placed across zones
-                  Only used when Zone or Subnet is not specified
+                description: PlacementStrategy defines how nodes should be placed
+                  across zones
                 properties:
                   zoneBalance:
                     default: Balanced
@@ -111,11 +110,6 @@ spec:
                 type: array
               template:
                 description: Template is the name of the template to use for nodes
-                type: string
-              zone:
-                description: |-
-                  Zone is the availability zone where nodes will be created
-                  If not specified, zones will be automatically selected based on placement strategy
                 type: string
             required:
             - blockDevicesStorageID
@@ -1087,7 +1081,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1100,7 +1094,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1151,7 +1145,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1172,7 +1166,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1192,7 +1186,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1213,7 +1207,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1259,7 +1253,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.2
+    helm.sh/chart: karpenter-provider-proxmox-0.0.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"

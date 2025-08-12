@@ -32,6 +32,10 @@ const (
 	// github.com/awslabs/eks-node-viewer label so that it shows up.
 	LabelNodeViewer = "eks-node-viewer/instance-price"
 
+	// Annotations that are propagated to the node
+	AnnotationProxmoxNodeClassHash        = apis.Group + "/proxmoxnodeclass-hash"
+	AnnotationProxmoxNodeClassHashVersion = apis.Group + "/proxmoxnodeclass-hash-version"
+
 	// Internal labels that are propagated to the node
 	ProxmoxLabelKey   = apis.Group + "/node"
 	ProxmoxLabelValue = "owned"
