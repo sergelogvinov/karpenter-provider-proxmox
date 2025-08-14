@@ -28,7 +28,6 @@ import (
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
@@ -37,7 +36,6 @@ import (
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -212,7 +210,7 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
 	}
 
-	vm, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
+	vmr, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
 	if err != nil {
 		if err == goproxmox.ErrVirtualMachineNotFound {
 			return cloudprovider.NewNodeClaimNotFoundError(err)
@@ -221,22 +219,14 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		return fmt.Errorf("failed to get vm: %v", err)
 	}
 
-	zone := vm.Node
+	zone := vmr.Node
 	if zone == "" {
 		zone = nodeClaim.Labels[corev1.LabelTopologyZone]
 	}
 
 	log.V(1).Info("Delete instance", "region", region, "zone", zone, "vmID", vmid)
 
-	if err = p.cluster.DeleteVMByIDInRegion(ctx, region, vm); err != nil {
-		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
-	}
-
-	if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, vmid, nodeClaim.Status.Capacity); err != nil {
-		log.Error(err, "failed to release capacity after VM deletion", "vmID", vmid)
-	}
-
-	return nil
+	return p.instanceDelete(ctx, nodeClaim, region, zone, vmr)
 }
 
 func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
@@ -390,158 +380,4 @@ func (p *DefaultProvider) DetachCloudInit(ctx context.Context, nodeClaim *karpv1
 	}
 
 	return nil
-}
-
-func (p *DefaultProvider) instanceCreate(ctx context.Context,
-	nodeClaim *karpv1.NodeClaim,
-	nodeClass *v1alpha1.ProxmoxNodeClass,
-	instanceTemplate *instancetemplate.InstanceTemplateInfo,
-	instanceType *cloudprovider.InstanceType,
-	region string,
-	zone string,
-) (*corev1.Node, error) {
-	log := log.FromContext(ctx).WithName("instance.instanceCreate()").WithValues("region", region, "zone", zone, "instanceType", instanceType.Name)
-
-	px, err := p.cluster.GetProxmoxCluster(region)
-	if err != nil {
-		return nil, pxpool.ErrRegionNotFound
-	}
-
-	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next id: %v", err)
-	}
-
-	vmTemplateID := instanceTemplate.TemplateID
-	if vmTemplateID == 0 {
-		return nil, fmt.Errorf("could not find vm template")
-	}
-
-	storage := nodeClass.Spec.BootDevice.Storage
-	if storage == "" {
-		storage = instanceTemplate.TemplateStorageID
-	}
-
-	if storage == "" {
-		return nil, fmt.Errorf("storage device must be specified in node class or instance template")
-	}
-
-	size := nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga)
-	sizeInstType := instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga)
-
-	// We will use the size from the instance type if it is larger than the one specified in the node class
-	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
-	if sizeInstType > 0 && size < sizeInstType {
-		size = sizeInstType
-	}
-
-	capacityType := getCapacityType(nodeClaim, instanceType, region, zone)
-
-	if err := p.cloudCapacityProvider.AllocateCapacityInZone(ctx, region, zone, newID, instanceType.Capacity); err != nil {
-		return nil, fmt.Errorf("failed to reserve capacity: %v", err)
-	}
-
-	vmOptions := goproxmox.VMCloneRequest{
-		NewID:       newID,
-		Node:        zone,
-		Name:        nodeClaim.Name,
-		Description: fmt.Sprintf("Karpenter, class=%s, capacity=%s", nodeClass.Name, capacityType),
-		Full:        1,
-		Pool:        nodeClass.Spec.ResourcePool,
-		Storage:     storage,
-
-		CPU:          int(instanceType.Capacity.Cpu().Value()),
-		Memory:       uint32(instanceType.Capacity.Memory().Value() / 1024 / 1024),
-		DiskSize:     fmt.Sprintf("%dG", size),
-		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
-		InstanceType: instanceType.Name,
-	}
-
-	defer func() {
-		if err != nil {
-			if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, newID, instanceType.Capacity); err != nil {
-				log.Error(err, "failed to release capacity", "vmID", newID)
-			}
-
-			if newID == 0 {
-				return
-			}
-
-			if defErr := px.DeleteVMByID(ctx, zone, newID); defErr != nil {
-				log.Error(defErr, "failed to delete vm", "vmID", newID)
-			}
-		}
-	}()
-
-	newID, err = px.CloneVM(ctx, int(vmTemplateID), vmOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to clone vm template %d: %v", vmTemplateID, err)
-	}
-
-	err = p.instanceNetworkSetup(ctx, region, zone, newID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to configure networking for vm %d: %v", newID, err)
-	}
-
-	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
-	for i, sg := range nodeClass.Spec.SecurityGroups {
-		rules[i] = &proxmox.FirewallRule{
-			Enable: 1,
-			Type:   "group",
-			Action: sg.Name,
-			Iface:  sg.Interface,
-		}
-	}
-
-	if len(rules) > 0 {
-		err = px.CreateVMFirewallRules(ctx, newID, zone, rules)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create firewall rules for vm %d: %v", newID, err)
-		}
-	}
-
-	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
-		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, newID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d: %v", newID, err)
-		}
-	}
-
-	log.V(1).Info("Starting VM", "vmID", newID)
-
-	vm, err := px.StartVMByID(ctx, zone, newID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to start vm %d: %v", newID, err)
-	}
-
-	cpu := goproxmox.VMCPU{}
-	cpu.UnmarshalString(vm.VirtualMachineConfig.CPU)
-
-	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: nodeClaim.Name,
-			Labels: map[string]string{
-				corev1.LabelTopologyRegion:     region,
-				corev1.LabelTopologyZone:       zone,
-				corev1.LabelInstanceTypeStable: instanceType.Name,
-				karpv1.CapacityTypeLabelKey:    capacityType,
-				v1alpha1.LabelInstanceFamily:   strings.Split(instanceType.Name, ".")[0],
-				v1alpha1.LabelInstanceCPUType:  cpu.Type,
-			},
-			Annotations:       map[string]string{},
-			CreationTimestamp: metav1.Now(),
-		},
-		Spec: corev1.NodeSpec{
-			ProviderID: provider.GetProviderID(region, newID),
-			Taints:     []corev1.Taint{karpv1.UnregisteredNoExecuteTaint},
-		},
-		Status: corev1.NodeStatus{
-			NodeInfo: corev1.NodeSystemInfo{
-				Architecture:    karpv1.ArchitectureAmd64,
-				OperatingSystem: string(corev1.Linux),
-			},
-		},
-	}
-
-	return node, nil
 }

@@ -127,8 +127,11 @@ linters:
       local-variables-are-used: false
   exclusions:
     paths:
+      # Copied from kubernetes repo
       - pkg/providers/cloudcapacity/cpumanager/topology
       - pkg/providers/cloudcapacity/cpumanager/policy_test.go
+      - pkg/providers/cloudcapacity/cpumanager/cpu_assignment_test.go
+      - pkg/providers/cloudcapacity/cpumanager/cpu_assignment.go
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

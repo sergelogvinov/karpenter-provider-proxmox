@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	proxmox "github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
@@ -35,9 +34,9 @@ import (
 )
 
 type ResourceManager interface {
-	Allocate(*proxmox.VirtualMachine) error
-	AllocateOrUpdate(*proxmox.VirtualMachine) error
-	Release(*proxmox.VirtualMachine) error
+	Allocate(*VMResourceOptions) error
+	AllocateOrUpdate(*VMResourceOptions) error
+	Release(*VMResourceOptions) error
 
 	AvailableCPUs() int
 	AvailableMemory() uint64
@@ -84,7 +83,7 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		if setting != nil {
 			manager.nodeSettings = *setting
 
-			log.V(1).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
+			log.V(4).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
 		}
 	}
 
@@ -101,6 +100,11 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 	cpus := cpuset.New(manager.nodeSettings.ReservedCPUs...)
 
 	switch opts.NodePolicy { //nolint:gocritic
+	case string(cpumanager.PolicyStatic):
+		manager.nodeCPUPolicy, err = cpumanager.NewStaticPolicy(log, nodeCPUTopology, cpus)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create static policy for node %s: %w", manager.zone, err)
+		}
 	default:
 		manager.nodeCPUPolicy, err = cpumanager.NewSimplePolicy(nodeCPUTopology, cpus)
 		if err != nil {
@@ -113,9 +117,9 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		return nil, fmt.Errorf("failed to create memory policy for node %s: %w", manager.zone, err)
 	}
 
-	log.V(1).Info("Created resource manager", "node", manager.zone,
-		"cpuStatus", manager.nodeCPUPolicy.Status(),
-		"memoryStatus", manager.nodeMemoryPolicy.Status(),
+	log.V(1).Info("Created resource manager",
+		"capacityCPU", manager.nodeCPUPolicy.Status(),
+		"capacityMem", manager.nodeMemoryPolicy.Status(),
 		"settings", manager.nodeSettings,
 		"policy", opts.NodePolicy,
 	)
@@ -124,75 +128,69 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 }
 
 // Allocate implements ResourceManager.
-func (r *resourceManager) Allocate(vm *proxmox.VirtualMachine) error {
-	if vm.CPUs <= 0 || vm.MaxMem == 0 || vm.VMID == 0 {
-		return fmt.Errorf("cannot allocate resources")
+func (r *resourceManager) Allocate(op *VMResourceOptions) (err error) {
+	if op == nil || op.CPUs <= 0 || op.MemoryMBytes == 0 {
+		return fmt.Errorf("cannot allocate resources, invalid options")
 	}
 
-	cpus, err := r.nodeCPUPolicy.Allocate(vm.CPUs)
+	op.CPUSet, err = r.nodeCPUPolicy.Allocate(op.CPUs)
 	if err != nil {
 		return err
 	}
 
-	err = r.nodeMemoryPolicy.Allocate(vm.MaxMem)
+	err = r.nodeMemoryPolicy.Allocate(op.MemoryMBytes * 1024 * 1024)
 	if err != nil {
-		r.nodeCPUPolicy.Release(vm.CPUs, cpus)
-
+		r.nodeCPUPolicy.Release(op.CPUs, op.CPUSet)
 		return err
 	}
 
-	r.log.V(1).Info("Allocated resources", "vmid", vm.VMID, "status", r.Status(), "cpus", r.nodeCPUPolicy.Status())
+	r.log.V(1).Info("Allocated resources", "id", op.ID,
+		"availableCapacity", r.Status(),
+		"CPUs", op.CPUs,
+		"CPUSet", op.CPUSet.String(),
+		"memoryMB", op.MemoryMBytes)
 
 	return nil
 }
 
 // AllocateOrUpdate implements ResourceManager.
-func (r *resourceManager) AllocateOrUpdate(vm *proxmox.VirtualMachine) (err error) {
-	if vm.CPUs <= 0 || vm.MaxMem == 0 || vm.VMID == 0 {
-		return fmt.Errorf("cannot allocate resources")
+func (r *resourceManager) AllocateOrUpdate(op *VMResourceOptions) error {
+	if op == nil || op.CPUs <= 0 || op.MemoryMBytes == 0 || op.ID == 0 {
+		return fmt.Errorf("cannot allocate resources, invalid options")
 	}
 
-	cpus := cpuset.New()
-
-	if vm.VirtualMachineConfig != nil && vm.VirtualMachineConfig.Affinity != "" {
-		cpus, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
-		if err != nil {
-			return fmt.Errorf("failed to parse existing CPU affinity for VM %d: %w", vm.VMID, err)
-		}
-	}
-
-	cpus, err = r.nodeCPUPolicy.AllocateOrUpdate(vm.CPUs, cpus)
+	cpus, err := r.nodeCPUPolicy.AllocateOrUpdate(op.CPUs, op.CPUSet)
 	if err != nil {
 		return err
 	}
 
-	err = r.nodeMemoryPolicy.AllocateOrUpdate(vm.MaxMem)
+	err = r.nodeMemoryPolicy.AllocateOrUpdate(op.MemoryMBytes * 1024 * 1024)
 	if err != nil {
-		r.nodeCPUPolicy.Release(vm.CPUs, cpus)
+		r.nodeCPUPolicy.Release(op.CPUs, cpus)
 
 		return err
 	}
 
-	r.log.V(1).Info("Allocated/Updated resources", "vmid", vm.VMID, "status", r.Status(), "cpus", r.nodeCPUPolicy.Status())
+	r.log.V(1).Info("Allocated/Updated resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", cpus)
 
 	return nil
 }
 
 // Release implements ResourceManager.
-func (r *resourceManager) Release(vm *proxmox.VirtualMachine) error {
-	if vm.CPUs == 0 || vm.MaxMem == 0 || vm.VMID == 0 {
+func (r *resourceManager) Release(op *VMResourceOptions) (err error) {
+	if op == nil || op.CPUs == 0 || op.MemoryMBytes == 0 || op.ID == 0 {
 		return nil
 	}
 
-	if err := r.nodeMemoryPolicy.Release(vm.MaxMem); err != nil {
+	if err := r.nodeMemoryPolicy.Release(op.MemoryMBytes * 1024 * 1024); err != nil {
 		return err
 	}
 
-	if err := r.nodeCPUPolicy.Release(vm.CPUs, cpuset.New()); err != nil {
+	if err := r.nodeCPUPolicy.Release(op.CPUs, op.CPUSet); err != nil {
 		return err
 	}
 
-	r.log.V(1).Info("Released resources", "vmid", vm.VMID, "status", r.Status(), "cpus", r.nodeCPUPolicy.Status())
+	r.log.V(1).Info("Released resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", op.CPUSet.String())
 
 	return nil
 }
@@ -209,5 +207,5 @@ func (r *resourceManager) AvailableMemory() uint64 {
 
 // Status implements ResourceManager.
 func (r *resourceManager) Status() string {
-	return fmt.Sprintf("CPUs: %d, Mem: %dM", r.AvailableCPUs(), r.AvailableMemory()/1024/1024)
+	return fmt.Sprintf("CPU: %s, Mem: %s", r.nodeCPUPolicy.Status(), r.nodeMemoryPolicy.Status())
 }

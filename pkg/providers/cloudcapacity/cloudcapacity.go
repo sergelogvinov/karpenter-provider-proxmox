@@ -27,6 +27,7 @@ import (
 	"github.com/go-logr/logr"
 	proxmox "github.com/luthermonson/go-proxmox"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,9 +37,9 @@ import (
 
 type Provider interface {
 	// AllocateCapacityInZone allocates the specified capacity in the given region and zone.
-	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error
+	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resourcemanager.VMResourceOptions) error
 	// ReleaseCapacityInZone releases the specified capacity in the given region and zone.
-	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error
+	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resourcemanager.VMResourceOptions) error
 
 	// SyncNodeCapacity updates the node CPU and RAM capacity information for all regions.
 	SyncNodeCapacity(ctx context.Context) error
@@ -88,22 +89,20 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 }
 
 //nolint:dupl
-func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error {
+func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resourcemanager.VMResourceOptions) error {
+	if op == nil {
+		return fmt.Errorf("cannot allocate capacity: VMResourceOptions must be provided")
+	}
+
 	log := log.FromContext(ctx).WithName("AllocateCapacityInZone()").WithValues("region", region, "zone", zone)
-	log.V(1).Info("Allocating capacity", "cpu", capacity.Cpu().String(), "memory", capacity.Memory().String(), "storage", capacity.StorageEphemeral().String())
+	log.V(1).Info("Allocating capacity", "cpu", op.CPUs, "memory", op.MemoryMBytes, "storage", op.DiskGBytes)
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
-		vm := &proxmox.VirtualMachine{
-			VMID:   proxmox.StringOrUint64(id),
-			CPUs:   int(capacity.Cpu().Value()),
-			MaxMem: uint64(capacity.Memory().Value()),
-		}
-
-		err := info.ResourceManager.Allocate(vm)
+		err := info.ResourceManager.Allocate(op)
 		if err != nil {
 			return fmt.Errorf("Failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
 		}
@@ -117,22 +116,20 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 }
 
 //nolint:dupl
-func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error {
+func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resourcemanager.VMResourceOptions) error {
+	if op == nil {
+		return fmt.Errorf("cannot release capacity: VMResourceOptions must be provided")
+	}
+
 	log := log.FromContext(ctx).WithName("ReleaseCapacityInZone()").WithValues("region", region, "zone", zone)
-	log.V(1).Info("Releasing capacity", "cpu", capacity.Cpu().String(), "memory", capacity.Memory().String(), "storage", capacity.StorageEphemeral().String())
+	log.V(1).Info("Releasing capacity", "cpu", op.CPUs, "memory", op.MemoryMBytes, "storage", op.DiskGBytes)
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
-		vm := &proxmox.VirtualMachine{
-			VMID:   proxmox.StringOrUint64(id),
-			CPUs:   int(capacity.Cpu().Value()),
-			MaxMem: uint64(capacity.Memory().Value()),
-		}
-
-		err := info.ResourceManager.Release(vm)
+		err := info.ResourceManager.Release(op)
 		if err != nil {
 			return fmt.Errorf("Failed to release CPU capacity in zone %s/%s: %w", region, zone, err)
 		}
