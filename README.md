@@ -39,7 +39,6 @@ Also, having free resources can provide more advantages than we might initially 
 
 - Kubernetes 1.30+
 - Proxmox VE 8+
-- Proxmox CCM plugin
 
 ## Installation
 
