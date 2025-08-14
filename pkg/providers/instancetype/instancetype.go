@@ -244,7 +244,7 @@ func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudpr
 	}
 }
 
-func computeRequirements(instanceTypeName string, offerings []*cloudprovider.Offering, regions []string) scheduling.Requirements {
+func computeRequirements(instanceTypeName string, _ []*cloudprovider.Offering, regions []string) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, instanceTypeName),

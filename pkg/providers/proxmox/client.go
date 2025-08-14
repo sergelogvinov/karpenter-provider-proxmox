@@ -224,6 +224,49 @@ func (c *APIClient) CloneVM(ctx context.Context, templateID int, options VMClone
 	return newid, err
 }
 
+func (c *APIClient) CreateVMFirewallRules(ctx context.Context, vmID int, nodeName string, rules []*proxmox.FirewallRule) error {
+	node, err := c.Node(ctx, nodeName)
+	if err != nil {
+		return fmt.Errorf("unable to find node with name %s: %w", nodeName, err)
+	}
+
+	vm, err := node.VirtualMachine(ctx, vmID)
+	if err != nil {
+		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
+	}
+
+	if len(rules) > 0 {
+		vmOptions, err := vm.FirewallOptionGet(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to get firewall options for vm %d: %v", vmID, err)
+		}
+
+		if vmOptions == nil {
+			vmOptions = &proxmox.FirewallVirtualMachineOption{
+				Enable:    false,
+				Dhcp:      true,
+				Ipfilter:  false,
+				PolicyIn:  "DROP",
+				PolicyOut: "ACCEPT",
+			}
+		}
+
+		vmOptions.Enable = true
+		vmOptions.PolicyIn = "DROP"
+		if err := vm.FirewallOptionSet(ctx, vmOptions); err != nil {
+			return fmt.Errorf("failed to set firewall options for vm %d: %v", vmID, err)
+		}
+
+		for _, rule := range rules {
+			if err := vm.FirewallRulesCreate(ctx, rule); err != nil {
+				return fmt.Errorf("failed to set firewall rule for vm %d: %v", vmID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
 func applyInstanceOptimization(vm *proxmox.VirtualMachine, options VMCloneRequest, vmOptions []proxmox.VirtualMachineOption) []proxmox.VirtualMachineOption {
 	if vm.VirtualMachineConfig != nil {
 		cpu := options.CPU

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cloudcapacity
+package node
 
 import (
 	"context"
@@ -33,6 +33,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
+const (
+	controllerName = "providers.cloudcapacity.node"
+
+	scanPeriod = 15 * time.Minute
+)
+
 type Controller struct {
 	cloudCapacityProvider cloudcapacity.Provider
 }
@@ -44,10 +50,10 @@ func NewController(cloudCapacityProvider cloudcapacity.Provider) (*Controller, e
 }
 
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "providers.cloudcapacity")
+	ctx = injection.WithControllerName(ctx, controllerName)
 
 	work := []func(ctx context.Context) error{
-		c.cloudCapacityProvider.UpdateNodeLoad,
+		c.cloudCapacityProvider.UpdateNodeCapacity,
 	}
 
 	errs := make([]error, len(work))
@@ -61,12 +67,12 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 		return reconcile.Result{}, fmt.Errorf("updating cloudcapacity, %w", err)
 	}
 
-	return reconcile.Result{RequeueAfter: 1 * time.Minute}, nil
+	return reconcile.Result{RequeueAfter: scanPeriod}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named("cloudcapacity").
+		Named(controllerName).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }

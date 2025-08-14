@@ -126,8 +126,12 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 // validateNodeClass performs validation of the ProxmoxNodeClass configuration
 func (c *Controller) validateNodeClass(_ context.Context, nc *v1alpha1.ProxmoxNodeClass) error {
-	if nc.Spec.Template == "" {
-		return fmt.Errorf("template is required")
+	if nc.Spec.InstanceTemplate.Type == "" || nc.Spec.InstanceTemplate.Name == "" {
+		return fmt.Errorf("instanceTemplate.Type and instanceTemplate.Name are required")
+	}
+
+	if nc.Spec.InstanceTemplate.Type != "template" {
+		return fmt.Errorf("instanceTemplate.Type must be 'template', got '%s'", nc.Spec.InstanceTemplate.Type)
 	}
 
 	return nil

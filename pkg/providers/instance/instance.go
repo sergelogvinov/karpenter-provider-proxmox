@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luthermonson/go-proxmox"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -101,6 +103,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 					continue
 				}
 
+				p.cloudCapacityProvider.UpdateNodeCapacityInZone(ctx, region, zone)
+
 				return node, nil
 			}
 		}
@@ -156,7 +160,7 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 		v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
 	}
 
-	log.V(1).Info("Get instance", "node", node.Name, "providerID", providerID, "vm", vm)
+	log.V(1).Info("Get instance", "node", node.Name, "providerID", providerID, "vmID", vm.VMID)
 
 	return node, nil
 }
@@ -164,15 +168,13 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	log := log.FromContext(ctx).WithName("instance.Delete()")
 
-	// FIXME: Get region and zone from nodeClaim
-	region := nodeClaim.Labels[corev1.LabelTopologyRegion]
-	if region == "" {
-		region = "region-1"
+	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
 	}
 
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-	if zone == "" {
-		zone = "rnd-1"
+	if region == "" {
+		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
 	}
 
 	px, err := p.cluster.GetProxmoxCluster(region)
@@ -180,12 +182,7 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
-	vmID, err := provider.GetVMID(nodeClaim.Status.ProviderID)
-	if err != nil {
-		return fmt.Errorf("failed to get vm id from providerID: %v", err)
-	}
-
-	vm, err := px.FindVMByID(ctx, uint64(vmID))
+	vm, err := px.FindVMByID(ctx, uint64(vmid))
 	if err != nil {
 		if err == goproxmox.ErrVirtualMachineNotFound {
 			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
@@ -194,10 +191,15 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		return fmt.Errorf("failed to get vm: %v", err)
 	}
 
-	log.V(1).Info("Delete instance", "nodeClaim", nodeClaim.Name, "vm", vm.VMID, "region", region, "zone", zone)
+	zone := vm.Node
+	if zone == "" {
+		zone = nodeClaim.Labels[corev1.LabelTopologyZone]
+	}
 
-	if err = px.DeleteVMByID(ctx, zone, vmID); err != nil {
-		return fmt.Errorf("cannot delete vm with id %d: %w", vmID, err)
+	log.V(1).Info("Delete instance", "nodeClaim", nodeClaim.Name, "vmID", vmid, "region", region, "zone", zone)
+
+	if err = px.DeleteVMByID(ctx, zone, vmid); err != nil {
+		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
 	}
 
 	return nil
@@ -222,7 +224,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
-	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.Template)
+	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.InstanceTemplate.Name)
 	if err != nil {
 		return nil, fmt.Errorf("could not find vm template: %w", err)
 	}
@@ -259,6 +261,20 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
 	}
 
+	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
+	for i, sg := range nodeClass.Spec.SecurityGroups {
+		rules[i] = &proxmox.FirewallRule{
+			Enable: 1,
+			Type:   "group",
+			Action: sg.Name,
+			Iface:  sg.Interface,
+		}
+	}
+
+	if err = px.CreateVMFirewallRules(ctx, newID, zone, rules); err != nil {
+		return nil, fmt.Errorf("failed to create firewall rules for vm %d in region %s: %v", newID, region, err)
+	}
+
 	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)
 
 	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
@@ -269,12 +285,11 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodeClaim.Name,
 			Labels: map[string]string{
-				corev1.LabelTopologyRegion:            region,
-				corev1.LabelTopologyZone:              zone,
-				corev1.LabelInstanceTypeStable:        instanceType.Name,
-				karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
-				v1alpha1.LabelInstanceFamily:          strings.Split(instanceType.Name, ".")[0],
-				v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
+				corev1.LabelTopologyRegion:     region,
+				corev1.LabelTopologyZone:       zone,
+				corev1.LabelInstanceTypeStable: instanceType.Name,
+				karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
+				v1alpha1.LabelInstanceFamily:   strings.Split(instanceType.Name, ".")[0],
 			},
 			Annotations:       map[string]string{},
 			CreationTimestamp: metav1.Now(),

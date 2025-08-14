@@ -30,9 +30,6 @@ const (
 	// Placement strategy
 	PlacementStrategyAvailabilityFirst = "AvailabilityFirst"
 	PlacementStrategyBalanced          = "Balanced"
-
-	// Version of the hash for ProxmoxNodeClass
-	ProxmoxNodeClassHashVersion = "v1"
 )
 
 // ProxmoxNodeClass is the Schema for the ProxmoxNodeClass API
@@ -51,31 +48,23 @@ type ProxmoxNodeClass struct {
 	Status ProxmoxNodeClassStatus `json:"status,omitempty"`
 }
 
-// PlacementStrategy defines how nodes should be placed across zones
-type PlacementStrategy struct {
-	// ZoneBalance determines how nodes are distributed across zones
-	// Valid values are:
-	// - "Balanced" (default) - Nodes are evenly distributed across zones
-	// - "AvailabilityFirst" - Prioritize zone availability over even distribution
-	// +optional
-	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
-	// +kubebuilder:default=Balanced
-	ZoneBalance string `json:"zoneBalance,omitempty"`
-}
-
 // ProxmoxNodeClassSpec defines the desired state of ProxmoxNodeClass
 type ProxmoxNodeClassSpec struct {
 	// Region is the Proxmox Cloud region where nodes will be created
 	// +optional
 	Region string `json:"region"`
 
+	// PlacementStrategy defines how nodes should be placed across zones
+	// +optional
+	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
+
 	// BlockDevicesStorageID is the storage ID to create/clone the VM
 	// +required
 	BlockDevicesStorageID string `json:"blockDevicesStorageID,omitempty"`
 
-	// Template is the name of the template to use for nodes
+	// InstanceTemplate is the template of the VM to create
 	// +required
-	Template string `json:"template"`
+	InstanceTemplate *InstanceTemplate `json:"instanceTemplate"`
 
 	// Tags to apply to the VMs
 	// +optional
@@ -90,21 +79,42 @@ type ProxmoxNodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
 	SecurityGroups []SecurityGroupsTerm `json:"securityGroups,omitempty"`
+}
 
-	// PlacementStrategy defines how nodes should be placed across zones
+// PlacementStrategy defines how nodes should be placed across zones
+type PlacementStrategy struct {
+	// ZoneBalance determines how nodes are distributed across zones
+	// Valid values are:
+	// - "Balanced" (default) - Nodes are evenly distributed across zones
+	// - "AvailabilityFirst" - Prioritize zone availability over even distribution
 	// +optional
-	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
+	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
+	// +kubebuilder:default=Balanced
+	ZoneBalance string `json:"zoneBalance,omitempty"`
+}
+
+type InstanceTemplate struct {
+	// Type is the type of the instance template
+	// +kubebuilder:validation:Enum={template}
+	// +required
+	Type string `json:"type"`
+
+	// Name is the name of the instance template
+	// +required
+	Name string `json:"name"`
 }
 
 // MetadataOptions contains parameters for specifying the exposure of the
 // Instance Metadata Service to provisioned VMs.
 type MetadataOptions struct {
-	// If specified, the instance metadata will be exposed to the VMs by CDRom, HTTP
-	// or template. Template is the default. It means that the metadata will be stored in VM template.
-	// +kubebuilder:default=template
-	// +kubebuilder:validation:Enum:={template,cdrom,http}
+	// If specified, the instance metadata will be exposed to the VMs by CDRom
+	// or virtual machine template.
+	// +kubebuilder:default=none
+	// +kubebuilder:validation:Enum:={none,cdrom}
 	// +optional
 	Type *string `json:"type,omitempty"`
+	// Name is the name of the configMap or Secrets that contains the metadata.
+	Name *string `json:"name,omitempty"`
 }
 
 // SecurityGroupsTerm defines a term to apply security groups
