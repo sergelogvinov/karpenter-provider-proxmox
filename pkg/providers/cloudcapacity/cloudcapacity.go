@@ -27,10 +27,13 @@ import (
 	"github.com/go-logr/logr"
 	proxmox "github.com/luthermonson/go-proxmox"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
+	topology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/cpuset"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -47,6 +50,9 @@ type Provider interface {
 	UpdateNodeStorageCapacity(ctx context.Context) error
 
 	// Regions returns a list of regions available in the pool.
+	// ReserveResources(ctx context.Context, region, zone string, req corev1.ResourceList) (NodeCapacity, error)
+	// ReleaseResources(ctx context.Context, region, zone string, req corev1.ResourceList) error
+
 	Regions() []string
 	// Zones returns a list of zones available in the specified region.
 	Zones(region string) []string
@@ -79,6 +85,9 @@ type NodeCapacityInfo struct {
 	Region string
 	// CPUInfo is the CPU information of the node.
 	CPUInfo proxmox.CPUInfo
+	// CPUTopology is the CPU topology of the node.
+	CPUTopology *topology.CPUTopology
+	CPUPolicy   cpumanager.Policy
 	// CPULoad is the CPU load of the node in percentage.
 	CPULoad int
 	// CapacityMaxCPU is the maximum number of CPUs available on the node.
@@ -179,10 +188,23 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 			}
 
 			nodes = append(nodes, item.Node)
+
+			nodeCPUTopology, err := topology.Discover(&node.CPUInfo)
+			if err != nil {
+				return fmt.Errorf("Failed to discover CPU topology for node %s in region %s: %w", item.Node, region, err)
+			}
+
+			policy, err := cpumanager.NewStaticPolicy(nodeCPUTopology, 0, cpuset.New())
+			if err != nil {
+				return fmt.Errorf("Failed to create CPU policy for node %s in region %s: %w", item.Node, region, err)
+			}
+
 			capacityInfo[key] = NodeCapacityInfo{
 				Name:           item.Node,
 				Region:         region,
 				CPUInfo:        node.CPUInfo,
+				CPUTopology:    nodeCPUTopology,
+				CPUPolicy:      policy,
 				CPULoad:        int(node.CPU * 100),
 				CapacityMaxCPU: uint64(item.MaxCPU),
 				CapacityMaxMem: item.MaxMem,

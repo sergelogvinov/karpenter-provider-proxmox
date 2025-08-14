@@ -1,4 +1,4 @@
-# syntax = docker/dockerfile:1.16
+# syntax = docker/dockerfile:1.18
 ########################################
 
 FROM golang:1.25-bookworm AS develop
@@ -9,7 +9,7 @@ RUN go mod download
 
 ########################################
 
-FROM --platform=${BUILDPLATFORM} golang:1.25.0-alpine3.22 AS builder
+FROM --platform=${BUILDPLATFORM} golang:1.25.1-alpine3.22 AS builder
 RUN apk update && apk add --no-cache make
 ENV GO111MODULE=on
 WORKDIR /src
