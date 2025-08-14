@@ -164,8 +164,8 @@ github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWN
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/samber/lo v1.52.0 h1:Rvi+3BFHES3A8meP33VPAxiBZX/Aws5RxrschYGjomw=
 github.com/samber/lo v1.52.0/go.mod h1:4+MXEGsJzbKGaUEQFKBq2xtfuznW9oz/WrgyzMzRoM0=
-github.com/sergelogvinov/go-proxmox v0.1.1-0.20260108083905-63ad3d61b87a h1:Y6nwZp1C/SaTp9WGySkUum0jVvPaDKEC6PA96JMLfYg=
-github.com/sergelogvinov/go-proxmox v0.1.1-0.20260108083905-63ad3d61b87a/go.mod h1:bsdIovDdJHrvvLdXs4/35SyYer/Sy9raOta0niaP/t4=
+github.com/sergelogvinov/go-proxmox v0.1.1-0.20260117042152-24982c417a21 h1:LARQsrzp49gPUhZ4eFIf7Riy8eWtltyV5Sdmxj2VG1s=
+github.com/sergelogvinov/go-proxmox v0.1.1-0.20260117042152-24982c417a21/go.mod h1:bsdIovDdJHrvvLdXs4/35SyYer/Sy9raOta0niaP/t4=
 github.com/sirupsen/logrus v1.9.4-0.20230606125235-dd1b4c2e81af h1:Sp5TG9f7K39yfB+If0vjp97vuT74F72r8hfRpP8jLU0=
 github.com/sirupsen/logrus v1.9.4-0.20230606125235-dd1b4c2e81af/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
@@ -281,8 +281,8 @@ sigs.k8s.io/controller-runtime v0.22.4 h1:GEjV7KV3TY8e+tJ2LCTxUTanW4z/FmNB7l327U
 sigs.k8s.io/controller-runtime v0.22.4/go.mod h1:+QX1XUpTXN4mLoblf4tqr5CQcyHPAki2HLXqQMY6vh8=
 sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 h1:IpInykpT6ceI+QxKBbEflcR5EXP7sU1kvOlxwZh5txg=
 sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730/go.mod h1:mdzfpAEoE6DHQEN0uh9ZbOCuHbLK5wOm7dK4ctXE9Tg=
-sigs.k8s.io/karpenter v1.8.0 h1:AmTHUPtnuL8IX9mbcD3NOohyk62idrBCBtM+8Wn6Jvk=
-sigs.k8s.io/karpenter v1.8.0/go.mod h1:nDDVB5873dVVuyTam3oJrllSv0sAgp6as6/5HRTcV4o=
+sigs.k8s.io/karpenter v1.8.2 h1:HvgnZuZZarg7gdEXIecx6lV/QHNCQj6mHg0mI65ztRU=
+sigs.k8s.io/karpenter v1.8.2/go.mod h1:SlMh0Ixoi1uj+cQ9meuWwk/iqfoXtcnqDx4wYheaeso=
 sigs.k8s.io/randfill v1.0.0 h1:JfjMILfT8A6RbawdsK2JXGBR5AQVfd+9TbzrlneTyrU=
 sigs.k8s.io/randfill v1.0.0/go.mod h1:XeLlZ/jmk4i1HRopwe7/aU3H5n1zNUcX6TM94b3QxOY=
 sigs.k8s.io/structured-merge-diff/v6 v6.3.1 h1:JrhdFMqOd/+3ByqlP2I45kTOZmTRLBUm5pvRjeheg7E=

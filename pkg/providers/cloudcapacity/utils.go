@@ -29,6 +29,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/utils/cpuset"
 )
 
 func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string, r *proxmox.ClusterResource) (NodeCapacityInfo, error) {
@@ -66,9 +67,22 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 			return fmt.Errorf("Failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		err = i.ResourceManager.AllocateOrUpdate(vm)
+		opt := &resourcemanager.VMResourceOptions{
+			ID:           int(vm.VMID),
+			CPUs:         vm.CPUs,
+			MemoryMBytes: vm.MaxMem / (1024 * 1024),
+		}
+
+		if vm.VirtualMachineConfig != nil && vm.VirtualMachineConfig.Affinity != "" {
+			opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
+			if err != nil {
+				return fmt.Errorf("Failed to parse CPU affinity for VM %d: %w", vmr.VMID, err)
+			}
+		}
+
+		err = i.ResourceManager.AllocateOrUpdate(opt)
 		if err != nil {
-			return fmt.Errorf("Failed to allocate resources for VM %d on node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
+			return fmt.Errorf("Failed to allocate resources for VM %d: %w", vmr.VMID, err)
 		}
 	}
 

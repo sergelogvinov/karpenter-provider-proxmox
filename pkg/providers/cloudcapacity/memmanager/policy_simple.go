@@ -101,5 +101,5 @@ func (p *simplePolicy) Release(mem uint64) error {
 }
 
 func (p *simplePolicy) Status() string {
-	return fmt.Sprintf("%d", p.AvailableMemory())
+	return fmt.Sprintf("%dM", p.AvailableMemory()/1024/1024)
 }

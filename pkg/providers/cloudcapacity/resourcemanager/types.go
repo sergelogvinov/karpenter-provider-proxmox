@@ -16,6 +16,8 @@ limitations under the License.
 
 package resourcemanager
 
+import "k8s.io/utils/cpuset"
+
 // NodeSettings represents the hardware settings of a node.
 type NodeSettings struct {
 	// ReservedCPUs is the list of reserved CPU IDs. For example: [0,4]
@@ -46,3 +48,12 @@ type NodeSettingsConfig map[string]map[string]NodeSettings
 //     }
 //   }
 // }
+
+type VMResourceOptions struct {
+	ID           int
+	CPUs         int
+	CPUSet       cpuset.CPUSet
+	MemoryMBytes uint64
+	DiskGBytes   uint64
+	StorageID    string
+}

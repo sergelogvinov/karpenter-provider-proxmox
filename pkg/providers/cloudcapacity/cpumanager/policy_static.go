@@ -20,16 +20,18 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/go-logr/logr"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 
 	"k8s.io/utils/cpuset"
 )
 
-type simplePolicy struct {
+const PolicyStatic policyName = "static"
+
+type staticPolicy struct {
 	mu sync.Mutex
 
-	// Maximum CPUs that can be assigned
-	// maxCPUs int
 	// Assigned CPUs of VM with dynamic assignments
 	assignedCPUs int
 
@@ -39,58 +41,77 @@ type simplePolicy struct {
 	availableCPUs cpuset.CPUSet
 	// Used CPUs of VM with affinity assignments
 	usedCPUs cpuset.CPUSet
-	// Reserved CPUs that cannot be assigned
+	// set of CPUs that is not available for exclusive assignment
 	reservedCPUs cpuset.CPUSet
+
+	// options allow to fine-tune the behavior of the policy
+	options StaticPolicyOptions
+
+	// cpu socket topology
+	topology *topology.CPUTopology
+	// we compute this value multiple time, and it's not supposed to change
+	// at runtime - the cpumanager can't deal with runtime topology changes anyway.
+	cpuGroupSize int
+
+	log logr.Logger
 }
 
-// PolicySimple name of simple policy
-const PolicySimple policyName = "simple"
+// Ensure staticPolicy implements Policy interface
+var _ Policy = &staticPolicy{}
 
-// Ensure simplePolicy implements Policy interface
-var _ Policy = &simplePolicy{}
-
-// NewSimplePolicy returns a cpuset manager policy that does nothing
-func NewSimplePolicy(topology *topology.CPUTopology, reservedCPUs cpuset.CPUSet) (Policy, error) {
+func NewStaticPolicy(logger logr.Logger, topology *topology.CPUTopology, reservedCPUs cpuset.CPUSet) (Policy, error) {
 	if topology.NumCPUs < reservedCPUs.Size() {
 		return nil, fmt.Errorf("not enough CPUs available: maxCPUs=%d, reservedCPUs=%d", topology.NumCPUs, reservedCPUs.Size())
 	}
 
 	allCPUs := topology.CPUDetails.CPUs()
 
-	return &simplePolicy{
-		// maxCPUs:       topology.NumCPUs,
+	policy := &staticPolicy{
 		allCPUs:       allCPUs,
 		availableCPUs: allCPUs.Difference(reservedCPUs),
 		usedCPUs:      cpuset.New(),
 		reservedCPUs:  reservedCPUs,
-	}, nil
+		options: StaticPolicyOptions{
+			FullPhysicalCPUsOnly:           false,
+			DistributeCPUsAcrossNUMA:       false,
+			DistributeCPUsAcrossCores:      false,
+			PreferAlignByUncoreCacheOption: true,
+		},
+		topology:     topology,
+		cpuGroupSize: topology.CPUsPerCore(),
+		log:          logger,
+	}
+
+	return policy, nil
 }
 
-func (p *simplePolicy) Name() string {
-	return string(PolicySimple)
+func (p *staticPolicy) Name() string {
+	return string(PolicyStatic)
 }
 
-func (p *simplePolicy) AvailableCPUs() int {
+func (p *staticPolicy) AvailableCPUs() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	return max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
 }
 
-func (p *simplePolicy) Allocate(numCPUs int) (cpuset.CPUSet, error) {
+func (p *staticPolicy) Allocate(numCPUs int) (cpuset.CPUSet, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.assignedCPUs+numCPUs > p.availableCPUs.Size() {
-		return cpuset.CPUSet{}, fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", numCPUs, p.availableCPUs.Size())
+	cpus, err := p.takeByTopology(p.log, p.availableCPUs, numCPUs)
+	if err != nil {
+		return cpuset.New(), err
 	}
 
-	p.assignedCPUs += numCPUs
+	p.usedCPUs = p.usedCPUs.Union(cpus)
+	p.availableCPUs = p.availableCPUs.Difference(cpus)
 
-	return cpuset.New(), nil
+	return cpus, nil
 }
 
-func (p *simplePolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset.CPUSet, error) {
+func (p *staticPolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset.CPUSet, error) {
 	if numCPUs <= 0 && cpus.IsEmpty() {
 		return cpuset.New(), nil
 	}
@@ -110,7 +131,7 @@ func (p *simplePolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset
 		return cpuset.New(), nil
 	}
 
-	if p.assignedCPUs+numCPUs > p.availableCPUs.Size() {
+	if p.assignedCPUs+numCPUs > p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size() {
 		return cpuset.New(), fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", numCPUs, p.availableCPUs.Size())
 	}
 
@@ -120,7 +141,7 @@ func (p *simplePolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset
 }
 
 //nolint:dupl
-func (p *simplePolicy) Release(numCPUs int, cpus cpuset.CPUSet) error {
+func (p *staticPolicy) Release(numCPUs int, cpus cpuset.CPUSet) error {
 	if numCPUs == 0 && cpus.IsEmpty() {
 		return nil
 	}
@@ -147,11 +168,29 @@ func (p *simplePolicy) Release(numCPUs int, cpus cpuset.CPUSet) error {
 	return nil
 }
 
-func (p *simplePolicy) Status() string {
+func (p *staticPolicy) Status() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	available := max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
 
 	return fmt.Sprintf("Free: %d, Static: [%v], Common: [%v], Reserved: [%v]", available, p.usedCPUs, p.availableCPUs, p.reservedCPUs)
+}
+
+func (p *staticPolicy) takeByTopology(logger logr.Logger, availableCPUs cpuset.CPUSet, numCPUs int) (cpuset.CPUSet, error) {
+	cpuSortingStrategy := CPUSortingStrategyPacked
+	if p.options.DistributeCPUsAcrossCores {
+		cpuSortingStrategy = CPUSortingStrategySpread
+	}
+
+	if p.options.DistributeCPUsAcrossNUMA {
+		cpuGroupSize := 1
+		if p.options.FullPhysicalCPUsOnly {
+			cpuGroupSize = p.cpuGroupSize
+		}
+
+		return takeByTopologyNUMADistributed(logger, p.topology, availableCPUs, numCPUs, cpuGroupSize, cpuSortingStrategy)
+	}
+
+	return takeByTopologyNUMAPacked(logger, p.topology, availableCPUs, numCPUs, cpuSortingStrategy, p.options.PreferAlignByUncoreCacheOption)
 }
