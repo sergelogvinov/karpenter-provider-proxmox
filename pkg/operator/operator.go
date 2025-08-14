@@ -24,6 +24,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
@@ -37,10 +38,11 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	ProxmoxPool           *pxpool.ProxmoxPool
-	CloudCapacityProvider cloudcapacity.Provider
-	InstanceTypeProvider  instancetype.Provider
-	InstanceProvider      instance.Provider
+	ProxmoxPool              *pxpool.ProxmoxPool
+	CloudCapacityProvider    cloudcapacity.Provider
+	InstanceProvider         instance.Provider
+	InstanceTemplateProvider instancetemplate.Provider
+	InstanceTypeProvider     instancetype.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -61,18 +63,15 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
-	if err != nil {
-		log.FromContext(ctx).Error(err, "failed creating cloud capacity provider")
-
-		os.Exit(1)
-	}
-
 	cloudCapacityProvider.UpdateNodeCapacity(ctx)
+
+	instanceTemplateProvider := instancetemplate.NewDefaultProvider(ctx, pxPool, cloudCapacityProvider)
+	instanceTemplateProvider.UpdateInstanceTemplates(ctx)
 
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
 	instanceTypeProvider.UpdateInstanceTypes(ctx)
 
-	instanceProvider, err := instance.NewProvider(ctx, pxPool, cloudCapacityProvider)
+	instanceProvider, err := instance.NewProvider(ctx, pxPool, cloudCapacityProvider, instanceTemplateProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")
 
@@ -80,10 +79,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	return ctx, &Operator{
-		Operator:              operator,
-		ProxmoxPool:           pxPool,
-		CloudCapacityProvider: cloudCapacityProvider,
-		InstanceTypeProvider:  instanceTypeProvider,
-		InstanceProvider:      instanceProvider,
+		Operator:                 operator,
+		ProxmoxPool:              pxPool,
+		CloudCapacityProvider:    cloudCapacityProvider,
+		InstanceTemplateProvider: instanceTemplateProvider,
+		InstanceTypeProvider:     instanceTypeProvider,
+		InstanceProvider:         instanceProvider,
 	}
 }

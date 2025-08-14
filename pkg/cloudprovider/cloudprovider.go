@@ -30,6 +30,7 @@ import (
 	cloudproviderevents "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider/events"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
 	corev1 "k8s.io/api/core/v1"
@@ -52,9 +53,10 @@ type CloudProvider struct {
 	kubeClient client.Client
 	recorder   events.Recorder
 
-	instanceProvider      instance.Provider
-	instanceTypeProvider  instancetype.Provider
-	cloudcapacityProvider cloudcapacity.Provider
+	instanceProvider         instance.Provider
+	instanceTypeProvider     instancetype.Provider
+	instanceTemplateProvider instancetemplate.Provider
+	cloudcapacityProvider    cloudcapacity.Provider
 
 	log logr.Logger
 }
@@ -64,18 +66,20 @@ func NewCloudProvider(
 	kubeClient client.Client,
 	recorder events.Recorder,
 	instanceProvider instance.Provider,
+	instanceTemplateProvider instancetemplate.Provider,
 	instanceTypeProvider instancetype.Provider,
 	cloudcapacityProvider cloudcapacity.Provider,
 ) *CloudProvider {
 	log := log.FromContext(ctx).WithName(CloudProviderName)
 
 	return &CloudProvider{
-		kubeClient:            kubeClient,
-		recorder:              recorder,
-		instanceProvider:      instanceProvider,
-		instanceTypeProvider:  instanceTypeProvider,
-		cloudcapacityProvider: cloudcapacityProvider,
-		log:                   log,
+		kubeClient:               kubeClient,
+		recorder:                 recorder,
+		instanceProvider:         instanceProvider,
+		instanceTemplateProvider: instanceTemplateProvider,
+		instanceTypeProvider:     instanceTypeProvider,
+		cloudcapacityProvider:    cloudcapacityProvider,
+		log:                      log,
 	}
 }
 

@@ -54,10 +54,14 @@ kind: ProxmoxNodeClass
 metadata:
   name: default
 spec:
-  blockDevicesStorageID: zfs
+  # placementStrategy:
+  #   zoneBalance: AvailabilityFirst
   instanceTemplate:
     type: template
     name: talos
+  bootDevice:
+    size: 30Gi
+    storage: zfs
   securityGroups:
     - name: kubernetes
       interface: net0

@@ -8,13 +8,37 @@ metadata:
 spec:
   group: karpenter.proxmox.sinextra.dev
   names:
+    categories:
+    - karpenter
     kind: ProxmoxNodeClass
     listKind: ProxmoxNodeClassList
     plural: proxmoxnodeclasses
     singular: proxmoxnodeclass
   scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.resources.zones
+      name: Zones
+      type: string
+    - jsonPath: .spec.placementStrategy.zoneBalance
+      name: Balance
+      type: string
+    - jsonPath: .spec.instanceTemplate.name
+      name: Template
+      type: string
+    - jsonPath: .spec.metadataOptions.type
+      name: Metadata
+      type: string
+    - jsonPath: .spec.bootDevice.size
+      name: Disk
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: ProxmoxNodeClass is the Schema for the ProxmoxNodeClass API
@@ -39,10 +63,28 @@ spec:
           spec:
             description: Spec defines the desired state of ProxmoxNodeClass
             properties:
-              blockDevicesStorageID:
-                description: BlockDevicesStorageID is the storage ID to create/clone
-                  the VM
-                type: string
+              bootDevice:
+                default:
+                  size: 30G
+                description: |-
+                  BootDevice defines the root device for the VM
+                  If not specified, a block storage device will be used from the instance template.
+                properties:
+                  size:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Size is the size of the block device in `Gi`, `G`,
+                      `Ti`, or `T`
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    type: string
+                    x-kubernetes-int-or-string: true
+                  storage:
+                    description: Storage is the proxmox storage-id to create the block
+                      device
+                    maxLength: 30
+                    type: string
+                type: object
               instanceTemplate:
                 description: InstanceTemplate is the template of the VM to create
                 properties:
@@ -60,7 +102,7 @@ spec:
                 type: object
               metadataOptions:
                 default:
-                  type: template
+                  type: none
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
@@ -79,6 +121,8 @@ spec:
                     type: string
                 type: object
               placementStrategy:
+                default:
+                  zoneBalance: Balanced
                 description: PlacementStrategy defines how nodes should be placed
                   across zones
                 properties:
@@ -125,7 +169,6 @@ spec:
                   type: string
                 type: array
             required:
-            - blockDevicesStorageID
             - instanceTemplate
             type: object
           status:
@@ -193,10 +236,20 @@ spec:
                   validated
                 format: date-time
                 type: string
-              selectedInstanceTypes:
+              resources:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Resources is the list of resources that have been provisioned.
+                type: object
+              selectedZones:
                 description: |-
-                  SelectedInstanceTypes contains the list of instance types that meet the requirements
-                  Only populated when using automatic instance type selection
+                  SelectedZones is a list of nodes that match this node class
+                  It depends on instanceTemplate and region.
+                  This field is populated by the controller and should not be set manually.
                 items:
                   type: string
                 type: array

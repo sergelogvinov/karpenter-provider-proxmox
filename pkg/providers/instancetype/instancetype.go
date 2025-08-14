@@ -46,10 +46,10 @@ type Provider interface {
 
 type DefaultProvider struct {
 	cloudCapacityProvider cloudcapacity.Provider
-	instanceTypes         []*cloudprovider.InstanceType
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo []*cloudprovider.InstanceType
+	instanceTypes     []*cloudprovider.InstanceType
 
 	log logr.Logger
 }
@@ -144,7 +144,7 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 					corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
 					corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
 					corev1.ResourcePods:             resource.MustParse("110"),
-					corev1.ResourceEphemeralStorage: resource.MustParse("30Gi"),
+					corev1.ResourceEphemeralStorage: resource.MustParse("30G"),
 				},
 				Overhead: &cloudprovider.InstanceTypeOverhead{
 					KubeReserved:   kubeReservedResources(int64(cpu), float64(mem)),

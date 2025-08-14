@@ -19,9 +19,9 @@ package cloudcapacity
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -36,25 +36,38 @@ import (
 )
 
 type Provider interface {
+	// UpdateNodeCapacity updates the node CPU and RAM capacity information for all regions.
 	UpdateNodeCapacity(ctx context.Context) error
+	// UpdateNodeCapacityInZone updates the node CPU and RAM capacity information for a specific region and zone.
 	UpdateNodeCapacityInZone(ctx context.Context, region, zone string) error
+	// UpdateNodeLoad updates the node CPU load information for all regions.
 	UpdateNodeLoad(ctx context.Context) error
 
+	// UpdateNodeStorageCapacity updates the node storage capacity information for all regions.
+	UpdateNodeStorageCapacity(ctx context.Context) error
+
+	// Regions returns a list of regions available in the pool.
 	Regions() []string
+	// Zones returns a list of zones available in the specified region.
 	Zones(region string) []string
 
 	GetAvailableZonesInRegion(region string, req corev1.ResourceList) []string
+	SortZonesByCPULoad(region string, zones []string) []string
 	FitInZone(region, zone string, req corev1.ResourceList) bool
 
-	SortZonesByCPULoad(region string, zones []string) []string
+	GetStorageAvailableZonesInRegion(region string, storage string) []string
 }
 
 type DefaultProvider struct {
 	pool *pxpool.ProxmoxPool
 
+	zoneList map[string][]string
+
 	muCapacityInfo sync.RWMutex
 	capacityInfo   map[string]NodeCapacityInfo
-	zoneList       map[string][]string
+
+	muStorageInfo sync.RWMutex
+	storageInfo   map[string]NodeStorageCapacityInfo
 
 	log logr.Logger
 }
@@ -78,6 +91,19 @@ type NodeCapacityInfo struct {
 	Allocatable corev1.ResourceList
 }
 
+type NodeStorageCapacityInfo struct {
+	// Name is the name of the node.
+	Name string
+	// Region is the region of the node.
+	Region string
+	// Shared indicates if the storage is shared across nodes.
+	Shared bool
+	// Capabilities are the capabilities of the storage.
+	Capabilities []string
+	// Zone is the zone of the node.
+	Zones []string
+}
+
 type NodeCapacity struct {
 	// Name is the name of the node.
 	Name string
@@ -96,14 +122,6 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 		pool: pool,
 		log:  log,
 	}
-}
-
-func (p *DefaultProvider) LivenessProbe(_ *http.Request) error {
-	// Locking the mutex to ensure that the provider is not in a deadlock state.
-	p.muCapacityInfo.Lock()
-	p.muCapacityInfo.Unlock()
-
-	return nil
 }
 
 func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
@@ -270,6 +288,108 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
+	log := p.log.WithName("UpdateNodeStorageCapacity()")
+
+	p.muStorageInfo.Lock()
+	defer p.muStorageInfo.Unlock()
+
+	capacityInfo := map[string]NodeStorageCapacityInfo{}
+
+	for _, region := range p.pool.GetRegions() {
+		log.V(1).Info("Syncing capacity for region", "region", region)
+
+		cl, err := p.pool.GetProxmoxCluster(region)
+		if err != nil {
+			log.Error(err, "Failed to get proxmox cluster", "region", region)
+
+			continue
+		}
+
+		cluster, err := cl.Cluster(ctx)
+		if err != nil {
+			log.Error(err, "Failed to get cluster status", "region", region)
+
+			continue
+		}
+
+		storageResources, err := cluster.Resources(ctx, "storage")
+		if err != nil {
+			log.Error(err, "Failed to list storage resources", "region", region)
+
+			continue
+		}
+
+		storages := []string{}
+		capacityZone := make(map[string]NodeStorageCapacityInfo)
+
+		for _, item := range storageResources {
+			if item.Status != "available" {
+				continue
+			}
+
+			capabilitys := strings.Split(item.Content, ",")
+			if slices.Contains(capabilitys, "images") || slices.Contains(capabilitys, "iso") {
+				key := fmt.Sprintf("%s/%s/%s", region, item.Storage, item.Node)
+
+				info := NodeStorageCapacityInfo{
+					Name:         item.Storage,
+					Region:       region,
+					Zones:        []string{item.Node},
+					Shared:       item.Shared == 1,
+					Capabilities: capabilitys,
+				}
+
+				capacityZone[key] = info
+
+				if !slices.Contains(storages, item.Storage) {
+					storages = append(storages, item.Storage)
+				}
+			}
+		}
+
+		for _, storage := range storages {
+			zones := []string{}
+
+			for _, info := range capacityZone {
+				if info.Name == storage && info.Region == region {
+					zones = append(zones, info.Zones...)
+				}
+			}
+
+			for _, info := range capacityZone {
+				if info.Name == storage && info.Region == region {
+					capacityInfo[fmt.Sprintf("%s/%s", region, storage)] = NodeStorageCapacityInfo{
+						Name:         info.Name,
+						Region:       info.Region,
+						Zones:        slices.Compact(zones),
+						Shared:       info.Shared,
+						Capabilities: info.Capabilities,
+					}
+				}
+			}
+		}
+	}
+
+	p.storageInfo = capacityInfo
+
+	log.V(4).Info("Syncing finished", "storages", len(capacityInfo))
+
+	return nil
+}
+
+func (p *DefaultProvider) GetStorageAvailableZonesInRegion(region string, storage string) []string {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	key := fmt.Sprintf("%s/%s", region, storage)
+	if info, ok := p.storageInfo[key]; ok {
+		return info.Zones
+	}
+
+	return []string{}
 }
 
 func (p *DefaultProvider) Regions() []string {
