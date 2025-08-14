@@ -45,21 +45,39 @@ spec:
                 description: BlockDevicesStorageID is the storage ID to create/clone
                   the VM
                 type: string
+              instanceTemplate:
+                description: InstanceTemplate is the template of the VM to create
+                properties:
+                  name:
+                    description: Name is the name of the instance template
+                    type: string
+                  type:
+                    description: Type is the type of the instance template
+                    enum:
+                    - template
+                    type: string
+                required:
+                - name
+                - type
+                type: object
               metadataOptions:
                 default:
                   type: template
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
+                  name:
+                    description: Name is the name of the configMap or Secrets that
+                      contains the metadata.
+                    type: string
                   type:
-                    default: template
+                    default: none
                     description: |-
-                      If specified, the instance metadata will be exposed to the VMs by CDRom, HTTP
-                      or template. Template is the default. It means that the metadata will be stored in VM template.
+                      If specified, the instance metadata will be exposed to the VMs by CDRom
+                      or virtual machine template.
                     enum:
-                    - template
+                    - none
                     - cdrom
-                    - http
                     type: string
                 type: object
               placementStrategy:
@@ -108,12 +126,9 @@ spec:
                 items:
                   type: string
                 type: array
-              template:
-                description: Template is the name of the template to use for nodes
-                type: string
             required:
             - blockDevicesStorageID
-            - template
+            - instanceTemplate
             type: object
           status:
             description: Status defines the observed state of ProxmoxNodeClass
@@ -187,10 +202,6 @@ spec:
                 items:
                   type: string
                 type: array
-              specHash:
-                description: SpecHash is a hash of the ProxmoxNodeClass spec
-                format: int64
-                type: integer
               validationError:
                 description: ValidationError contains the error message from the last
                   validation
@@ -1081,7 +1092,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1094,7 +1105,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1145,7 +1156,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1166,7 +1177,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1186,7 +1197,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1207,7 +1218,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"
@@ -1253,7 +1264,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.3
+    helm.sh/chart: karpenter-provider-proxmox-0.0.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.1.0"

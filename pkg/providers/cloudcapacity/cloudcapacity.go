@@ -19,6 +19,7 @@ package cloudcapacity
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"slices"
 	"sort"
 	"sync"
@@ -36,6 +37,7 @@ import (
 
 type Provider interface {
 	UpdateNodeCapacity(ctx context.Context) error
+	UpdateNodeCapacityInZone(ctx context.Context, region, zone string) error
 	UpdateNodeLoad(ctx context.Context) error
 
 	Regions() []string
@@ -66,6 +68,10 @@ type NodeCapacityInfo struct {
 	CPUInfo proxmox.CPUInfo
 	// CPULoad is the CPU load of the node in percentage.
 	CPULoad int
+	// CapacityMaxCPU is the maximum number of CPUs available on the node.
+	CapacityMaxCPU uint64
+	// CapacityMaxMem is the maximum amount of memory available on the node in bytes.
+	CapacityMaxMem uint64
 	// Capacity is the total amount of resources available on the node.
 	Capacity corev1.ResourceList
 	// Allocatable is the total amount of resources available to the VMs.
@@ -90,6 +96,14 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 		pool: pool,
 		log:  log,
 	}
+}
+
+func (p *DefaultProvider) LivenessProbe(_ *http.Request) error {
+	// Locking the mutex to ensure that the provider is not in a deadlock state.
+	p.muCapacityInfo.Lock()
+	p.muCapacityInfo.Unlock()
+
+	return nil
 }
 
 func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
@@ -144,10 +158,12 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 
 			nodes = append(nodes, item.Node)
 			capacityInfo[key] = NodeCapacityInfo{
-				Name:    item.Node,
-				Region:  region,
-				CPUInfo: node.CPUInfo,
-				CPULoad: int(node.CPU * 100),
+				Name:           item.Node,
+				Region:         region,
+				CPUInfo:        node.CPUInfo,
+				CPULoad:        int(node.CPU * 100),
+				CapacityMaxCPU: uint64(item.MaxCPU),
+				CapacityMaxMem: item.MaxMem,
 				Capacity: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", item.MaxCPU)),
 					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", item.MaxMem)),
@@ -167,13 +183,53 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 	return nil
 }
 
+func (p *DefaultProvider) UpdateNodeCapacityInZone(ctx context.Context, region, zone string) error {
+	log := p.log.WithName("UpdateNodeCapacityInZone()")
+
+	p.muCapacityInfo.Lock()
+	defer p.muCapacityInfo.Unlock()
+
+	log.V(1).Info("Syncing capacity for region", "region", region, "zone", zone)
+
+	cl, err := p.pool.GetProxmoxCluster(region)
+	if err != nil {
+		log.Error(err, "Failed to get proxmox cluster", "region", region)
+
+		return err
+	}
+
+	node, err := cl.Node(ctx, zone)
+	if err != nil {
+		return fmt.Errorf("cannot find node with name %s in region %s: %w", zone, region, err)
+	}
+
+	key := fmt.Sprintf("%s/%s", region, zone)
+	nodeCapacity := p.capacityInfo[key]
+
+	allocatable, err := nodeAllocatable(ctx, node, nodeCapacity.CapacityMaxCPU, nodeCapacity.CapacityMaxMem)
+	if err != nil {
+		log.Error(err, "Failed to get allocatable resources for node", "node", zone, "region", region)
+
+		allocatable = corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("0"),
+			corev1.ResourceMemory: resource.MustParse("0"),
+		}
+	}
+
+	nodeCapacity.CPULoad = int(node.CPU * 100)
+	nodeCapacity.Allocatable = allocatable
+	p.capacityInfo[key] = nodeCapacity
+
+	return nil
+}
+
 func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 	log := p.log.WithName("UpdateNodeLoad()")
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
 
-	for _, region := range p.pool.GetRegions() {
+	for region := range p.zoneList {
 		log.V(1).Info("Syncing capacity for region", "region", region)
 
 		cl, err := p.pool.GetProxmoxCluster(region)
@@ -204,11 +260,12 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 
 			key := fmt.Sprintf("%s/%s", region, item.Node)
 
-			info := p.capacityInfo[key]
-			info.CPULoad = int(item.CPU * 100)
-			p.capacityInfo[key] = info
+			if info, ok := p.capacityInfo[key]; ok {
+				info.CPULoad = int(item.CPU * 100)
+				p.capacityInfo[key] = info
 
-			log.V(4).Info("Syncing capacity for region", "region", region, "node", item.Node, "cpuLoad", info.CPULoad)
+				log.V(4).Info("Syncing capacity for region", "region", region, "node", item.Node, "cpuLoad", info.CPULoad)
+			}
 		}
 	}
 

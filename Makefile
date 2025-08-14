@@ -100,13 +100,10 @@ gen-objects: ## generate the controller-gen related objects
 manifests: ## generate the controller-gen kubernetes manifests
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
-	@echo "Copying generated CRDs to Helm chart..."
-	@mkdir -p charts/karpenter-provider-proxmox/crds
-	@cp pkg/apis/crds/*.yaml charts/karpenter-provider-proxmox/crds/
 
 .PHONY: install
 install: ## Install
-	kubectl replace -f charts/karpenter-provider-proxmox/crds/
+	kubectl replace -f pkg/apis/crds/
 
 .PHONY: build
 build: ## Build
@@ -152,16 +149,20 @@ helm-release: ## Helm Release
 
 .PHONY: docs
 docs:
-	yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
-	helm template -n kube-system --include-crds karpenter-provider-proxmox \
+	@echo "Copying generated CRDs to Helm chart..."
+	@mkdir -p charts/karpenter-provider-proxmox/crds
+	@cp pkg/apis/crds/*.yaml charts/karpenter-provider-proxmox/crds/
+	@yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
+	@echo "Generate to Helm chart deployment manifests..."
+	@helm template -n kube-system --include-crds karpenter-provider-proxmox \
 		-f charts/karpenter-provider-proxmox/values.edge.yaml \
 		--set-string image.tag=$(TAG) \
 		charts/karpenter-provider-proxmox > docs/deploy/karpenter-provider-proxmox.yml
-	helm template -n kube-system --include-crds karpenter-provider-proxmox \
+	@helm template -n kube-system --include-crds karpenter-provider-proxmox \
 		-f charts/karpenter-provider-proxmox/values.edge.yaml \
 		--set-string image.tag=edge \
 		charts/karpenter-provider-proxmox > docs/deploy/karpenter-provider-proxmox-edge.yml
-	helm-docs --sort-values-order=file charts/karpenter-provider-proxmox
+	@helm-docs --sort-values-order=file charts/karpenter-provider-proxmox
 
 release-update:
 	git-chglog --config hack/chglog-config.yml -o CHANGELOG.md
