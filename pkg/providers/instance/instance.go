@@ -31,10 +31,12 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -50,14 +52,21 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	cluster               *pxpool.ProxmoxPool
-	cloudCapacityProvider cloudcapacity.Provider
+	cluster                  *pxpool.ProxmoxPool
+	cloudCapacityProvider    cloudcapacity.Provider
+	instanceTemplateProvider instancetemplate.Provider
 }
 
-func NewProvider(ctx context.Context, cluster *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) (*DefaultProvider, error) {
+func NewProvider(
+	ctx context.Context,
+	cluster *pxpool.ProxmoxPool,
+	cloudCapacityProvider cloudcapacity.Provider,
+	instanceTemplateProvider instancetemplate.Provider,
+) (*DefaultProvider, error) {
 	return &DefaultProvider{
-		cluster:               cluster,
-		cloudCapacityProvider: cloudCapacityProvider,
+		cluster:                  cluster,
+		cloudCapacityProvider:    cloudCapacityProvider,
+		instanceTemplateProvider: instanceTemplateProvider,
 	}, nil
 }
 
@@ -94,8 +103,17 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				continue
 			}
 
-			for _, zone := range p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, zones) {
-				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, instanceType, region, zone)
+			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, zones)
+			for _, zone := range zones {
+				instanceTemplate, err := p.instanceTemplateProvider.Get(ctx, nodeClass, region, zone)
+				if err != nil {
+					log.Error(err, "Failed to get instance template", "nodeClass", nodeClass.Name, "region", region, "zone", zone)
+					errs = append(errs, err)
+
+					continue
+				}
+
+				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone)
 				if err != nil {
 					log.Error(err, "Failed to create instance", "nodeClaim", nodeClaim.Name, "instanceType", instanceType.Name, "region", region, "zone", zone)
 					errs = append(errs, err)
@@ -208,6 +226,7 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
+	instanceTemplate *instancetemplate.InstanceTemplateInfo,
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
@@ -224,9 +243,27 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
-	vmTemplateID, err := px.FindVMTemplateByName(ctx, zone, nodeClass.Spec.InstanceTemplate.Name)
-	if err != nil {
+	vmTemplateID := instanceTemplate.TemplateID
+	if vmTemplateID == 0 {
 		return nil, fmt.Errorf("could not find vm template: %w", err)
+	}
+
+	storage := nodeClass.Spec.BootDevice.Storage
+	if storage == "" {
+		storage = instanceTemplate.TemplateStorageID
+	}
+
+	if storage == "" {
+		return nil, fmt.Errorf("storage device must be specified in node class or instance template")
+	}
+
+	size := nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga)
+	sizeInstType := instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga)
+
+	// We will use the size from the instance type if it is larger than the one specified in the node class
+	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
+	if sizeInstType > 0 && size < sizeInstType {
+		size = sizeInstType
 	}
 
 	vmOptions := goproxmox.VMCloneRequest{
@@ -235,11 +272,11 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		Name:        nodeClaim.Name,
 		Description: fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name),
 		Full:        1,
-		Storage:     nodeClass.Spec.BlockDevicesStorageID,
-		DiskSize:    fmt.Sprintf("%dG", instanceType.Capacity.StorageEphemeral().Value()/1024/1024/1024),
+		Storage:     storage,
 
 		CPU:          int(instanceType.Capacity.Cpu().Value()),
 		Memory:       uint32(instanceType.Capacity.Memory().Value() / 1024 / 1024),
+		DiskSize:     fmt.Sprintf("%dG", size),
 		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
 		InstanceType: instanceType.Name,
 	}
@@ -256,7 +293,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		}
 	}()
 
-	newID, err = px.CloneVM(ctx, vmTemplateID, vmOptions)
+	newID, err = px.CloneVM(ctx, int(vmTemplateID), vmOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
 	}

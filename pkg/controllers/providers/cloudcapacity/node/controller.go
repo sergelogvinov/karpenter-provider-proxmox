@@ -54,6 +54,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 	work := []func(ctx context.Context) error{
 		c.cloudCapacityProvider.UpdateNodeCapacity,
+		c.cloudCapacityProvider.UpdateNodeStorageCapacity,
 	}
 
 	errs := make([]error, len(work))

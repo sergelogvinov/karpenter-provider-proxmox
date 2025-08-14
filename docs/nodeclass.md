@@ -29,8 +29,11 @@ spec:
     # Name is the name of the instance template
     name: k8s-node-vm-template
 
-  # Template is the name of the template to use for nodes
-  blockDevicesStorageID: zfs
+  # BootDevice defines the root device for the VM
+  # Optional: If not set, it will use the block storage device where the template is located
+  bootDevice:
+    size: 50Gi
+    storage: lvm
 
   # Tags to apply to the VMs after creation
   # Optional: if not set, no tags will be applied to the VMs
@@ -38,7 +41,7 @@ spec:
     - karpenter
 
   # MetadataOptions contains parameters for specifying the cloud-init metadata
-  # Required
+  # Optional, defaults type is `none`
   metadataOptions:
     # Type of the metadata to expose to the VMs
     # Valid values: none, cdrom

@@ -23,6 +23,8 @@ import (
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -30,13 +32,23 @@ const (
 	// Placement strategy
 	PlacementStrategyAvailabilityFirst = "AvailabilityFirst"
 	PlacementStrategyBalanced          = "Balanced"
+
+	// Resource names for ProxmoxNodeClass status
+	ResourceZones corev1.ResourceName = "zones"
 )
 
 // ProxmoxNodeClass is the Schema for the ProxmoxNodeClass API
 // +kubebuilder:object:root=true
 // +kubebuilder:object:generate=true
+// +kubebuilder:printcolumn:name="Zones",type="string",JSONPath=".status.resources.zones",description=""
+// +kubebuilder:printcolumn:name="Balance",type="string",JSONPath=".spec.placementStrategy.zoneBalance",description=""
+// +kubebuilder:printcolumn:name="Template",type="string",JSONPath=".spec.instanceTemplate.name",description=""
+// +kubebuilder:printcolumn:name="Metadata",type="string",JSONPath=".spec.metadataOptions.type",description=""
+// +kubebuilder:printcolumn:name="Disk",type="string",JSONPath=".spec.bootDevice.size",description=""
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description=""
+// +kubebuilder:resource:scope=Cluster,categories=karpenter
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
 type ProxmoxNodeClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -55,23 +67,26 @@ type ProxmoxNodeClassSpec struct {
 	Region string `json:"region"`
 
 	// PlacementStrategy defines how nodes should be placed across zones
+	// +kubebuilder:default={"zoneBalance":"Balanced"}
 	// +optional
 	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
-
-	// BlockDevicesStorageID is the storage ID to create/clone the VM
-	// +required
-	BlockDevicesStorageID string `json:"blockDevicesStorageID,omitempty"`
 
 	// InstanceTemplate is the template of the VM to create
 	// +required
 	InstanceTemplate *InstanceTemplate `json:"instanceTemplate"`
+
+	// BootDevice defines the root device for the VM
+	// If not specified, a block storage device will be used from the instance template.
+	// +kubebuilder:default={"size":"30G"}
+	// +optional
+	BootDevice *BlockDevice `json:"bootDevice"`
 
 	// Tags to apply to the VMs
 	// +optional
 	Tags []string `json:"tags,omitempty"`
 
 	// MetadataOptions for the generated launch template of provisioned nodes.
-	// +kubebuilder:default={"type":"template"}
+	// +kubebuilder:default={"type":"none"}
 	// +optional
 	MetadataOptions *MetadataOptions `json:"metadataOptions,omitempty"`
 
@@ -87,10 +102,24 @@ type PlacementStrategy struct {
 	// Valid values are:
 	// - "Balanced" (default) - Nodes are evenly distributed across zones
 	// - "AvailabilityFirst" - Prioritize zone availability over even distribution
-	// +optional
-	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
 	// +kubebuilder:default=Balanced
+	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
+	// +optional
 	ZoneBalance string `json:"zoneBalance,omitempty"`
+}
+
+// BlockDevice defines the block device configuration for the VM
+type BlockDevice struct {
+	// Size is the size of the block device in `Gi`, `G`, `Ti`, or `T`
+	// +kubebuilder:validation:Type:=string
+	// +optional
+	Size *resource.Quantity `json:"size,omitempty"`
+
+	// Storage is the proxmox storage-id to create the block device
+	// +kubebuilder:validation:Type:=string
+	// +kubebuilder:validation:MaxLength=30
+	// +optional
+	Storage string `json:"storage,omitempty"`
 }
 
 type InstanceTemplate struct {
@@ -140,10 +169,15 @@ type ProxmoxNodeClassStatus struct {
 	// +optional
 	ValidationError string `json:"validationError,omitempty"`
 
-	// SelectedInstanceTypes contains the list of instance types that meet the requirements
-	// Only populated when using automatic instance type selection
+	// Resources is the list of resources that have been provisioned.
 	// +optional
-	SelectedInstanceTypes []string `json:"selectedInstanceTypes,omitempty"`
+	Resources corev1.ResourceList `json:"resources,omitempty"`
+
+	// SelectedZones is a list of nodes that match this node class
+	// It depends on instanceTemplate and region.
+	// This field is populated by the controller and should not be set manually.
+	// +optional
+	SelectedZones []string `json:"selectedZones,omitempty"`
 
 	// Conditions contains signals for health and readiness
 	// +optional
