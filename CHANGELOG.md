@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.1.0...v0.2.0) (2025-08-15)
+
+
+### Features
+
+* instance template status ([58d78b7](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/58d78b7c69e48553baffdd589c94ae9c147bc834))
+* regional schedule ([bf9431c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/bf9431c2fbc9cad38e10274e2d944b3ff59d06ab))
+* security groups ([0fd72ac](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/0fd72ac4742c41561ec3cc9a9089c7f944ed3daf))
+
 ## [0.1.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.0.1...v0.1.0) (2025-08-10)
 
 
