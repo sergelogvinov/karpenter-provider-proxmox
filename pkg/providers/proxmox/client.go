@@ -187,7 +187,7 @@ func (c *APIClient) CloneVM(ctx context.Context, templateID int, options VMClone
 		return 0, fmt.Errorf("failed to get vm %d: %v", newid, err)
 	}
 
-	if err = vm.ResizeDisk(ctx, "scsi0", options.DiskSize); err != nil {
+	if _, err = vm.ResizeDisk(ctx, "scsi0", options.DiskSize); err != nil {
 		return 0, fmt.Errorf("failed to resize disk for vm %d: %v", newid, err)
 	}
 

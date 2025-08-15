@@ -71,7 +71,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
 	instanceTypeProvider.UpdateInstanceTypes(ctx)
 
-	instanceProvider, err := instance.NewProvider(ctx, pxPool, cloudCapacityProvider, instanceTemplateProvider)
+	instanceProvider, err := instance.NewProvider(ctx, operator.KubernetesInterface, pxPool, cloudCapacityProvider, instanceTemplateProvider)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")
 

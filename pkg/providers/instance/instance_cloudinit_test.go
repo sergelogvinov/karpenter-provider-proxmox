@@ -1,0 +1,77 @@
+/*
+Copyright 2025 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package instance
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/luthermonson/go-proxmox"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
+)
+
+func TestNetworkFromInstanceConfig(t *testing.T) {
+	assert := assert.New(t)
+
+	tests := []struct {
+		name     string
+		template *proxmox.VirtualMachineConfig
+		network  cloudinit.NetworkConfig
+	}{
+		{
+			name:     "empty",
+			template: &proxmox.VirtualMachineConfig{},
+			network:  cloudinit.NetworkConfig{},
+		},
+		{
+			name: "2-interfaces",
+			template: &proxmox.VirtualMachineConfig{
+				Net0:         "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1500",
+				Net1:         "virtio=BC:24:11:EE:9A:23,bridge=vmbr1,firewall=0,mtu=1400",
+				IPConfig0:    "ip=dhcp,ip6=auto",
+				IPConfig1:    "ip=1.2.3.4",
+				Nameserver:   "1.1.1.1 2001:4860:4860::8888",
+				Searchdomain: "example.com",
+			},
+			network: cloudinit.NetworkConfig{
+				Interfaces: []cloudinit.InterfaceConfig{
+					{
+						Name:    "eth0",
+						MacAddr: "BC:24:11:CD:B9:41",
+						DHCPv4:  true,
+					},
+					{
+						Name:     "eth1",
+						MacAddr:  "BC:24:11:EE:9A:23",
+						Address4: []string{"1.2.3.4"},
+					},
+				},
+				NameServers:   []string{"1.1.1.1", "2001:4860:4860::8888"},
+				SearchDomains: []string{"example.com"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.name), func(t *testing.T) {
+			result := networkFromInstanceConfig(tt.template)
+			assert.Equal(tt.network, result)
+		})
+	}
+}
