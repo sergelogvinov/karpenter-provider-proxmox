@@ -163,6 +163,12 @@ func (c *Controller) validateNodeClass(_ context.Context, nc *v1alpha1.ProxmoxNo
 		return fmt.Errorf("instanceTemplate.Type must be 'template', got '%s'", nc.Spec.InstanceTemplate.Type)
 	}
 
+	if nc.Spec.MetadataOptions.Type == "cdrom" {
+		if nc.Spec.MetadataOptions.SecretRef.Name == "" || nc.Spec.MetadataOptions.SecretRef.Namespace == "" {
+			return fmt.Errorf("metadataOptions.SecretRef is required when metadataOptions.Type is 'cdrom'")
+		}
+	}
+
 	return nil
 }
 

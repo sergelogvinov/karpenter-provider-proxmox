@@ -106,10 +106,24 @@ spec:
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
-                  name:
-                    description: Name is the name of the configMap or Secrets that
-                      contains the metadata.
-                    type: string
+                  secretRef:
+                    description: |-
+                      SecretRef is a reference to the secret that contains cloud-init metadata.
+                      Secret must contain the following keys, each key is optional:
+                      - `user-data` - Userdata for cloud-init
+                      - `meta-data` - Metadata for cloud-init
+                      - `network-config` - Network configuration for cloud-init
+                    properties:
+                      name:
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                   type:
                     default: none
                     description: |-

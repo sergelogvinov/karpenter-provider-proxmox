@@ -5,7 +5,7 @@ go 1.24.5
 require (
 	github.com/awslabs/operatorpkg v0.0.0-20250804204931-57066b748e19
 	github.com/go-logr/logr v1.4.3
-	github.com/luthermonson/go-proxmox v0.2.2
+	github.com/luthermonson/go-proxmox v0.2.3-0.20250815182455-16138a778fb5
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.51.0
@@ -19,6 +19,7 @@ require (
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
 	sigs.k8s.io/controller-runtime v0.21.0
 	sigs.k8s.io/karpenter v1.6.1
+	sigs.k8s.io/yaml v1.5.0
 )
 
 require (
@@ -63,6 +64,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	go.yaml.in/yaml/v3 v3.0.3 // indirect
 	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
@@ -83,5 +85,4 @@ require (
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.7.0 // indirect
-	sigs.k8s.io/yaml v1.5.0 // indirect
 )

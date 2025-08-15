@@ -38,6 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -52,6 +53,7 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	kubernetesInterface      kubernetes.Interface
 	cluster                  *pxpool.ProxmoxPool
 	cloudCapacityProvider    cloudcapacity.Provider
 	instanceTemplateProvider instancetemplate.Provider
@@ -59,11 +61,13 @@ type DefaultProvider struct {
 
 func NewProvider(
 	ctx context.Context,
+	kubernetesInterface kubernetes.Interface,
 	cluster *pxpool.ProxmoxPool,
 	cloudCapacityProvider cloudcapacity.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 ) (*DefaultProvider, error) {
 	return &DefaultProvider{
+		kubernetesInterface:      kubernetesInterface,
 		cluster:                  cluster,
 		cloudCapacityProvider:    cloudCapacityProvider,
 		instanceTemplateProvider: instanceTemplateProvider,
@@ -310,6 +314,13 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	if err = px.CreateVMFirewallRules(ctx, newID, zone, rules); err != nil {
 		return nil, fmt.Errorf("failed to create firewall rules for vm %d in region %s: %v", newID, region, err)
+	}
+
+	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
+		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, newID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", newID, region, err)
+		}
 	}
 
 	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)

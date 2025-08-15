@@ -32,7 +32,11 @@ spec:
   # BootDevice defines the root device for the VM
   # Optional: If not set, it will use the block storage device where the template is located
   bootDevice:
-    size: 50Gi
+    # Size of the boot device
+    # Valid formats: 50G, 50Gi
+    size: 50G
+
+    # Storage is the storage where the boot device will be created
     storage: lvm
 
   # Tags to apply to the VMs after creation
@@ -46,6 +50,15 @@ spec:
     # Type of the metadata to expose to the VMs
     # Valid values: none, cdrom
     type: none
+
+    # SecretRef is used if the type is `cdrom`. It references a secret that contains cloud-init metadata.
+    # It must contain the following keys, each key is optional:
+    # - `user-data` - Userdata for cloud-init
+    # - `meta-data` - Metadata for cloud-init
+    # - `network-config` - Network configuration for cloud-init
+    secretRef:
+      name: talos-template
+      namespace: kube-system
 
   # SecurityGroups to apply to the VMs
   # Optional: if not set, no security groups will be applied to the VMs

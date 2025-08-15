@@ -59,6 +59,11 @@ spec:
   instanceTemplate:
     type: template
     name: talos
+  metadataOptions:
+    type: cdrom
+    secretRef:
+      name: talos-template
+      namespace: kube-system
   bootDevice:
     size: 30Gi
     storage: zfs

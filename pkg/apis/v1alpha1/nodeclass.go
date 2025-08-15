@@ -141,9 +141,15 @@ type MetadataOptions struct {
 	// +kubebuilder:default=none
 	// +kubebuilder:validation:Enum:={none,cdrom}
 	// +optional
-	Type *string `json:"type,omitempty"`
-	// Name is the name of the configMap or Secrets that contains the metadata.
-	Name *string `json:"name,omitempty"`
+	Type string `json:"type,omitempty"`
+
+	// SecretRef is a reference to the secret that contains cloud-init metadata.
+	// Secret must contain the following keys, each key is optional:
+	// - `user-data` - Userdata for cloud-init
+	// - `meta-data` - Metadata for cloud-init
+	// - `network-config` - Network configuration for cloud-init
+	// +optional
+	SecretRef *corev1.SecretReference `json:"secretRef,omitempty"`
 }
 
 // SecurityGroupsTerm defines a term to apply security groups
@@ -153,6 +159,7 @@ type SecurityGroupsTerm struct {
 	// +kubebuilder:validation:Pattern:="net[0-9]+"
 	// +optional
 	Interface string `json:"interface,omitempty"`
+
 	// Name is the security group name in Proxmox.
 	// +kubebuilder:validation:MaxLength=30
 	// +required
@@ -182,6 +189,10 @@ type ProxmoxNodeClassStatus struct {
 	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// TaskRef is a reference to the task that is being executed.
+	// +optional
+	// TaskRef *string `json:"taskRef,omitempty"`
 }
 
 // StatusConditions returns the condition set for the status.Object interface
