@@ -31,7 +31,6 @@ import (
 
 var genericMap = map[string]interface{}{
 	"default":      defaultFunc,
-	"empty":        empty,
 	"coalesce":     coalesce,
 	"ternary":      ternary,
 	"toJson":       toJson,
@@ -54,16 +53,18 @@ var genericMap = map[string]interface{}{
 	"regexFindString": regexFindString,
 	"regexReplaceAll": regexReplaceAll,
 
-	"contains":  func(substr string, str string) bool { return strings.Contains(str, substr) },
-	"hasPrefix": func(substr string, str string) bool { return strings.HasPrefix(str, substr) },
-	"hasSuffix": func(substr string, str string) bool { return strings.HasSuffix(str, substr) },
+	// String slice functions:
+	"getValue": getValue,
 
 	// Encoding functions:
 	"b64enc": base64encode,
 	"b64dec": base64decode,
 
-	// String slice functions:
-	"getValue": getValue,
+	// Flow Control functions:
+	"empty":     empty,
+	"contains":  func(substr string, str string) bool { return strings.Contains(str, substr) },
+	"hasPrefix": func(substr string, str string) bool { return strings.HasPrefix(str, substr) },
+	"hasSuffix": func(substr string, str string) bool { return strings.HasSuffix(str, substr) },
 }
 
 func ExecuteTemplate(tmpl string, data interface{}) (string, error) {

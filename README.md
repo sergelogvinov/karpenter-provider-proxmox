@@ -19,13 +19,15 @@ The benefits of not fully utilizing all bare metal resources include:
 
 ## In Scope
 
-* [x] Dynamic creation/termination
-* [x] VM template selection to create kubernetes node
+* [x] Dynamic creation and termination
 * [x] The best placement strategy for VMs across zones
+* [x] Cloud-init metadata delivery by cdrom
 * [x] Firewall security groups
-* [ ] Cloud-init metadata delivery by cdrom
-* [ ] VM optimization: CPU pinning and NUMA node affinity
-* [ ] VM optimization: Network and storage performance
+* [ ] Kubelet config optimization
+* [x] VM clone template selection
+* [ ] VM optimization: CPU pinning
+* [ ] VM optimization: NUMA node affinity
+* [x] VM optimization: Network performance
 
 ## Requirements
 
@@ -53,8 +55,12 @@ spec:
     - karpenter
 
   metadataOptions:
-    # How delivery the metadata to the VM, options: none, cdrom or http endpoint (required)
-    type: none|cdrom|http
+    # How delivery the metadata to the VM, options: none or cdrom (required)
+    type: none|cdrom
+    # SecretRef is used if the type is `cdrom`, that contains cloud-init metadata templates
+    secretRef:
+      name: ubuntu-k8s
+      namespace: kube-system
 
   # Firewall Security Groups to apply to the VM (optional)
   securityGroups:

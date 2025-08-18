@@ -78,7 +78,7 @@ kubectl apply -f https://raw.githubusercontent.com/sergelogvinov/karpenter-provi
 
 ### Install by using Helm
 
-Create the helm values file, for more information see [values.yaml](../charts/karpenter-provider-proxmox/values.yaml)
+Create the helm values file, for more information see [values.yaml](/charts/karpenter-provider-proxmox/values.yaml)
 
 ```yaml
 # karpenter-proxmox.yaml
