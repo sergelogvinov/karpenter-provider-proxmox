@@ -75,6 +75,10 @@ type ProxmoxNodeClassSpec struct {
 	// +required
 	InstanceTemplate *InstanceTemplate `json:"instanceTemplate"`
 
+	// KubeletConfiguration defines kubelet config file
+	// +optional
+	KubeletConfiguration *KubeletConfiguration `json:"kubeletConfiguration,omitempty"`
+
 	// BootDevice defines the root device for the VM
 	// If not specified, a block storage device will be used from the instance template.
 	// +kubebuilder:default={"size":"30G"}
@@ -106,6 +110,103 @@ type PlacementStrategy struct {
 	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
 	// +optional
 	ZoneBalance string `json:"zoneBalance,omitempty"`
+}
+
+// KubeletConfiguration defines args to be used when configuring kubelet on provisioned nodes.
+// They are a subset of the upstream types, recognizing not all options may be supported.
+// Wherever possible, the types and names should reflect the upstream kubelet types.
+// https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration
+// https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/apis/config/types.go
+type KubeletConfiguration struct {
+	// CPUManagerPolicy is the name of the policy to use.
+	// +kubebuilder:validation:Enum:={none,static}
+	// +optional
+	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty" yaml:"cpuManagerPolicy,omitempty"`
+
+	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
+	// +optional
+	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty" yaml:"cpuCFSQuota,omitempty"`
+
+	// cpuCFSQuotaPeriod sets the CPU CFS quota period value, `cpu.cfs_period_us`.
+	// The value must be between 1 ms and 1 second, inclusive.
+	// +optional
+	CPUCFSQuotaPeriod *metav1.Duration `json:"cpuCFSQuotaPeriod,omitempty" yaml:"cpuCFSQuotaPeriod,omitempty"`
+
+	// TopologyManagerPolicy is the name of the topology manager policy to use.
+	// Valid values include:
+	//
+	// - `restricted`: kubelet only allows pods with optimal NUMA node alignment for requested resources;
+	// - `best-effort`: kubelet will favor pods with NUMA alignment of CPU and device resources;
+	// - `none`: kubelet has no knowledge of NUMA alignment of a pod's CPU and device resources.
+	// - `single-numa-node`: kubelet only allows pods with a single NUMA alignment
+	//   of CPU and device resources.
+	//
+	// +kubebuilder:validation:Enum:={restricted,best-effort,none,single-numa-node}
+	// +optional
+	TopologyManagerPolicy string `json:"topologyManagerPolicy,omitempty" yaml:"topologyManagerPolicy,omitempty"`
+
+	// TopologyManagerScope represents the scope of topology hint generation
+	// that topology manager requests and hint providers generate.
+	// Valid values include:
+	//
+	// - `container`: topology policy is applied on a per-container basis.
+	// - `pod`: topology policy is applied on a per-pod basis.
+	//
+	// +kubebuilder:validation:Enum:={container,pod}
+	// +optional
+	TopologyManagerScope string `json:"topologyManagerScope,omitempty" yaml:"topologyManagerScope,omitempty"`
+
+	// ImageGCHighThresholdPercent is the percent of disk usage after which image
+	// garbage collection is always run. The percent is calculated by dividing this
+	// field value by 100, so this field must be between 0 and 100, inclusive.
+	// When specified, the value must be greater than ImageGCLowThresholdPercent.
+	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty" yaml:"imageGCHighThresholdPercent,omitempty"`
+
+	// ImageGCLowThresholdPercent is the percent of disk usage before which image
+	// garbage collection is never run. Lowest disk usage to garbage collect to.
+	// The percent is calculated by dividing this field value by 100,
+	// so the field value must be between 0 and 100, inclusive.
+	// When specified, the value must be less than imageGCHighThresholdPercent
+	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Maximum:=100
+	// +optional
+	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty" yaml:"imageGCLowThresholdPercent,omitempty"`
+
+	// ShutdownGracePeriod specifies the total duration that the node should delay the
+	// shutdown and total grace period for pod termination during a node shutdown.
+	// +optional
+	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty" yaml:"shutdownGracePeriod,omitempty"`
+
+	// A comma separated whitelist of unsafe sysctls or sysctl patterns (ending in `*`).
+	// Unsafe sysctl groups are `kernel.shm*`, `kernel.msg*`, `kernel.sem`, `fs.mqueue.*`,
+	// and `net.*`. For example: "`kernel.msg*,net.ipv4.route.min_pmtu`"
+	// +optional
+	AllowedUnsafeSysctls []string `json:"allowedUnsafeSysctls,omitempty" yaml:"allowedUnsafeSysctls,omitempty"`
+
+	// ClusterDNS is a list of IP addresses for a cluster DNS server. If set,
+	// kubelet will configure all containers to use this for DNS resolution
+	// instead of the host's DNS servers.
+	// +optional
+	ClusterDNS []string `json:"clusterDNS,omitempty" yaml:"clusterDNS,omitempty"`
+
+	// MaxPods is an override for the maximum number of pods that can run on
+	// a worker node instance.
+	// +kubebuilder:validation:Minimum:=10
+	// +kubebuilder:validation:Maximum:=250
+	// +optional
+	MaxPods *int32 `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
+
+	// ProviderID, if set, sets the unique ID of the instance that an external
+	// provider (i.e. cloudprovider) can use to identify a specific node.
+	// +optional
+	ProviderID string `json:"providerID,omitempty" yaml:"providerID,omitempty"`
+
+	// FailSwapOn tells the Kubelet to fail to start if swap is enabled on the node.
+	// +optional
+	FailSwapOn *bool `json:"failSwapOn,omitempty" yaml:"failSwapOn,omitempty"`
 }
 
 // BlockDevice defines the block device configuration for the VM
