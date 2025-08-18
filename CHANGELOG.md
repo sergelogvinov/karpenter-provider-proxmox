@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.1.0...v0.2.0) (2025-08-18)
+
+
+### Features
+
+* add devcontainer for Go development ([7df658f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/7df658f3e2b1744aeaf2cc6d09b88b470d83a18a))
+* cloud-init as kubernetes secret ([cfe328f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/cfe328f600388aaab4e80e1fd8bb0ceef14f78fc))
+* instance template status ([58d78b7](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/58d78b7c69e48553baffdd589c94ae9c147bc834))
+* kubelet config file ([9eed04f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/9eed04f36e1c2fee48bffa8c3671cb00504ffa20))
+* regional schedule ([bf9431c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/bf9431c2fbc9cad38e10274e2d944b3ff59d06ab))
+* security groups ([0fd72ac](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/0fd72ac4742c41561ec3cc9a9089c7f944ed3daf))
+
 ## [0.1.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.0.1...v0.1.0) (2025-08-10)
 
 

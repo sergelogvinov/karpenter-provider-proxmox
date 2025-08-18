@@ -102,6 +102,112 @@ spec:
                 - name
                 - type
                 type: object
+              kubeletConfiguration:
+                description: KubeletConfiguration defines kubelet config file
+                properties:
+                  allowedUnsafeSysctls:
+                    description: |-
+                      A comma separated whitelist of unsafe sysctls or sysctl patterns (ending in `*`).
+                      Unsafe sysctl groups are `kernel.shm*`, `kernel.msg*`, `kernel.sem`, `fs.mqueue.*`,
+                      and `net.*`. For example: "`kernel.msg*,net.ipv4.route.min_pmtu`"
+                    items:
+                      type: string
+                    type: array
+                  clusterDNS:
+                    description: |-
+                      ClusterDNS is a list of IP addresses for a cluster DNS server. If set,
+                      kubelet will configure all containers to use this for DNS resolution
+                      instead of the host's DNS servers.
+                    items:
+                      type: string
+                    type: array
+                  cpuCFSQuota:
+                    description: CPUCFSQuota enables CPU CFS quota enforcement for
+                      containers that specify CPU limits.
+                    type: boolean
+                  cpuCFSQuotaPeriod:
+                    description: |-
+                      cpuCFSQuotaPeriod sets the CPU CFS quota period value, `cpu.cfs_period_us`.
+                      The value must be between 1 ms and 1 second, inclusive.
+                    type: string
+                  cpuManagerPolicy:
+                    description: CPUManagerPolicy is the name of the policy to use.
+                    enum:
+                    - none
+                    - static
+                    type: string
+                  failSwapOn:
+                    description: FailSwapOn tells the Kubelet to fail to start if
+                      swap is enabled on the node.
+                    type: boolean
+                  imageGCHighThresholdPercent:
+                    description: |-
+                      ImageGCHighThresholdPercent is the percent of disk usage after which image
+                      garbage collection is always run. The percent is calculated by dividing this
+                      field value by 100, so this field must be between 0 and 100, inclusive.
+                      When specified, the value must be greater than ImageGCLowThresholdPercent.
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  imageGCLowThresholdPercent:
+                    description: |-
+                      ImageGCLowThresholdPercent is the percent of disk usage before which image
+                      garbage collection is never run. Lowest disk usage to garbage collect to.
+                      The percent is calculated by dividing this field value by 100,
+                      so the field value must be between 0 and 100, inclusive.
+                      When specified, the value must be less than imageGCHighThresholdPercent
+                    format: int32
+                    maximum: 100
+                    minimum: 0
+                    type: integer
+                  maxPods:
+                    description: |-
+                      MaxPods is an override for the maximum number of pods that can run on
+                      a worker node instance.
+                    format: int32
+                    maximum: 250
+                    minimum: 10
+                    type: integer
+                  providerID:
+                    description: |-
+                      ProviderID, if set, sets the unique ID of the instance that an external
+                      provider (i.e. cloudprovider) can use to identify a specific node.
+                    type: string
+                  shutdownGracePeriod:
+                    description: |-
+                      ShutdownGracePeriod specifies the total duration that the node should delay the
+                      shutdown and total grace period for pod termination during a node shutdown.
+                    type: string
+                  topologyManagerPolicy:
+                    description: |-
+                      TopologyManagerPolicy is the name of the topology manager policy to use.
+                      Valid values include:
+
+                      - `restricted`: kubelet only allows pods with optimal NUMA node alignment for requested resources;
+                      - `best-effort`: kubelet will favor pods with NUMA alignment of CPU and device resources;
+                      - `none`: kubelet has no knowledge of NUMA alignment of a pod's CPU and device resources.
+                      - `single-numa-node`: kubelet only allows pods with a single NUMA alignment
+                        of CPU and device resources.
+                    enum:
+                    - restricted
+                    - best-effort
+                    - none
+                    - single-numa-node
+                    type: string
+                  topologyManagerScope:
+                    description: |-
+                      TopologyManagerScope represents the scope of topology hint generation
+                      that topology manager requests and hint providers generate.
+                      Valid values include:
+
+                      - `container`: topology policy is applied on a per-container basis.
+                      - `pod`: topology policy is applied on a per-pod basis.
+                    enum:
+                    - container
+                    - pod
+                    type: string
+                type: object
               metadataOptions:
                 default:
                   type: none
@@ -1159,10 +1265,10 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
 ---
@@ -1172,10 +1278,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -1223,10 +1329,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -1244,10 +1350,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1264,10 +1370,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1285,10 +1391,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -1331,10 +1437,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.0.5
+    helm.sh/chart: karpenter-provider-proxmox-0.0.6
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.1.0"
+    app.kubernetes.io/version: "v0.2.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1
