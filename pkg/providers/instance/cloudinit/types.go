@@ -16,7 +16,7 @@ limitations under the License.
 
 package cloudinit
 
-type CloudInitData struct {
+type MetaData struct {
 	Hostname     string
 	InstanceID   string
 	InstanceUUID string

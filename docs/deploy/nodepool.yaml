@@ -64,6 +64,9 @@ spec:
     secretRef:
       name: talos-template
       namespace: kube-system
+  kubeletConfiguration:
+    allowedUnsafeSysctls: [net.core.somaxconn]
+    topologyManagerPolicy: best-effort
   bootDevice:
     size: 30Gi
     storage: zfs

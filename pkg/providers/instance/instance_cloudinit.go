@@ -151,7 +151,7 @@ func (p *DefaultProvider) generateCloudInit(
 		return "", "", "", "", fmt.Errorf("failed to get secret %s/%s: %v", secretKey.Namespace, secretKey.Name, err)
 	}
 
-	data := cloudinit.CloudInitData{
+	metadataValues := cloudinit.MetaData{
 		Hostname:     nodeClaim.Name,
 		InstanceID:   fmt.Sprintf("%d", vm.VMID),
 		InstanceType: instanceType.Name,
@@ -160,12 +160,19 @@ func (p *DefaultProvider) generateCloudInit(
 		Zone:         zone,
 	}
 
+	userdataValues := UserDataValues{
+		MetaData:             metadataValues,
+		NodeClassName:        nodeClass.Name,
+		Tags:                 nodeClass.Spec.Tags,
+		KubeletConfiguration: nodeClass.Spec.KubeletConfiguration,
+	}
+
 	userdata := string(secret.Data["user-data"])
 	if userdata == "" {
 		userdata = cloudinit.DefaultUserdata
 	}
 
-	userdata, err = cloudinit.ExecuteTemplate(userdata, data)
+	userdata, err = cloudinit.ExecuteTemplate(userdata, userdataValues)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to execute userdata template: %v", err)
 	}
@@ -175,14 +182,14 @@ func (p *DefaultProvider) generateCloudInit(
 		metadata = cloudinit.DefaultMetadata
 	}
 
-	metadata, err = cloudinit.ExecuteTemplate(metadata, data)
+	metadata, err = cloudinit.ExecuteTemplate(metadata, metadataValues)
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to execute metadata template: %v", err)
 	}
 
 	vendordata := string(secret.Data["vendor-data"])
 	if vendordata != "" {
-		vendordata, err = cloudinit.ExecuteTemplate(vendordata, data)
+		vendordata, err = cloudinit.ExecuteTemplate(vendordata, metadataValues)
 		if err != nil {
 			return "", "", "", "", fmt.Errorf("failed to execute vendor-data template: %v", err)
 		}
