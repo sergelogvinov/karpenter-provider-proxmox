@@ -1,6 +1,6 @@
 # Provider configuration file
 
-This file is used to configure the Proxmox Karpenter Provider.
+This file configures the Proxmox Karpenter Provider and defines how it connects to Proxmox VE cluster.
 
 ```yaml
 clusters:
@@ -22,7 +22,7 @@ clusters:
     region: Region-2
 ```
 
-## Cluster list
+## Cluster credentials
 
 You can define multiple clusters in the `clusters` section.
 

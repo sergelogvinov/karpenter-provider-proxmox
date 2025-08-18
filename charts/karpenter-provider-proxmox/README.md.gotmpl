@@ -18,12 +18,12 @@
 
 ```shell
 # Create role Karpenter
-pveum role add karpenter -privs "Datastore.AllocateSpace Datastore.Audit SDN.Audit SDN.Use VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.HWType VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt"
+pveum role add Karpenter -privs "Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit SDN.Audit SDN.Use VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.HWType VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt"
 
 # Create user and grant permissions
-pveum user add kubernetes-karpenter@pve
-pveum aclmod / -user kubernetes-karpenter@pve -role karpenter
-pveum user token add kubernetes-karpenter@pve karpenter -privsep 0 --comment "Kubernetes Karpenter"
+pveum user add kubernetes@pve
+pveum aclmod / -user kubernetes@pve -role Karpenter
+pveum user token add kubernetes@pve Karpenter -privsep 0 --comment "Kubernetes Karpenter"
 ```
 
 ## Helm values example
@@ -35,7 +35,7 @@ config:
   clusters:
     - url: https://cluster-api-1.exmple.com:8006/api2/json
       insecure: false
-      token_id: "kubernetes-csi@pve!csi"
+      token_id: "kubernetes@pve!karpenter"
       token_secret: "key"
       region: cluster-1
 

@@ -1,6 +1,6 @@
 # karpenter-provider-proxmox
 
-![Version: 0.0.4](https://img.shields.io/badge/Version-0.0.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.1.0](https://img.shields.io/badge/AppVersion-v0.1.0-informational?style=flat-square)
+![Version: 0.0.5](https://img.shields.io/badge/Version-0.0.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.1.0](https://img.shields.io/badge/AppVersion-v0.1.0-informational?style=flat-square)
 
 Karpenter for Proxmox VE.
 
@@ -20,12 +20,12 @@ Karpenter for Proxmox VE.
 
 ```shell
 # Create role Karpenter
-pveum role add karpenter -privs "Datastore.AllocateSpace Datastore.Audit SDN.Audit SDN.Use VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.HWType VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt"
+pveum role add Karpenter -privs "Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit SDN.Audit SDN.Use VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.HWType VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt"
 
 # Create user and grant permissions
-pveum user add kubernetes-karpenter@pve
-pveum aclmod / -user kubernetes-karpenter@pve -role karpenter
-pveum user token add kubernetes-karpenter@pve karpenter -privsep 0 --comment "Kubernetes Karpenter"
+pveum user add kubernetes@pve
+pveum aclmod / -user kubernetes@pve -role Karpenter
+pveum user token add kubernetes@pve Karpenter -privsep 0 --comment "Kubernetes Karpenter"
 ```
 
 ## Helm values example
@@ -37,7 +37,7 @@ config:
   clusters:
     - url: https://cluster-api-1.exmple.com:8006/api2/json
       insecure: false
-      token_id: "kubernetes-csi@pve!csi"
+      token_id: "kubernetes@pve!karpenter"
       token_secret: "key"
       region: cluster-1
 
@@ -97,7 +97,7 @@ helm upgrade -i --namespace=kube-system -f karpenter-provider-proxmox.yaml \
 | nodeSelector | object | `{}` | Node labels for controller assignment. ref: https://kubernetes.io/docs/user-guide/node-selection/ |
 | tolerations | list | `[{"effect":"NoSchedule","key":"node-role.kubernetes.io/control-plane","operator":"Exists"},{"effect":"NoSchedule","key":"node.cloudprovider.kubernetes.io/uninitialized","operator":"Exists"}]` | Tolerations for controller assignment. ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/ |
 | affinity | object | `{}` | Affinity for controller assignment. ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity |
-| extraEnvs | list | `[]` | Any extra environments for talos-cloud-controller-manager |
-| extraArgs | list | `[]` | Any extra arguments for talos-cloud-controller-manager |
+| extraEnvs | list | `[]` | Any extra environments for Karpenter |
+| extraArgs | list | `[]` | Any extra arguments for Karpenter |
 | extraVolumes | list | `[]` | Additional volumes for Pods |
 | extraVolumeMounts | list | `[]` | Additional volume mounts for Pods |

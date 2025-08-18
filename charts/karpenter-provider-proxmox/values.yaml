@@ -183,16 +183,14 @@ tolerations:
 # ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
 affinity: {}
 
-# -- Any extra environments for talos-cloud-controller-manager
+# -- Any extra environments for Karpenter
 extraEnvs:
   []
   # - name: KUBERNETES_SERVICE_HOST
   #   value: 127.0.0.1
 
-# -- Any extra arguments for talos-cloud-controller-manager
-extraArgs:
-  []
-  # - --cluster-name=kubernetes
+# -- Any extra arguments for Karpenter
+extraArgs: []
 
 # -- Additional volumes for Pods
 extraVolumes:
