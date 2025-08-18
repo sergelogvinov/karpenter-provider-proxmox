@@ -1,0 +1,47 @@
+{
+    "name": "Go-karpenter",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "vscode",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": "true",
+            "configureZshAsDefaultShell": "true",
+            "username": "vscode",
+            "userUid": "1000",
+            "userGid": "1000",
+            "upgradePackages": "true"
+        },
+        "ghcr.io/devcontainers/features/go:1": {
+            "version": "none"
+        },
+        "ghcr.io/devcontainers/features/git:1": {
+            "version": "latest",
+            "ppa": "false"
+        },
+        "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+        "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+            "version": "v1.33.4"
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "go.toolsManagement.checkForUpdates": "local",
+                "go.useLanguageServer": true,
+                "terminal.integrated.env.linux": {
+                    "KUBECONFIG": "kubeconfig"
+                }
+            },
+            "extensions": [
+                "golang.Go",
+                "timonwong.shellcheck",
+                "jinliming2.vscode-go-template",
+                "dmitrydorofeev.empty-indent",
+                "mohsen1.prettify-json",
+                "github.vscode-github-actions"
+            ]
+        }
+    }
+}
