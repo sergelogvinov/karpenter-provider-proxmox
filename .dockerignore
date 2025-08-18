@@ -3,9 +3,11 @@
 .git/
 **/.gitignore
 #
+.devcontainer/
+.vscode/
+#
 bin/
 charts/
-dist/
 docs/
 hack/
 vendor/
