@@ -87,12 +87,12 @@ type ProxmoxNodeClassSpec struct {
 	// Tags to apply to the VMs
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
-	Tags []string `json:"tags,omitempty"`
+	Tags []string `json:"tags,omitempty" hash:"ignore"`
 
 	// MetadataOptions for the generated launch template of provisioned nodes.
 	// +kubebuilder:default={"type":"none"}
 	// +optional
-	MetadataOptions *MetadataOptions `json:"metadataOptions,omitempty"`
+	MetadataOptions *MetadataOptions `json:"metadataOptions,omitempty" hash:"ignore"`
 
 	// SecurityGroups to apply to the VMs
 	// +kubebuilder:validation:MaxItems:=10

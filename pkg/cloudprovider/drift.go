@@ -20,6 +20,9 @@ import (
 	"context"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
+
+	corev1 "k8s.io/api/core/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -30,6 +33,66 @@ const (
 	ImageDrift     cloudprovider.DriftReason = "ImageDrift"
 )
 
-func (c *CloudProvider) isNodeClassDrifted(_ context.Context, _ *karpv1.NodeClaim, _ *v1alpha1.ProxmoxNodeClass) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (cloudprovider.DriftReason, error) {
+	checks := []func(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (cloudprovider.DriftReason, error){
+		c.areStaticFieldsDrifted,
+		c.isTemplateDrifted,
+	}
+
+	for _, check := range checks {
+		driftReason, err := check(ctx, nodeClaim, nodeClass)
+		if err != nil {
+			return "", err
+		}
+		if driftReason != "" {
+			return driftReason, nil
+		}
+	}
+
+	return "", nil
+}
+
+func (c *CloudProvider) areStaticFieldsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (cloudprovider.DriftReason, error) {
+	nodeClassHash, foundNodeClassHash := nodeClass.Annotations[v1alpha1.AnnotationProxmoxNodeClassHash]
+	nodeClassHashVersion, foundNodeClassHashVersion := nodeClass.Annotations[v1alpha1.AnnotationProxmoxNodeClassHashVersion]
+	nodeClaimHash, foundNodeClaimHash := nodeClaim.Annotations[v1alpha1.AnnotationProxmoxNodeClassHash]
+	nodeClaimHashVersion, foundNodeClaimHashVersion := nodeClaim.Annotations[v1alpha1.AnnotationProxmoxNodeClassHashVersion]
+
+	if !foundNodeClassHash || !foundNodeClaimHash || !foundNodeClassHashVersion || !foundNodeClaimHashVersion {
+		return "", nil
+	}
+
+	if nodeClassHashVersion != nodeClaimHashVersion {
+		return "", nil
+	}
+
+	if nodeClassHash != nodeClaimHash {
+		return NodeClassDrift, nil
+	}
+
+	return "", nil
+}
+
+func (c *CloudProvider) isTemplateDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (cloudprovider.DriftReason, error) {
+	if nodeClaim.Status.ImageID == "" {
+		return "", nil
+	}
+
+	_, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return "", nil //nolint: nilerr
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+
+	template, err := c.instanceTemplateProvider.Get(ctx, nodeClass, region, zone)
+	if err != nil {
+		return "", nil //nolint: nilerr
+	}
+
+	if template.TemplateHash != nodeClaim.Status.ImageID {
+		return ImageDrift, nil
+	}
+
 	return "", nil
 }

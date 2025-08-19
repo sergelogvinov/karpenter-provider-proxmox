@@ -23,6 +23,8 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -65,6 +67,8 @@ type InstanceTemplateInfo struct {
 	Zone string
 	// TemplateID is the ID of the template.
 	TemplateID uint64
+	// TemplateHash is the hash of the template.
+	TemplateHash string
 	// TemplateTags are the tags associated with the template.
 	TemplateTags []string
 	// TemplateStorage is the storage of boot disk for the template.
@@ -139,7 +143,7 @@ func (p *DefaultProvider) ListByRegion(ctx context.Context, nodeClass *v1alpha1.
 func (p *DefaultProvider) Get(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass, region string, zone string) (*InstanceTemplateInfo, error) {
 	log := p.log.WithName("Get()")
 
-	log.V(1).Info("Getting instance template for node class", "nodeClass", nodeClass.Name, "region", region, "zone", zone, "name", nodeClass.Spec.InstanceTemplate.Name)
+	log.V(1).Info("Getting instance template for node class", "nodeClass", nodeClass.Name, "region", region, "zone", zone, "instanceTemplate", nodeClass.Spec.InstanceTemplate.Name)
 
 	if region == "" {
 		return nil, fmt.Errorf("region must be specified")
@@ -219,6 +223,7 @@ func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
 				}
 
 				info.TemplateTags = strings.Split(vmRes.Tags, ",")
+				info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(vmRes.VirtualMachineConfig.Meta, hashstructure.FormatV2, nil)))
 
 				if vmRes.VirtualMachineConfig != nil {
 					info.Status = InstanceTemplateStatusAvailable
