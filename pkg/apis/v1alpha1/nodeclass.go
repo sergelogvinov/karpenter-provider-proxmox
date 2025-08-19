@@ -19,7 +19,6 @@ package v1alpha1
 import (
 	"fmt"
 
-	"github.com/awslabs/operatorpkg/status"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 
@@ -86,6 +85,7 @@ type ProxmoxNodeClassSpec struct {
 	BootDevice *BlockDevice `json:"bootDevice"`
 
 	// Tags to apply to the VMs
+	// +kubebuilder:validation:MaxItems:=10
 	// +optional
 	Tags []string `json:"tags,omitempty"`
 
@@ -189,6 +189,7 @@ type KubeletConfiguration struct {
 	// ClusterDNS is a list of IP addresses for a cluster DNS server. If set,
 	// kubelet will configure all containers to use this for DNS resolution
 	// instead of the host's DNS servers.
+	// +kubebuilder:validation:MaxItems:=3
 	// +optional
 	ClusterDNS []string `json:"clusterDNS,omitempty" yaml:"clusterDNS,omitempty"`
 
@@ -201,6 +202,7 @@ type KubeletConfiguration struct {
 
 	// ProviderID, if set, sets the unique ID of the instance that an external
 	// provider (i.e. cloudprovider) can use to identify a specific node.
+	// +kubebuilder:validation:MinLength:=1
 	// +optional
 	ProviderID string `json:"providerID,omitempty" yaml:"providerID,omitempty"`
 
@@ -213,6 +215,7 @@ type KubeletConfiguration struct {
 type BlockDevice struct {
 	// Size is the size of the block device in `Gi`, `G`, `Ti`, or `T`
 	// +kubebuilder:validation:Type:=string
+	// +kubebuilder:validation:Pattern=`^\d+(T|G|Ti|Gi)$`
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
 
@@ -230,6 +233,7 @@ type InstanceTemplate struct {
 	Type string `json:"type"`
 
 	// Name is the name of the instance template
+	// +kubebuilder:validation:MinLength:=1
 	// +required
 	Name string `json:"name"`
 }
@@ -265,78 +269,6 @@ type SecurityGroupsTerm struct {
 	// +kubebuilder:validation:MaxLength=30
 	// +required
 	Name string `json:"name,omitempty"`
-}
-
-// ProxmoxNodeClassStatus defines the observed state of ProxmoxNodeClass
-type ProxmoxNodeClassStatus struct {
-	// LastValidationTime is the last time the nodeclass was validated
-	// +optional
-	LastValidationTime metav1.Time `json:"lastValidationTime,omitempty"`
-
-	// ValidationError contains the error message from the last validation
-	// +optional
-	ValidationError string `json:"validationError,omitempty"`
-
-	// Resources is the list of resources that have been provisioned.
-	// +optional
-	Resources corev1.ResourceList `json:"resources,omitempty"`
-
-	// SelectedZones is a list of nodes that match this node class
-	// It depends on instanceTemplate and region.
-	// This field is populated by the controller and should not be set manually.
-	// +optional
-	SelectedZones []string `json:"selectedZones,omitempty"`
-
-	// Conditions contains signals for health and readiness
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// TaskRef is a reference to the task that is being executed.
-	// +optional
-	// TaskRef *string `json:"taskRef,omitempty"`
-}
-
-// StatusConditions returns the condition set for the status.Object interface
-func (in *ProxmoxNodeClass) StatusConditions() status.ConditionSet {
-	return status.NewReadyConditions().For(in)
-}
-
-// GetConditions returns the conditions as status.Conditions for the status.Object interface
-func (in *ProxmoxNodeClass) GetConditions() []status.Condition {
-	conditions := make([]status.Condition, 0, len(in.Status.Conditions))
-	for _, c := range in.Status.Conditions {
-		conditions = append(conditions, status.Condition{
-			Type:               c.Type,
-			Status:             c.Status, // Use c.Status directly as it's already a string-like value
-			LastTransitionTime: c.LastTransitionTime,
-			Reason:             c.Reason,
-			Message:            c.Message,
-			ObservedGeneration: c.ObservedGeneration,
-		})
-	}
-
-	return conditions
-}
-
-// SetConditions sets the conditions from status.Conditions for the status.Object interface
-func (in *ProxmoxNodeClass) SetConditions(conditions []status.Condition) {
-	metav1Conditions := make([]metav1.Condition, 0, len(conditions))
-	for _, c := range conditions {
-		if c.LastTransitionTime.IsZero() {
-			continue
-		}
-
-		metav1Conditions = append(metav1Conditions, metav1.Condition{
-			Type:               c.Type,
-			Status:             c.Status,
-			LastTransitionTime: c.LastTransitionTime,
-			Reason:             c.Reason,
-			Message:            c.Message,
-			ObservedGeneration: c.ObservedGeneration,
-		})
-	}
-
-	in.Status.Conditions = metav1Conditions
 }
 
 func (in *ProxmoxNodeClass) Hash() string {

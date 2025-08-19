@@ -52,7 +52,7 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, "nodeclass.hash")
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	nodeClassCopy := nodeClass.DeepCopy()
 	nodeClassCopy.Annotations = lo.Assign(nodeClass.Annotations, map[string]string{

@@ -34,8 +34,6 @@ import (
 )
 
 const (
-	controllerName = "providers.cloudcapacity.nodeload"
-
 	scanPeriod = 1 * time.Minute
 )
 
@@ -49,8 +47,12 @@ func NewController(cloudCapacityProvider cloudcapacity.Provider) (*Controller, e
 	}, nil
 }
 
+func (c *Controller) Name() string {
+	return "providers.cloudcapacity.nodeload"
+}
+
 func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
-	ctx = injection.WithControllerName(ctx, controllerName)
+	ctx = injection.WithControllerName(ctx, c.Name())
 
 	work := []func(ctx context.Context) error{
 		c.cloudCapacityProvider.UpdateNodeLoad,
@@ -72,7 +74,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
-		Named(controllerName).
+		Named(c.Name()).
 		WatchesRawSource(singleton.Source()).
 		Complete(singleton.AsReconciler(c))
 }
