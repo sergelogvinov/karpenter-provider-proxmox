@@ -71,12 +71,14 @@ spec:
                   If not specified, a block storage device will be used from the instance template.
                 properties:
                   size:
+                    allOf:
+                    - pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    - pattern: ^\d+(T|G|Ti|Gi)$
                     anyOf:
                     - type: integer
                     - type: string
                     description: Size is the size of the block device in `Gi`, `G`,
                       `Ti`, or `T`
-                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     type: string
                     x-kubernetes-int-or-string: true
                   storage:
@@ -90,6 +92,7 @@ spec:
                 properties:
                   name:
                     description: Name is the name of the instance template
+                    minLength: 1
                     type: string
                   type:
                     description: Type is the type of the instance template
@@ -118,6 +121,7 @@ spec:
                       instead of the host's DNS servers.
                     items:
                       type: string
+                    maxItems: 3
                     type: array
                   cpuCFSQuota:
                     description: CPUCFSQuota enables CPU CFS quota enforcement for
@@ -171,6 +175,7 @@ spec:
                     description: |-
                       ProviderID, if set, sets the unique ID of the instance that an external
                       provider (i.e. cloudprovider) can use to identify a specific node.
+                    minLength: 1
                     type: string
                   shutdownGracePeriod:
                     description: |-
@@ -287,6 +292,7 @@ spec:
                 description: Tags to apply to the VMs
                 items:
                   type: string
+                maxItems: 10
                 type: array
             required:
             - instanceTemplate
@@ -297,8 +303,8 @@ spec:
               conditions:
                 description: Conditions contains signals for health and readiness
                 items:
-                  description: Condition contains details for one aspect of the current
-                    state of this API Resource.
+                  description: Condition aliases the upstream type and adds additional
+                    helper methods
                   properties:
                     lastTransitionTime:
                       description: |-
@@ -351,11 +357,6 @@ spec:
                   - type
                   type: object
                 type: array
-              lastValidationTime:
-                description: LastValidationTime is the last time the nodeclass was
-                  validated
-                format: date-time
-                type: string
               resources:
                 additionalProperties:
                   anyOf:
@@ -373,10 +374,6 @@ spec:
                 items:
                   type: string
                 type: array
-              validationError:
-                description: ValidationError contains the error message from the last
-                  validation
-                type: string
             type: object
         type: object
     served: true
