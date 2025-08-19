@@ -16,6 +16,7 @@ limitations under the License.
 
 package cloudinit
 
+// MetaData contains information about the instance.
 type MetaData struct {
 	Hostname     string
 	InstanceID   string
@@ -26,12 +27,14 @@ type MetaData struct {
 	Zone         string
 }
 
+// NetworkConfig contains network configuration for the instance.
 type NetworkConfig struct {
 	Interfaces    []InterfaceConfig
 	SearchDomains []string `yaml:"search_domains,omitempty"`
 	NameServers   []string `yaml:"name_servers,omitempty"`
 }
 
+// InterfaceConfig contains configuration for a network interface.
 type InterfaceConfig struct {
 	Name     string   `yaml:"name"`
 	MacAddr  string   `yaml:"mac_address,omitempty"`

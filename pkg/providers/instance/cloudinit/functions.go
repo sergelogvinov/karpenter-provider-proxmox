@@ -67,6 +67,7 @@ var genericMap = map[string]interface{}{
 	"hasSuffix": func(substr string, str string) bool { return strings.HasSuffix(str, substr) },
 }
 
+// ExecuteTemplate executes a template with the given data.
 func ExecuteTemplate(tmpl string, data interface{}) (string, error) {
 	t, err := template.New("cloudinit").Funcs(genericFuncMap()).Parse(tmpl)
 	if err != nil {

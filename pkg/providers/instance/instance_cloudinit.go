@@ -18,6 +18,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -60,7 +62,7 @@ func (p *DefaultProvider) attachCloudInitISO(
 		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
 	}
 
-	userdata, metadata, vendordata, networkconfig, err := p.generateCloudInit(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, vm)
+	userdata, metadata, vendordata, networkconfig, err := p.generateCloudInitVars(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, vm)
 	if err != nil {
 		return fmt.Errorf("failed to generate cloud-init for vm %d in region %s: %v", vmID, region, err)
 	}
@@ -71,6 +73,51 @@ func (p *DefaultProvider) attachCloudInitISO(
 	}
 
 	return nil
+}
+
+func applyKubernetesConfiguration(
+	nodeClass *v1alpha1.ProxmoxNodeClass,
+	instanceType *cloudprovider.InstanceType,
+) *KubeletConfiguration {
+	kubeletConfig := &KubeletConfiguration{}
+
+	if nodeClass.Spec.KubeletConfiguration != nil {
+		data, _ := json.Marshal(nodeClass.Spec.KubeletConfiguration) //nolint: errchkjson
+		json.Unmarshal(data, kubeletConfig)
+	}
+
+	if instanceType.Overhead != nil {
+		if len(instanceType.Overhead.KubeReserved) > 0 {
+			kubeletConfig.KubeReserved = requestsToMap(instanceType.Overhead.KubeReserved)
+		}
+
+		if len(instanceType.Overhead.SystemReserved) > 0 {
+			kubeletConfig.SystemReserved = requestsToMap(instanceType.Overhead.SystemReserved)
+		}
+	}
+
+	return kubeletConfig
+}
+
+func requestsToMap(requests corev1.ResourceList) map[string]string {
+	m := make(map[string]string)
+
+	cpu := requests.Cpu().MilliValue()
+	if cpu > 0 {
+		m[string(corev1.ResourceCPU)] = fmt.Sprintf("%dm", cpu)
+	}
+
+	mem := requests.Memory().Value() / (1024 * 1024)
+	if mem > 0 {
+		m[string(corev1.ResourceMemory)] = fmt.Sprintf("%dMi", mem)
+	}
+
+	storage := requests.StorageEphemeral().Value() / (1024 * 1024 * 1024)
+	if storage > 0 {
+		m[string(corev1.ResourceEphemeralStorage)] = fmt.Sprintf("%dGi", storage)
+	}
+
+	return m
 }
 
 func networkFromInstanceConfig(vmc *proxmox.VirtualMachineConfig) cloudinit.NetworkConfig {
@@ -91,6 +138,7 @@ func networkFromInstanceConfig(vmc *proxmox.VirtualMachineConfig) cloudinit.Netw
 
 	ipconfigs := vmc.MergeIPConfigs()
 
+	// FIXME: refactor this
 	for i, net := range nets {
 		inx, _ := strconv.Atoi(strings.TrimPrefix(i, "net"))
 		params := strings.Split(net, ",")
@@ -134,7 +182,7 @@ func networkFromInstanceConfig(vmc *proxmox.VirtualMachineConfig) cloudinit.Netw
 	return network
 }
 
-func (p *DefaultProvider) generateCloudInit(
+func (p *DefaultProvider) generateCloudInitVars(
 	ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
@@ -164,8 +212,9 @@ func (p *DefaultProvider) generateCloudInit(
 		MetaData:             metadataValues,
 		NodeClassName:        nodeClass.Name,
 		Tags:                 nodeClass.Spec.Tags,
-		KubeletConfiguration: nodeClass.Spec.KubeletConfiguration,
+		KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
 	}
+	userdataValues.KubeletConfiguration.ProviderID = metadataValues.ProviderID
 
 	userdata := string(secret.Data["user-data"])
 	if userdata == "" {

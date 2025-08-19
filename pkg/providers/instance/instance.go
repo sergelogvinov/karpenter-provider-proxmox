@@ -20,9 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"math/rand/v2"
-	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
@@ -77,9 +75,8 @@ func NewProvider(
 // Create an instance given the constraints.
 func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
 	log := log.FromContext(ctx).WithName("instance.Create()")
-	log.V(1).Info("Requirements", "nodeClaim", nodeClaim.Spec.Requirements, "nodeClass", nodeClass.Spec)
 
-	var errs []error
+	errs := []error{}
 
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	for _, instanceType := range instanceTypes {
@@ -111,7 +108,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 			for _, zone := range zones {
 				instanceTemplate, err := p.instanceTemplateProvider.Get(ctx, nodeClass, region, zone)
 				if err != nil {
-					log.Error(err, "Failed to get instance template", "nodeClass", nodeClass.Name, "region", region, "zone", zone)
+					log.Error(err, "Failed to get instance template", "region", region, "zone", zone, "instanceType", instanceType.Name)
 					errs = append(errs, err)
 
 					continue
@@ -119,34 +116,53 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone)
 				if err != nil {
-					log.Error(err, "Failed to create instance", "nodeClaim", nodeClaim.Name, "instanceType", instanceType.Name, "region", region, "zone", zone)
+					log.Error(err, "Failed to create instance", "region", region, "zone", zone, "instanceType", instanceType.Name)
 					errs = append(errs, err)
 
 					continue
 				}
 
+				node.Labels[v1alpha1.LabelInstanceImageID] = strconv.Itoa(int(instanceTemplate.TemplateID))
+
+				// FIXME: reserve capacity in creation stage
 				p.cloudCapacityProvider.UpdateNodeCapacityInZone(ctx, region, zone)
 
 				return node, nil
 			}
 		}
+
+		errs = append(errs, fmt.Errorf("no available regions found for instance type %s", instanceType.Name))
 	}
 
 	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {
-	log := log.FromContext(ctx).WithName("instance.Get()")
+	log := log.FromContext(ctx).WithName("instance.Get()").WithValues("providerID", providerID)
+	log.Info("Get instance by providerID")
 
 	vmid, region, err := provider.ParseProviderID(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse providerID: %v", err)
 	}
 
+	vm, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
+	if err != nil {
+		if err == goproxmox.ErrVirtualMachineNotFound {
+			return nil, cloudprovider.NewNodeClaimNotFoundError(err)
+		}
+
+		return nil, fmt.Errorf("failed to get vm: %v", err)
+	}
+
+	// FIXME
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
+			Name: vm.Name,
 			Labels: map[string]string{
-				corev1.LabelTopologyRegion: region,
+				corev1.LabelTopologyRegion:  region,
+				corev1.LabelTopologyZone:    vm.Node,
+				karpv1.CapacityTypeLabelKey: karpv1.CapacityTypeOnDemand,
 			},
 		},
 		Spec: corev1.NodeSpec{
@@ -160,29 +176,7 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 		},
 	}
 
-	px, err := p.cluster.GetProxmoxCluster(region)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
-	}
-
-	vm, err := px.FindVMByID(ctx, uint64(vmid))
-	if err != nil {
-		if err == goproxmox.ErrVirtualMachineNotFound {
-			return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
-		}
-
-		return nil, fmt.Errorf("failed to get vm: %v", err)
-	}
-
-	node.ObjectMeta.Name = vm.Name
-	node.ObjectMeta.Labels = map[string]string{
-		corev1.LabelTopologyRegion:            region,
-		corev1.LabelTopologyZone:              vm.Node,
-		karpv1.CapacityTypeLabelKey:           karpv1.CapacityTypeOnDemand,
-		v1alpha1.LabelInstanceCPUManufacturer: "kvm64",
-	}
-
-	log.V(1).Info("Get instance", "node", node.Name, "providerID", providerID, "vmID", vm.VMID)
+	log.V(1).Info("Get instance", "node", vm.Name, "vmID", vm.VMID)
 
 	return node, nil
 }
@@ -199,15 +193,10 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
 	}
 
-	px, err := p.cluster.GetProxmoxCluster(region)
-	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
-	}
-
-	vm, err := px.FindVMByID(ctx, uint64(vmid))
+	vm, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
 	if err != nil {
 		if err == goproxmox.ErrVirtualMachineNotFound {
-			return cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("instance not found: %w", err))
+			return cloudprovider.NewNodeClaimNotFoundError(err)
 		}
 
 		return fmt.Errorf("failed to get vm: %v", err)
@@ -218,9 +207,9 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		zone = nodeClaim.Labels[corev1.LabelTopologyZone]
 	}
 
-	log.V(1).Info("Delete instance", "nodeClaim", nodeClaim.Name, "vmID", vmid, "region", region, "zone", zone)
+	log.V(1).Info("Delete instance", "region", region, "zone", zone, "vmID", vmid)
 
-	if err = px.DeleteVMByID(ctx, zone, vmid); err != nil {
+	if err = p.cluster.DeleteVMByIDInRegion(ctx, region, vm); err != nil {
 		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
 	}
 
@@ -235,13 +224,14 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	region string,
 	zone string,
 ) (*corev1.Node, error) {
-	log := log.FromContext(ctx).WithName("instance.instanceCreate()")
+	log := log.FromContext(ctx).WithName("instance.instanceCreate()").WithValues("region", region, "zone", zone, "instanceType", instanceType.Name)
 
 	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
+	// FIXME: Need random ID generator
 	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get next id: %v", err)
@@ -312,8 +302,11 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		}
 	}
 
-	if err = px.CreateVMFirewallRules(ctx, newID, zone, rules); err != nil {
-		return nil, fmt.Errorf("failed to create firewall rules for vm %d in region %s: %v", newID, region, err)
+	if len(rules) > 0 {
+		err = px.CreateVMFirewallRules(ctx, newID, zone, rules)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create firewall rules for vm %d in region %s: %v", newID, region, err)
+		}
 	}
 
 	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
@@ -323,7 +316,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		}
 	}
 
-	log.V(1).Info("StartVM", "Name", nodeClaim.Name, "ID", newID, "region", region, "zone", zone)
+	log.V(1).Info("Starting VM", "vmID", newID)
 
 	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
 		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
@@ -355,55 +348,4 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	}
 
 	return node, nil
-}
-
-func (p *DefaultProvider) sortBestZoneByPlacementStrategy(placementStrategy *v1alpha1.PlacementStrategy, region string, zones []string) []string {
-	if len(zones) == 1 {
-		return zones
-	}
-
-	strategy := placementStrategy
-	if strategy == nil {
-		strategy = &v1alpha1.PlacementStrategy{
-			ZoneBalance: v1alpha1.PlacementStrategyBalanced,
-		}
-	}
-
-	switch strategy.ZoneBalance {
-	case v1alpha1.PlacementStrategyAvailabilityFirst:
-		// Sort zones randomly to prioritize availability
-		sortedZones := make([]string, len(zones))
-		for i, v := range rand.Perm(len(zones)) {
-			sortedZones[v] = zones[i]
-		}
-
-		return sortedZones
-	default:
-		// Sort zones by CPU load
-		return p.cloudCapacityProvider.SortZonesByCPULoad(region, zones)
-	}
-}
-
-func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requirements scheduling.Requirements) []*cloudprovider.InstanceType {
-	// Order instance types so that we get the cheapest instance types of the available offerings
-	sort.Slice(instanceTypes, func(i, j int) bool {
-		iPrice := math.MaxFloat64
-		jPrice := math.MaxFloat64
-
-		if len(instanceTypes[i].Offerings.Available().Compatible(requirements)) > 0 {
-			iPrice = instanceTypes[i].Offerings.Available().Compatible(requirements).Cheapest().Price
-		}
-
-		if len(instanceTypes[j].Offerings.Available().Compatible(requirements)) > 0 {
-			jPrice = instanceTypes[j].Offerings.Available().Compatible(requirements).Cheapest().Price
-		}
-
-		if iPrice == jPrice {
-			return instanceTypes[i].Name < instanceTypes[j].Name
-		}
-
-		return iPrice < jPrice
-	})
-
-	return instanceTypes
 }

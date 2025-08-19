@@ -86,8 +86,7 @@ func NewCloudProvider(
 // Create launches a NodeClaim with the given resource requests and requirements and returns a hydrated
 // NodeClaim back with resolved NodeClaim labels for the launched NodeClaim
 func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*karpv1.NodeClaim, error) {
-	log := c.log.WithName("Create()")
-	log.Info("Executed with params", "nodeClaim", nodeClaim.Name, "spec", nodeClaim.Spec)
+	log := c.log.WithName("Create()").WithValues("nodeClaim", nodeClaim.Name)
 
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
@@ -141,8 +140,7 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 // NodeClaimNotFoundError if the cloudProvider instance is already terminated and nil if deletion was triggered.
 // Karpenter will keep retrying until Delete returns a NodeClaimNotFound error.
 func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
-	log := c.log.WithName("Delete()")
-	log.Info("Executed with params", "nodePool", nodeClaim.Name, "providerID", nodeClaim.Status.ProviderID)
+	log := c.log.WithName("Delete()").WithValues("nodeClaim", nodeClaim.Name, "providerID", nodeClaim.Status.ProviderID)
 
 	providerID := nodeClaim.Status.ProviderID
 	if providerID == "" {
@@ -162,14 +160,17 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 
 // Get retrieves a NodeClaim from the cloudprovider by its provider id
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.NodeClaim, error) {
-	log := c.log.WithName("Get()")
-	log.Info("Executed with params", "providerID", providerID)
+	log := c.log.WithName("Get()").WithValues("providerID", providerID)
 
 	if providerID == "" {
+		log.Info("providerID is empty")
+
 		return nil, fmt.Errorf("providerID is empty")
 	}
 
 	if !strings.HasPrefix(providerID, ProxmoxProviderPrefix) {
+		log.Info("providerID does not have the correct prefix")
+
 		return nil, fmt.Errorf("providerID does not have the correct prefix")
 	}
 
@@ -182,6 +183,7 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Node
 		return nil, fmt.Errorf("getting instance, %w", err)
 	}
 
+	// FIXME: make prediction by resources?
 	instanceType, err := c.resolveInstanceTypeFromNode(ctx, node)
 	if err != nil {
 		log.Error(err, "Failed to resolve instance type from node", "node", node.Name)
