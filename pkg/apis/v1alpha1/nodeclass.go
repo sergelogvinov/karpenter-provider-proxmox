@@ -121,16 +121,16 @@ type KubeletConfiguration struct {
 	// CPUManagerPolicy is the name of the policy to use.
 	// +kubebuilder:validation:Enum:={none,static}
 	// +optional
-	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty" yaml:"cpuManagerPolicy,omitempty"`
+	CPUManagerPolicy string `json:"cpuManagerPolicy,omitempty"`
 
 	// CPUCFSQuota enables CPU CFS quota enforcement for containers that specify CPU limits.
 	// +optional
-	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty" yaml:"cpuCFSQuota,omitempty"`
+	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 
 	// cpuCFSQuotaPeriod sets the CPU CFS quota period value, `cpu.cfs_period_us`.
 	// The value must be between 1 ms and 1 second, inclusive.
 	// +optional
-	CPUCFSQuotaPeriod *metav1.Duration `json:"cpuCFSQuotaPeriod,omitempty" yaml:"cpuCFSQuotaPeriod,omitempty"`
+	CPUCFSQuotaPeriod *metav1.Duration `json:"cpuCFSQuotaPeriod,omitempty"`
 
 	// TopologyManagerPolicy is the name of the topology manager policy to use.
 	// Valid values include:
@@ -143,7 +143,7 @@ type KubeletConfiguration struct {
 	//
 	// +kubebuilder:validation:Enum:={restricted,best-effort,none,single-numa-node}
 	// +optional
-	TopologyManagerPolicy string `json:"topologyManagerPolicy,omitempty" yaml:"topologyManagerPolicy,omitempty"`
+	TopologyManagerPolicy string `json:"topologyManagerPolicy,omitempty"`
 
 	// TopologyManagerScope represents the scope of topology hint generation
 	// that topology manager requests and hint providers generate.
@@ -154,7 +154,7 @@ type KubeletConfiguration struct {
 	//
 	// +kubebuilder:validation:Enum:={container,pod}
 	// +optional
-	TopologyManagerScope string `json:"topologyManagerScope,omitempty" yaml:"topologyManagerScope,omitempty"`
+	TopologyManagerScope string `json:"topologyManagerScope,omitempty"`
 
 	// ImageGCHighThresholdPercent is the percent of disk usage after which image
 	// garbage collection is always run. The percent is calculated by dividing this
@@ -163,7 +163,7 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:Minimum:=0
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
-	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty" yaml:"imageGCHighThresholdPercent,omitempty"`
+	ImageGCHighThresholdPercent *int32 `json:"imageGCHighThresholdPercent,omitempty"`
 
 	// ImageGCLowThresholdPercent is the percent of disk usage before which image
 	// garbage collection is never run. Lowest disk usage to garbage collect to.
@@ -173,42 +173,36 @@ type KubeletConfiguration struct {
 	// +kubebuilder:validation:Minimum:=0
 	// +kubebuilder:validation:Maximum:=100
 	// +optional
-	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty" yaml:"imageGCLowThresholdPercent,omitempty"`
+	ImageGCLowThresholdPercent *int32 `json:"imageGCLowThresholdPercent,omitempty"`
 
 	// ShutdownGracePeriod specifies the total duration that the node should delay the
 	// shutdown and total grace period for pod termination during a node shutdown.
 	// +optional
-	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty" yaml:"shutdownGracePeriod,omitempty"`
+	ShutdownGracePeriod *metav1.Duration `json:"shutdownGracePeriod,omitempty"`
 
 	// A comma separated whitelist of unsafe sysctls or sysctl patterns (ending in `*`).
 	// Unsafe sysctl groups are `kernel.shm*`, `kernel.msg*`, `kernel.sem`, `fs.mqueue.*`,
 	// and `net.*`. For example: "`kernel.msg*,net.ipv4.route.min_pmtu`"
 	// +optional
-	AllowedUnsafeSysctls []string `json:"allowedUnsafeSysctls,omitempty" yaml:"allowedUnsafeSysctls,omitempty"`
+	AllowedUnsafeSysctls []string `json:"allowedUnsafeSysctls,omitempty"`
 
 	// ClusterDNS is a list of IP addresses for a cluster DNS server. If set,
 	// kubelet will configure all containers to use this for DNS resolution
 	// instead of the host's DNS servers.
 	// +kubebuilder:validation:MaxItems:=3
 	// +optional
-	ClusterDNS []string `json:"clusterDNS,omitempty" yaml:"clusterDNS,omitempty"`
+	ClusterDNS []string `json:"clusterDNS,omitempty"`
 
 	// MaxPods is an override for the maximum number of pods that can run on
 	// a worker node instance.
 	// +kubebuilder:validation:Minimum:=10
 	// +kubebuilder:validation:Maximum:=250
 	// +optional
-	MaxPods *int32 `json:"maxPods,omitempty" yaml:"maxPods,omitempty"`
-
-	// ProviderID, if set, sets the unique ID of the instance that an external
-	// provider (i.e. cloudprovider) can use to identify a specific node.
-	// +kubebuilder:validation:MinLength:=1
-	// +optional
-	ProviderID string `json:"providerID,omitempty" yaml:"providerID,omitempty"`
+	MaxPods *int32 `json:"maxPods,omitempty"`
 
 	// FailSwapOn tells the Kubelet to fail to start if swap is enabled on the node.
 	// +optional
-	FailSwapOn *bool `json:"failSwapOn,omitempty" yaml:"failSwapOn,omitempty"`
+	FailSwapOn *bool `json:"failSwapOn,omitempty"`
 }
 
 // BlockDevice defines the block device configuration for the VM

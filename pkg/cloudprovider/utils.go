@@ -25,6 +25,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -40,14 +41,6 @@ func (c *CloudProvider) resolveInstanceTypes(ctx context.Context, nodeClaim *kar
 	}
 
 	reqs := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
-
-	// for _, instanceType := range instanceTypes {
-	// 	zones := []string{}
-	// 	for _, req := range instanceType.Offerings {
-	// 		zones = append(zones, req.Zone())
-	// 	}
-	// 	c.log.V(1).Info("Compatible instance types", "name", instanceType.Name, "compatible", instanceType.Offerings.Compatible(reqs).Available(), "zones", zones)
-	// }
 
 	return lo.Filter(instanceTypes, func(i *cloudprovider.InstanceType, _ int) bool {
 		return len(i.Offerings.Compatible(reqs).Available()) > 0 &&
@@ -78,8 +71,8 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudpr
 			}
 		}
 
-		nodeClaim.Status.Capacity = instanceType.Capacity
-		nodeClaim.Status.Allocatable = instanceType.Allocatable()
+		nodeClaim.Status.Capacity = lo.PickBy(instanceType.Capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
+		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
 	} else {
 		labels[karpv1.CapacityTypeLabelKey] = karpv1.CapacityTypeOnDemand
 
@@ -100,6 +93,10 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudpr
 
 	nodeClaim.Status.NodeName = node.Name
 	nodeClaim.Status.ProviderID = node.Spec.ProviderID
+
+	if id, ok := node.Labels[v1alpha1.LabelInstanceImageID]; ok {
+		nodeClaim.Status.ImageID = id
+	}
 
 	return nodeClaim, nil
 }

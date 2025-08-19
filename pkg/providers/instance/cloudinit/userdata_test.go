@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 )
@@ -50,7 +50,7 @@ func TestUserData(t *testing.T) {
 	metadata := struct {
 		cloudinit.MetaData
 
-		KubeletConfiguration *v1alpha1.KubeletConfiguration
+		KubeletConfiguration *instance.KubeletConfiguration
 	}{
 		MetaData: cloudinit.MetaData{
 			Hostname:     "hostname-1",
@@ -60,7 +60,7 @@ func TestUserData(t *testing.T) {
 			Region:       region,
 			Zone:         zone,
 		},
-		KubeletConfiguration: &v1alpha1.KubeletConfiguration{
+		KubeletConfiguration: &instance.KubeletConfiguration{
 			AllowedUnsafeSysctls:  []string{"kernel.msgmax", "kernel.shmmax"},
 			TopologyManagerPolicy: "best-effort",
 			ProviderID:            provider.GetProviderID(region, 100),

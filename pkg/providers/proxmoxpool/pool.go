@@ -85,7 +85,7 @@ func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool
 		}, nil
 	}
 
-	return nil, fmt.Errorf("no Proxmox clusters found")
+	return nil, ErrClustersNotFound
 }
 
 // GetProxmoxCluster returns supported regions.
@@ -132,7 +132,30 @@ func (c *ProxmoxPool) GetProxmoxCluster(region string) (*goproxmox.APIClient, er
 		return c.clients[region], nil
 	}
 
-	return nil, fmt.Errorf("proxmox cluster %s not found", region)
+	return nil, ErrRegionNotFound
+}
+
+func (c *ProxmoxPool) GetVMByIDInRegion(ctx context.Context, region string, vmid uint64) (*proxmox.ClusterResource, error) {
+	px, err := c.GetProxmoxCluster(region)
+	if err != nil {
+		return nil, err
+	}
+
+	vm, err := px.FindVMByID(ctx, uint64(vmid)) //nolint: unconvert
+	if err != nil {
+		return nil, err
+	}
+
+	return vm, nil
+}
+
+func (c *ProxmoxPool) DeleteVMByIDInRegion(ctx context.Context, region string, vm *proxmox.ClusterResource) error {
+	px, err := c.GetProxmoxCluster(region)
+	if err != nil {
+		return err
+	}
+
+	return px.DeleteVMByID(ctx, vm.Node, int(vm.VMID))
 }
 
 // FindVMByNode find a VM by kubernetes node resource in all Proxmox clusters.

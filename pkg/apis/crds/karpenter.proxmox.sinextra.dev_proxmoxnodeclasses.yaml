@@ -171,12 +171,6 @@ spec:
                     maximum: 250
                     minimum: 10
                     type: integer
-                  providerID:
-                    description: |-
-                      ProviderID, if set, sets the unique ID of the instance that an external
-                      provider (i.e. cloudprovider) can use to identify a specific node.
-                    minLength: 1
-                    type: string
                   shutdownGracePeriod:
                     description: |-
                       ShutdownGracePeriod specifies the total duration that the node should delay the

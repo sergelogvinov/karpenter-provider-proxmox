@@ -272,6 +272,7 @@ func applyInstanceOptimization(vm *proxmox.VirtualMachine, options VMCloneReques
 		cpu := options.CPU
 		nets := vm.VirtualMachineConfig.MergeNets()
 
+		// FIXME: refactor this
 		for d := range nets {
 			options := map[string]string{}
 
