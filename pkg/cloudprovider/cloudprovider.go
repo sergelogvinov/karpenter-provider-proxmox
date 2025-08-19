@@ -25,6 +25,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	cloudproviderevents "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider/events"
@@ -133,7 +134,19 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 		log.Error(err, "Failed to resolve instance type from node", "node", node.Name)
 	}
 
-	return c.nodeToNodeClaim(ctx, instanceType, node)
+	nc, err := c.nodeToNodeClaim(ctx, instanceType, node)
+	if err != nil {
+		log.Error(err, "Failed to convert node to NodeClaim", "node", node.Name)
+
+		return nil, fmt.Errorf("converting node to NodeClaim, %w", err)
+	}
+
+	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
+		v1alpha1.AnnotationProxmoxNodeClassHash:        nodeClass.Hash(),
+		v1alpha1.AnnotationProxmoxNodeClassHashVersion: v1alpha1.ProxmoxNodeClassHashVersion,
+	})
+
+	return nc, nil
 }
 
 // Delete removes a NodeClaim from the cloudprovider by its provider id. Delete should return

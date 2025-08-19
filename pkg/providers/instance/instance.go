@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
@@ -122,7 +121,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 					continue
 				}
 
-				node.Labels[v1alpha1.LabelInstanceImageID] = strconv.Itoa(int(instanceTemplate.TemplateID))
+				node.Labels[v1alpha1.LabelInstanceImageID] = instanceTemplate.TemplateHash
 
 				// FIXME: reserve capacity in creation stage
 				p.cloudCapacityProvider.UpdateNodeCapacityInZone(ctx, region, zone)
