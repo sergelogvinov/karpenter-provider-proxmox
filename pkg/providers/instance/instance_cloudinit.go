@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/luthermonson/go-proxmox"
 
@@ -120,68 +118,6 @@ func requestsToMap(requests corev1.ResourceList) map[string]string {
 	return m
 }
 
-func networkFromInstanceConfig(vmc *proxmox.VirtualMachineConfig) cloudinit.NetworkConfig {
-	network := cloudinit.NetworkConfig{}
-
-	if vmc.Nameserver != "" {
-		network.NameServers = strings.Split(vmc.Nameserver, " ")
-	}
-
-	if vmc.Searchdomain != "" {
-		network.SearchDomains = strings.Split(vmc.Searchdomain, " ")
-	}
-
-	nets := vmc.MergeNets()
-	if len(nets) == 0 {
-		return network
-	}
-
-	ipconfigs := vmc.MergeIPConfigs()
-
-	// FIXME: refactor this
-	for i, net := range nets {
-		inx, _ := strconv.Atoi(strings.TrimPrefix(i, "net"))
-		params := strings.Split(net, ",")
-
-		iface := cloudinit.InterfaceConfig{
-			Name:    fmt.Sprintf("eth%d", inx),
-			MacAddr: strings.Split(params[0], "=")[1],
-		}
-
-		if ipparams, ok := ipconfigs[fmt.Sprintf("ipconfig%d", inx)]; ok {
-			for _, p := range strings.Split(ipparams, ",") {
-				parts := strings.SplitN(p, "=", 2)
-				value := parts[1]
-
-				switch parts[0] {
-				case "ip":
-					if value == "dhcp" {
-						iface.DHCPv4 = true
-					} else {
-						iface.Address4 = []string{value}
-					}
-				case "gw":
-					iface.Gateway4 = value
-				case "ip6":
-					switch value {
-					case "dhcp":
-						iface.DHCPv6 = true
-					case "auto":
-					default:
-						iface.Address6 = []string{value}
-					}
-				case "gw6":
-					iface.Gateway6 = value
-				}
-			}
-		}
-
-		network.Interfaces = append(network.Interfaces, iface)
-	}
-
-	return network
-}
-
 func (p *DefaultProvider) generateCloudInitVars(
 	ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
@@ -250,9 +186,7 @@ func (p *DefaultProvider) generateCloudInitVars(
 	}
 
 	if networkconfig != "" {
-		network := networkFromInstanceConfig(vm.VirtualMachineConfig)
-
-		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, network)
+		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig))
 		if err != nil {
 			return "", "", "", "", fmt.Errorf("failed to execute network-config template: %v", err)
 		}

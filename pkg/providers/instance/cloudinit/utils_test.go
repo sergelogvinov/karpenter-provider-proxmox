@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package instance
+package cloudinit_test
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 )
 
-func TestNetworkFromInstanceConfig(t *testing.T) {
+func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 	assert := assert.New(t)
 
 	tests := []struct {
@@ -70,7 +70,7 @@ func TestNetworkFromInstanceConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.name), func(t *testing.T) {
-			result := networkFromInstanceConfig(tt.template)
+			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template)
 			assert.Equal(tt.network, result)
 		})
 	}

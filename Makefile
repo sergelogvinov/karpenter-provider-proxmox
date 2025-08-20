@@ -82,6 +82,7 @@ clean: ## Clean
 .PHONY: tools
 tools:
 	go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+	go install github.com/google/go-licenses@latest
 
 .PHONY: vendor
 vendor: ## update modules and populate local vendor directory
@@ -121,6 +122,10 @@ lint: ## Lint Code
 .PHONY: unit
 unit: ## Unit Tests
 	go test -tags=unit $(shell go list ./...) $(TESTARGS)
+
+.PHONY: licenses
+licenses:
+	go-licenses check ./... --disallowed_types=forbidden,restricted,reciprocal,unknown
 
 .PHONY: conformance
 conformance:

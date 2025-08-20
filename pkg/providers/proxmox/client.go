@@ -24,6 +24,8 @@ import (
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
+
+	"k8s.io/utils/ptr"
 )
 
 // APIClient Proxmox API client object.
@@ -204,12 +206,19 @@ func (c *APIClient) CloneVM(ctx context.Context, templateID int, options VMClone
 	}
 
 	if vm.VirtualMachineConfig != nil {
-		smbios1 := fmt.Sprintf("%s,serial=%s,sku=%s,base64=1", vm.VirtualMachineConfig.SMBios1,
-			base64.StdEncoding.EncodeToString([]byte("h="+options.Name+";i="+strconv.Itoa(newid))),
-			base64.StdEncoding.EncodeToString([]byte(options.InstanceType)),
-		)
+		smbios1 := VMSMBIOS{}
+		smbios1.UnmarshalString(vm.VirtualMachineConfig.SMBios1)
 
-		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "smbios1", Value: smbios1})
+		smbios1.SKU = base64.StdEncoding.EncodeToString([]byte(options.InstanceType))
+		smbios1.Serial = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("h=%s;i=%d", options.Name, newid)))
+		smbios1.Base64 = NewIntOrBool(true)
+
+		v, err := smbios1.ToString()
+		if err != nil {
+			return 0, fmt.Errorf("failed to marshal smbios1: %w", err)
+		}
+
+		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "smbios1", Value: v})
 	}
 
 	vmOptions = applyInstanceOptimization(vm, options, vmOptions)
@@ -269,31 +278,24 @@ func (c *APIClient) CreateVMFirewallRules(ctx context.Context, vmID int, nodeNam
 
 func applyInstanceOptimization(vm *proxmox.VirtualMachine, options VMCloneRequest, vmOptions []proxmox.VirtualMachineOption) []proxmox.VirtualMachineOption {
 	if vm.VirtualMachineConfig != nil {
-		cpu := options.CPU
 		nets := vm.VirtualMachineConfig.MergeNets()
 
-		// FIXME: refactor this
-		for d := range nets {
-			options := map[string]string{}
-
-			params := strings.Split(nets[d], ",")
-			for _, param := range params {
-				kv := strings.Split(param, "=")
-				if len(kv) == 2 && options[kv[0]] == "" {
-					options[kv[0]] = kv[1]
-				}
+		for d, net := range nets {
+			iface := VMNetworkDevice{}
+			if err := iface.UnmarshalString(net); err != nil {
+				return nil
 			}
 
-			options["queues"] = strconv.Itoa(cpu)
+			iface.Queues = ptr.To(options.CPU)
 
-			opt := make([]string, 0, len(options))
-			for k := range options {
-				opt = append(opt, fmt.Sprintf("%s=%s", k, options[k]))
+			v, err := iface.ToString()
+			if err != nil {
+				return nil
 			}
 
 			vmOptions = append(vmOptions, proxmox.VirtualMachineOption{
 				Name:  d,
-				Value: strings.Join(opt, ","),
+				Value: v,
 			})
 		}
 	}
