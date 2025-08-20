@@ -138,17 +138,28 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 			name := makeGenericInstanceTypeName(cpu, memFactor)
 
 			mem := cpu * memFactor
+			pods := 110
+
+			switch {
+			case mem <= 1:
+				pods = 32
+			case mem < 2:
+				pods = 64
+			}
+
+			capacity := corev1.ResourceList{
+				corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
+				corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
+				corev1.ResourcePods:             resource.MustParse(fmt.Sprintf("%d", pods)),
+				corev1.ResourceEphemeralStorage: resource.MustParse("30G"),
+			}
+
 			opts := cloudprovider.InstanceType{
-				Name: name,
-				Capacity: corev1.ResourceList{
-					corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
-					corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
-					corev1.ResourcePods:             resource.MustParse("110"),
-					corev1.ResourceEphemeralStorage: resource.MustParse("30G"),
-				},
+				Name:     name,
+				Capacity: capacity,
 				Overhead: &cloudprovider.InstanceTypeOverhead{
-					KubeReserved:   kubeReservedResources(int64(cpu), float64(mem)),
-					SystemReserved: systemReservedResources(),
+					KubeReserved:   kubeReservedResources(&capacity),
+					SystemReserved: systemReservedResources(&capacity),
 				},
 			}
 
@@ -168,17 +179,43 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	return nil
 }
 
-func systemReservedResources() corev1.ResourceList {
+func systemReservedResources(_ *corev1.ResourceList) corev1.ResourceList {
 	return corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("10m"),
-		corev1.ResourceMemory: resource.MustParse("128Mi"),
+		corev1.ResourceMemory: resource.MustParse("64Mi"),
 	}
 }
 
-func kubeReservedResources(_ int64, _ float64) corev1.ResourceList {
+func kubeReservedResources(capacity *corev1.ResourceList) corev1.ResourceList {
+	cpuResource := resource.MustParse("100m")
+	memResource := resource.MustParse("384Mi")
+
+	cpu := capacity.Cpu().Value()
+	mem := capacity.Memory().Value() / 1024 / 1024
+
+	switch {
+	case cpu < 1:
+		cpuResource = resource.MustParse("10m")
+	case cpu < 2:
+		cpuResource = resource.MustParse("20m")
+	case cpu < 4:
+		cpuResource = resource.MustParse("50m")
+	}
+
+	switch {
+	case mem < 1:
+		memResource = resource.MustParse("128Mi")
+	case mem < 2:
+		memResource = resource.MustParse("192Mi")
+	case mem < 4:
+		memResource = resource.MustParse("256Mi")
+	case mem < 8:
+		memResource = resource.MustParse("384Mi")
+	}
+
 	resources := corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse("200m"),
-		corev1.ResourceMemory: resource.MustParse("256Mi"),
+		corev1.ResourceCPU:    cpuResource,
+		corev1.ResourceMemory: memResource,
 	}
 
 	return resources

@@ -23,7 +23,7 @@ The benefits of not fully utilizing all bare metal resources include:
 * [x] The best placement strategy for VMs across zones
 * [x] Cloud-init metadata delivery by cdrom
 * [x] Firewall security groups
-* [ ] Kubelet config optimization
+* [x] Kubelet config optimization
 * [x] VM clone template selection
 * [ ] VM optimization: CPU pinning
 * [ ] VM optimization: NUMA node affinity
