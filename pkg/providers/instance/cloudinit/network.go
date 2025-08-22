@@ -22,13 +22,13 @@ const (
 config:
 {{- range $iface := .Interfaces }}
 - type: physical
-  name: {{ $iface.Name | quote }}
-  mac_address: {{ $iface.MacAddr | quote }}
+  name: {{ $iface.Name }}
+  mac_address: {{ $iface.MacAddr | lower | quote }}
 {{- if ne $iface.MTU 0 }}
   mtu: {{ $iface.MTU }}
 {{- end }}
-{{- if or $iface.DHCPv4 $iface.DHCPv6 $iface.Address4 $iface.Address6 }}
   subnets:
+{{- if or $iface.DHCPv4 $iface.DHCPv6 $iface.Address4 $iface.Address6 }}
   {{- if $iface.DHCPv4 }}
   - type: dhcp
   {{- else if $iface.Address4 }}{{- range $iface.Address4 }}
@@ -43,7 +43,10 @@ config:
   - type: static6
     address: {{ . | quote }}
     gateway: {{ $iface.Gateway6 | quote }}
-  {{- end }}{{- end }}
+  {{- end }}
+  {{- else }}
+  - type: ipv6_slaac
+  {{- end }}
   {{- end }}
 {{- if .NameServers }}
 - type: nameserver

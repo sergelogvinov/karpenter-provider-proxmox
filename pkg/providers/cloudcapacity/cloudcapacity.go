@@ -55,7 +55,7 @@ type Provider interface {
 	SortZonesByCPULoad(region string, zones []string) []string
 	FitInZone(region, zone string, req corev1.ResourceList) bool
 
-	GetStorageAvailableZonesInRegion(region string, storage string) []string
+	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
 }
 
 type DefaultProvider struct {
@@ -98,11 +98,15 @@ type NodeStorageCapacityInfo struct {
 	Region string
 	// Shared indicates if the storage is shared across nodes.
 	Shared bool
+	// Type is the type of the storage. (dir/lvm/zfspool)
+	Type string
 	// Capabilities are the capabilities of the storage.
 	Capabilities []string
 	// Zone is the zone of the node.
 	Zones []string
 }
+
+type StorageOption func(*NodeStorageCapacityInfo)
 
 type NodeCapacity struct {
 	// Name is the name of the node.
@@ -331,7 +335,7 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 			}
 
 			capabilitys := strings.Split(item.Content, ",")
-			if slices.Contains(capabilitys, "images") || slices.Contains(capabilitys, "iso") {
+			if slices.Contains(capabilitys, "images") || slices.Contains(capabilitys, "iso") || slices.Contains(capabilitys, "import") {
 				key := fmt.Sprintf("%s/%s/%s", region, item.Storage, item.Node)
 
 				info := NodeStorageCapacityInfo{
@@ -339,6 +343,7 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 					Region:       region,
 					Zones:        []string{item.Node},
 					Shared:       item.Shared == 1,
+					Type:         item.PluginType,
 					Capabilities: capabilitys,
 				}
 
@@ -366,6 +371,7 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 						Region:       info.Region,
 						Zones:        slices.Compact(zones),
 						Shared:       info.Shared,
+						Type:         info.Type,
 						Capabilities: info.Capabilities,
 					}
 				}
@@ -380,16 +386,26 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 	return nil
 }
 
-func (p *DefaultProvider) GetStorageAvailableZonesInRegion(region string, storage string) []string {
+func (p *DefaultProvider) GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
 	key := fmt.Sprintf("%s/%s", region, storage)
 	if info, ok := p.storageInfo[key]; ok {
-		return info.Zones
+		storage := info
+
+		if len(filter) == 0 {
+			return &storage
+		}
+
+		for _, f := range filter {
+			if f(&storage) {
+				return &storage
+			}
+		}
 	}
 
-	return []string{}
+	return nil
 }
 
 func (p *DefaultProvider) Regions() []string {

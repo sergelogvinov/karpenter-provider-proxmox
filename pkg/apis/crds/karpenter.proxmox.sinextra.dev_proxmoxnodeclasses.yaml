@@ -23,7 +23,7 @@ spec:
     - jsonPath: .spec.placementStrategy.zoneBalance
       name: Balance
       type: string
-    - jsonPath: .spec.instanceTemplate.name
+    - jsonPath: .spec.instanceTemplateRef.name
       name: Template
       type: string
     - jsonPath: .spec.metadataOptions.type
@@ -87,21 +87,23 @@ spec:
                     maxLength: 30
                     type: string
                 type: object
-              instanceTemplate:
-                description: InstanceTemplate is the template of the VM to create
+              instanceTemplateRef:
+                description: InstanceTemplateRef is the template reference for the
+                  VM template
                 properties:
+                  kind:
+                    description: 'Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"'
+                    enum:
+                    - ProxmoxTemplate
+                    - ProxmoxUnmanagedTemplate
+                    type: string
                   name:
-                    description: Name is the name of the instance template
+                    description: 'Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names'
                     minLength: 1
                     type: string
-                  type:
-                    description: Type is the type of the instance template
-                    enum:
-                    - template
-                    type: string
                 required:
+                - kind
                 - name
-                - type
                 type: object
               kubeletConfiguration:
                 description: KubeletConfiguration defines kubelet config file
@@ -260,12 +262,12 @@ spec:
               region:
                 description: Region is the Proxmox Cloud region where nodes will be
                   created
+                minLength: 1
                 type: string
               securityGroups:
                 description: SecurityGroups to apply to the VMs
                 items:
-                  description: SecurityGroupsTerm defines a term to apply security
-                    groups
+                  description: SecurityGroups defines a term to apply security groups
                   properties:
                     interface:
                       default: net0
@@ -289,7 +291,7 @@ spec:
                 maxItems: 10
                 type: array
             required:
-            - instanceTemplate
+            - instanceTemplateRef
             type: object
           status:
             description: Status defines the observed state of ProxmoxNodeClass
