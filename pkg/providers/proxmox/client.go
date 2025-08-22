@@ -160,6 +160,25 @@ func (c *APIClient) DeleteVMByID(ctx context.Context, nodeName string, vmID int)
 	return nil
 }
 
+func (c *APIClient) CreateVM(ctx context.Context, node string, vm map[string]interface{}) error {
+	var upid proxmox.UPID
+
+	if err := c.Post(ctx, fmt.Sprintf("/nodes/%s/qemu", node), &vm, &upid); nil != err {
+		return fmt.Errorf("unable to create virtual machine: %w", err)
+	}
+
+	task := proxmox.NewTask(upid, c.Client)
+	if err := task.WaitFor(ctx, 5*60); err != nil {
+		return fmt.Errorf("unable to create virtual machine: %w", err)
+	}
+
+	if task.IsFailed {
+		return fmt.Errorf("unable to create virtual machine: %s", task.ExitStatus)
+	}
+
+	return nil
+}
+
 func (c *APIClient) CloneVM(ctx context.Context, templateID int, options VMCloneRequest) (newid int, err error) {
 	node, err := c.Node(ctx, options.Node)
 	if err != nil {

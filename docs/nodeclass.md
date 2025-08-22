@@ -11,36 +11,37 @@ kind: ProxmoxNodeClass
 metadata:
   name: node-class-name
 spec:
-  # Region name to use for this NodeClass
+  # Region where this NodeClass is applied
   # Optional: if not set, all regions will be used
   region: cluster-1
 
-  # PlacementStrategy defines how VM should be placed across zones
+  # PlacementStrategy defines how VM should be placed across zones.
   # Optional: if not set, Balanced strategy will be used
   placementStrategy:
     zoneBalance: Balanced|AvailabilityFirst
 
-  # InstanceTemplate is the template of the VM to create
+  # InstanceTemplateRef is a reference to a Kubernetes Custom Resource
+  # that defines the virtual machine template used for creating instances.
   # Required
-  instanceTemplate:
-    # Type is the type of the instance template
-    # Valid values: template, crd
-    type: template
-    # Name is the name of the instance template
+  instanceTemplateRef:
+    # Kind specifies the type of the instance template resource.
+    # Valid values: ProxmoxTemplate, ProxmoxUnmanagedTemplate
+    kind: ProxmoxUnmanagedTemplate
+    # Name of resource
     name: k8s-node-vm-template
 
   # BootDevice defines the root device for the VM
-  # Optional: If not set, it will use the block storage device where the template is located
+  # Optional: If not specified, the system will use the storage device on which the template is stored.
   bootDevice:
     # Size of the boot device
     # Valid formats: 50G, 50Gi
     size: 50G
 
-    # Storage is the storage where the boot device will be created
+    # Storage specifies the storage device where the boot disk for the virtual machine will be created.
     storage: lvm
 
   # Tags to apply to the VMs after creation
-  # Optional: if not set, no tags will be applied to the VMs
+  # Optional
   tags:
     - karpenter
 
@@ -75,9 +76,11 @@ spec:
 * `placementStrategy` - The strategy to use for placing VMs across zones. Optional.
   - `zoneBalance` - Balanced or AvailabilityFirst. Defaults to Balanced.
 
-* `instanceTemplate` - The template to use for creating VMs.
-  - `type` - The type of the instance template, either `template` or `crd`. (CRD is not implemented yet). If `type` is `template`, then `name` must be the name of an existing Proxmox VM template.
+* `instanceTemplateRef` - The template to use for creating VMs.
+  - `kind` - The kind of the instance template, either [ProxmoxTemplate](nodetemplateclass.md) or [ProxmoxUnmanagedTemplate](nodetemplateclass.md).
   - `name` - The name of the instance template.
+
+    If `kind` is `ProxmoxUnmanagedTemplate`, then VM template should be prepared manually on proxmox side.
 
 * `bootDevice` - Defines the root device for the VM.
   - `size` - The size of the boot device, in formats like `50G`, `50Gi`, `1T`, `1Ti`.
@@ -94,6 +97,16 @@ spec:
 * `securityGroups` - A list of security groups to apply to the VMs. Optional.
   - `name` - The name of the security group.
   - `interface` - The interface to apply the security group.
+
+Karpenter supports instance drift detection when an `ProxmoxNodeClass` is updated.
+If a change affects a node, Karpenter may replace (drift) the instance to align with the new configuration.
+However, some parameters __do not trigger__ drift.
+Changes to these fields are ignored during drift evaluation:
+* `tags`
+* `metadataOptions`
+* `securityGroups`
+
+The `ProxmoxTemplate` and `ProxmoxUnmanagedTemplate` resource definitions see [here](nodetemplateclass.md).
 
 ## Cloud-Init metadata
 

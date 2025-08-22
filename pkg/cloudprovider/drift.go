@@ -19,8 +19,11 @@ package proxmox
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -84,13 +87,17 @@ func (c *CloudProvider) isTemplateDrifted(ctx context.Context, nodeClaim *karpv1
 	}
 
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+	templateIDs := nodeClass.GetTemplateIDs(region)
 
-	template, err := c.instanceTemplateProvider.Get(ctx, nodeClass, region, zone)
-	if err != nil {
+	templates := c.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
+		return c.Region == region && c.Zone == zone && lo.Contains(templateIDs, c.TemplateID)
+	})
+
+	if len(templates) == 0 {
 		return "", nil //nolint: nilerr
 	}
 
-	if template.TemplateHash != nodeClaim.Status.ImageID {
+	if templates[0].TemplateHash != nodeClaim.Status.ImageID {
 		return ImageDrift, nil
 	}
 

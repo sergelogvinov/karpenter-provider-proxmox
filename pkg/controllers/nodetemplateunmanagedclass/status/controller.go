@@ -18,6 +18,7 @@ package status
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"go.uber.org/multierr"
@@ -25,67 +26,72 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
-type nodeClassStatusReconciler interface {
-	Reconcile(context.Context, *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error)
+type nodeTemplateStatusReconciler interface {
+	Reconcile(context.Context, *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error)
 }
 
-// Controller reconciles an ProxmoxNodeClass object to update its status
+// Controller reconciles an ProxmoxUnmanagedTemplate object to update its status
 type Controller struct {
 	kubeClient               client.Client
 	instanceTemplateProvider *InstanceTemplate
-	metadataOptions          *MetadataOptions
 }
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, instanceTemplateProvider instancetemplate.Provider) *Controller {
 	return &Controller{
 		kubeClient:               kubeClient,
-		instanceTemplateProvider: &InstanceTemplate{kubeClient: kubeClient, instanceTemplateProvider: instanceTemplateProvider},
-		metadataOptions:          &MetadataOptions{kubeClient: kubeClient},
+		instanceTemplateProvider: &InstanceTemplate{instanceTemplateProvider: instanceTemplateProvider},
 	}
 }
 
 func (c *Controller) Name() string {
-	return "nodeclass.status"
+	return "nodetemplateunmanagedclass.status"
 }
 
 // Reconcile executes a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
+	log.FromContext(ctx).V(1).Info("Syncing Proxmox Unmanaged Templates")
 
-	nodeClassCopy := nodeClass.DeepCopy()
+	templateClassCopy := templateClass.DeepCopy()
 
 	var errs error
 
 	results := []reconcile.Result{}
 
-	for _, reconciler := range []nodeClassStatusReconciler{
+	for _, reconciler := range []nodeTemplateStatusReconciler{
 		c.instanceTemplateProvider,
-		c.metadataOptions,
 	} {
-		res, err := reconciler.Reconcile(ctx, nodeClass)
+		res, err := reconciler.Reconcile(ctx, templateClass)
 		errs = multierr.Append(errs, err)
 
 		results = append(results, res)
 	}
 
-	if !equality.Semantic.DeepEqual(nodeClassCopy, nodeClass) {
+	templateClass.Status.Resources = corev1.ResourceList{
+		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(templateClass.Status.Zones))),
+	}
+
+	if !equality.Semantic.DeepEqual(templateClassCopy, templateClass) {
 		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the status condition list
-		if err := c.kubeClient.Status().Patch(ctx, nodeClass, client.MergeFromWithOptions(nodeClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
+		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
 				return reconcile.Result{Requeue: true}, nil
 			}
@@ -105,7 +111,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1alpha1.ProxmoxNodeClass{}).
+		For(&v1alpha1.ProxmoxUnmanagedTemplate{}).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 10,

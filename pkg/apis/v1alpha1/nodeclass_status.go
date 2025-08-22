@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/awslabs/operatorpkg/status"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,10 +45,43 @@ type ProxmoxNodeClassStatus struct {
 	// This field is populated by the controller and should not be set manually.
 	// +optional
 	SelectedZones []string `json:"selectedZones,omitempty"`
+}
 
-	// TaskRef is a reference to the task that is being executed.
-	// +optional
-	// TaskRef *string `json:"taskRef,omitempty"`
+// GetZones returns the zones that are selected for this node class
+func (in *ProxmoxNodeClass) GetZones(region string) []string {
+	zones := []string{}
+
+	for _, selectedZone := range in.Status.SelectedZones {
+		if !strings.HasPrefix(selectedZone, region+"/") {
+			continue
+		}
+
+		p := strings.SplitN(selectedZone, "/", 3)
+		if len(p) == 3 {
+			zones = append(zones, p[1])
+		}
+	}
+
+	return zones
+}
+
+// GetTemplateIDs returns the template IDs that are selected for this node class
+func (in *ProxmoxNodeClass) GetTemplateIDs(region string) []uint64 {
+	ids := []uint64{}
+
+	for _, selectedZone := range in.Status.SelectedZones {
+		if !strings.HasPrefix(selectedZone, region+"/") {
+			continue
+		}
+
+		p := strings.SplitN(selectedZone, "/", 3)
+		if len(p) == 3 {
+			id, _ := strconv.Atoi(p[2])
+			ids = append(ids, uint64(id))
+		}
+	}
+
+	return ids
 }
 
 // StatusConditions returns the condition set for the status.Object interface

@@ -19,6 +19,8 @@ package instancetemplate
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -36,9 +38,10 @@ import (
 type Provider interface {
 	UpdateInstanceTemplates(context.Context) error
 
-	List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]InstanceTemplateInfo, error)
-	ListByRegion(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass, region string) ([]InstanceTemplateInfo, error)
-	Get(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass, region string, zone string) (*InstanceTemplateInfo, error)
+	Create(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
+	Delete(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
+
+	ListWithFilter(ctx context.Context, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo
 }
 
 type DefaultProvider struct {
@@ -56,6 +59,8 @@ const (
 	InstanceTemplateStatusDisabled           = "disabled"
 	InstanceTemplateStatusUnknown            = "unknown"
 	InstanceTemplateStatusMultipleStorageIDs = "multiple_storage_ids"
+
+	importContent = "import"
 )
 
 type InstanceTemplateInfo struct {
@@ -87,78 +92,160 @@ func NewDefaultProvider(ctx context.Context, pool *pxpool.ProxmoxPool, cloudCapa
 	}
 }
 
-func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]InstanceTemplateInfo, error) {
-	log := p.log.WithName("List()")
+func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+	log := log.FromContext(ctx).WithName("instancetemplate.Create()")
 
-	log.V(1).Info("Listing instance templates for node class", "nodeClass", nodeClass.Name)
-
-	p.muInstanceTemplates.RLock()
-	defer p.muInstanceTemplates.RUnlock()
-
-	instanceTemplates := make([]InstanceTemplateInfo, 0)
+	imageID := templateClass.GetImageID()
+	if templateClass.Status.ImageID != "" && templateClass.Status.ImageID != imageID {
+		return fmt.Errorf("wait until old image will deleted")
+	}
 
 	regions := []string{}
-	if nodeClass.Spec.Region != "" {
-		regions = []string{nodeClass.Spec.Region}
+	if templateClass.Spec.Region != "" {
+		regions = []string{templateClass.Spec.Region}
 	}
 
 	if len(regions) == 0 {
 		regions = p.pool.GetRegions()
 	}
 
+	installedZones := []string{} // templateClass.Status.InstalledZones
+
 	for _, region := range regions {
+		var (
+			storageImage    *cloudcapacity.NodeStorageCapacityInfo
+			storageTemplate *cloudcapacity.NodeStorageCapacityInfo
+		)
+
+		for _, storageID := range templateClass.Spec.StorageIDs {
+			storageImageTmp := p.cloudCapacityProvider.GetStorage(region, storageID, func(info *cloudcapacity.NodeStorageCapacityInfo) bool {
+				return slices.Contains(info.Capabilities, importContent) && len(info.Zones) != 0
+			})
+			if storageImage == nil && storageImageTmp != nil {
+				storageImage = storageImageTmp
+			}
+
+			storageTemplateTmp := p.cloudCapacityProvider.GetStorage(region, storageID, func(info *cloudcapacity.NodeStorageCapacityInfo) bool {
+				return slices.Contains(info.Capabilities, "images") && len(info.Zones) != 0
+			})
+			if storageTemplate == nil && storageTemplateTmp != nil {
+				storageTemplate = storageTemplateTmp
+			}
+		}
+
+		if storageImage == nil || storageTemplate == nil {
+			log.Error(nil, "No storage found for image or template", "region", region, "storageIDs", templateClass.Spec.StorageIDs, "storageImage", storageImage, "storageTemplate", storageTemplate)
+
+			continue
+		}
+
+		zones := lo.Intersect(storageImage.Zones, storageTemplate.Zones)
+		if storageTemplate.Shared {
+			zones = []string{storageTemplate.Zones[0]}
+		}
+
+		for _, zone := range zones {
+			err := p.downloadImage(ctx, templateClass, region, zone, storageImage)
+			if err != nil {
+				continue
+			}
+
+			vmid, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
+			if err != nil || vmid == 0 {
+				continue
+			}
+
+			p.UpdateInstanceTemplates(ctx)
+
+			installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
+		}
+	}
+
+	if len(installedZones) > 0 {
+		templateClass.Status.ImageID = imageID
+		templateClass.Status.Zones = installedZones
+	}
+
+	return nil
+}
+
+func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+	log := log.FromContext(ctx).WithName("instancetemplate.Delete()").WithValues("imageID", templateClass.Status.ImageID)
+	log.V(1).Info("Deleting template")
+
+	imageID := templateClass.Status.ImageID
+
+	removedImages := []string{}
+
+	for _, key := range templateClass.Status.Zones {
+		parts := strings.SplitN(key, "/", 3)
+		if len(parts) < 2 {
+			removedImages = append(removedImages, key)
+
+			continue
+		}
+
+		region := parts[0]
+		zone := parts[1]
+
+		if len(parts) == 3 {
+			vmid, _ := strconv.Atoi(parts[2])
+
+			if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
+				log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
+
+				return fmt.Errorf("failed to delete template %d: %w", vmid, err)
+			}
+		}
+
+		for _, storageID := range templateClass.Spec.StorageIDs {
+			storage := p.cloudCapacityProvider.GetStorage(region, storageID, func(info *cloudcapacity.NodeStorageCapacityInfo) bool {
+				return slices.Contains(info.Capabilities, importContent) && slices.Contains(info.Zones, zone)
+			})
+			if storage == nil {
+				continue
+			}
+
+			err := p.deleteImage(ctx, templateClass, region, zone, storage)
+			if err != nil {
+				return fmt.Errorf("failed to delete image: %w", err)
+			}
+		}
+
+		removedImages = append(removedImages, key)
+	}
+
+	templateClass.Status.Zones = lo.Filter(templateClass.Status.Zones, func(item string, index int) bool {
+		return !slices.Contains(removedImages, item)
+	})
+	if len(templateClass.Status.Zones) > 0 {
+		return fmt.Errorf("unable to delete image %s, still installed in zones: %v", imageID, templateClass.Status.Zones)
+	}
+
+	p.UpdateInstanceTemplates(ctx)
+
+	return nil
+}
+
+func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo {
+	p.muInstanceTemplates.RLock()
+	defer p.muInstanceTemplates.RUnlock()
+
+	instanceTemplates := []InstanceTemplateInfo{}
+
+	for _, region := range p.pool.GetRegions() {
 		for _, info := range p.instanceTemplate[region] {
-			if info.Status == InstanceTemplateStatusAvailable && info.Name == nodeClass.Spec.InstanceTemplate.Name {
-				instanceTemplates = append(instanceTemplates, info)
+			if info.Status == InstanceTemplateStatusAvailable {
+				for _, f := range filter {
+					if f(&info) {
+						instanceTemplates = append(instanceTemplates, info)
+					}
+				}
 			}
 		}
 	}
 
-	return instanceTemplates, nil
-}
-
-func (p *DefaultProvider) ListByRegion(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass, region string) ([]InstanceTemplateInfo, error) {
-	log := p.log.WithName("ListByRegion()")
-
-	log.V(1).Info("Listing instance templates for node class", "nodeClass", nodeClass.Name, "region", region)
-
-	if region == "" {
-		return nil, fmt.Errorf("region must be specified")
-	}
-
-	p.muInstanceTemplates.RLock()
-	defer p.muInstanceTemplates.RUnlock()
-
-	instanceTemplates := make([]InstanceTemplateInfo, 0)
-
-	for _, info := range p.instanceTemplate[region] {
-		if info.Status == InstanceTemplateStatusAvailable && info.Name == nodeClass.Spec.InstanceTemplate.Name {
-			instanceTemplates = append(instanceTemplates, info)
-		}
-	}
-
-	return instanceTemplates, nil
-}
-
-func (p *DefaultProvider) Get(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass, region string, zone string) (*InstanceTemplateInfo, error) {
-	log := p.log.WithName("Get()")
-
-	log.V(1).Info("Getting instance template for node class", "nodeClass", nodeClass.Name, "region", region, "zone", zone, "instanceTemplate", nodeClass.Spec.InstanceTemplate.Name)
-
-	if region == "" {
-		return nil, fmt.Errorf("region must be specified")
-	}
-
-	p.muInstanceTemplates.RLock()
-	defer p.muInstanceTemplates.RUnlock()
-
-	for _, info := range p.instanceTemplate[region] {
-		if info.Status == InstanceTemplateStatusAvailable && info.Name == nodeClass.Spec.InstanceTemplate.Name && info.Zone == zone {
-			return &info, nil
-		}
-	}
-
-	return nil, fmt.Errorf("instance template %s not found in region %s and zone %s", nodeClass.Spec.InstanceTemplate.Name, region, zone)
+	return instanceTemplates
 }
 
 func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {

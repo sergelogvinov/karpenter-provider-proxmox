@@ -23,6 +23,10 @@ import (
 
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
+	nodetemplateclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/hash"
+	nodetemplateclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/status"
+	nodetemplateunmanagedclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/hash"
+	nodetemplateunmanagedclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/status"
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -42,25 +46,15 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	instanceTemplateProvider instancetemplate.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
 ) []controller.Controller {
-	controllers := make([]controller.Controller, 0)
-
-	// Add nodeclass hash controller
-	if hashCtrl, err := nodeclasshash.NewController(kubeClient); err == nil {
-		controllers = append(controllers, hashCtrl)
-	}
-
-	// Add nodeclass status controller
-	if statusCtrl, err := nodeclaasstatus.NewController(kubeClient, instanceTemplateProvider); err == nil {
-		controllers = append(controllers, statusCtrl)
-	}
-
-	// Add cloudCapacity controller
-	if cloudCapacityNodeCtrl, err := cloudcapacitynode.NewController(cloudCapacityProvider); err == nil {
-		controllers = append(controllers, cloudCapacityNodeCtrl)
-	}
-
-	if cloudCapacityNodeLoadCtrl, err := cloudcapacitynodeload.NewController(cloudCapacityProvider); err == nil {
-		controllers = append(controllers, cloudCapacityNodeLoadCtrl)
+	controllers := []controller.Controller{
+		nodeclasshash.NewController(kubeClient),
+		nodeclaasstatus.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateclasshash.NewController(kubeClient),
+		nodetemplateclassstatus.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateunmanagedclasshash.NewController(kubeClient),
+		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
+		cloudcapacitynode.NewController(cloudCapacityProvider),
+		cloudcapacitynodeload.NewController(cloudCapacityProvider),
 	}
 
 	return controllers

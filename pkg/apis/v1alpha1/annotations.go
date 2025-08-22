@@ -22,9 +22,18 @@ const (
 	// Version of the hash for ProxmoxNodeClass
 	ProxmoxNodeClassHashVersion = "v1"
 
+	// Version of the hash for ProxmoxNodeTemplateClass
+	ProxmoxTemplateClassHashVersion = "v1"
+
 	// AnnotationProxmoxNodeClassHash is the annotation key for the hash of the ProxmoxNodeClass
 	AnnotationProxmoxNodeClassHash = apis.Group + "/proxmoxnodeclass-hash"
 
 	// AnnotationProxmoxNodeClassHashVersion is the annotation key for the version of the hash function
 	AnnotationProxmoxNodeClassHashVersion = apis.Group + "/proxmoxnodeclass-hash-version"
+
+	// AnnotationProxmoxTemplateClassHash is the annotation key for the hash of the ProxmoxTemplateClasses
+	AnnotationProxmoxTemplateClassHash = apis.Group + "/proxmoxtemplateclass-hash"
+
+	// AnnotationProxmoxTemplateClassHashVersion is the annotation key for the version of the hash function
+	AnnotationProxmoxTemplateClassHashVersion = apis.Group + "/proxmoxtemplateclass-hash-version"
 )

@@ -1,0 +1,306 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: proxmoxnodetemplateclasses.karpenter.proxmox.sinextra.dev
+spec:
+  group: karpenter.proxmox.sinextra.dev
+  names:
+    categories:
+    - karpenter
+    kind: ProxmoxNodeTemplateClass
+    listKind: ProxmoxNodeTemplateClassList
+    plural: proxmoxnodetemplateclasses
+    singular: proxmoxnodetemplateclass
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.resources.zones
+      name: Zones
+      type: string
+    - jsonPath: .spec.machine
+      name: Machine
+      type: string
+    - jsonPath: .spec.cpu.type
+      name: CPU
+      type: string
+    - jsonPath: .spec.vga.type
+      name: VGA
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ProxmoxNodeTemplateClass is the Schema for the ProxmoxNodeTemplateClass
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: Spec defines the desired state of ProxmoxNodeTemplateClass
+            properties:
+              cpu:
+                default:
+                  type: x86-64-v2-AES
+                description: CPU configuration
+                properties:
+                  flags:
+                    description: List of additional CPU flags
+                    items:
+                      type: string
+                    maxItems: 10
+                    type: array
+                  type:
+                    default: x86-64-v2-AES
+                    description: Emulated CPU type.
+                    enum:
+                    - host
+                    - kvm64
+                    - x86-64-v2
+                    - x86-64-v2-AES
+                    - x86-64-v3
+                    - x86-64-v4
+                    type: string
+                type: object
+              description:
+                description: Description for the VM template.
+                minLength: 1
+                type: string
+              machine:
+                default: q35
+                description: Machine for the VM machine type.
+                enum:
+                - pc
+                - q35
+                type: string
+              network:
+                description: Network defines the network configuration for the VM
+                  template
+                items:
+                  description: Network defines the network configuration for the VM
+                    template
+                  properties:
+                    bridge:
+                      description: Bridge to attach the network device to.
+                      minLength: 1
+                      type: string
+                    firewall:
+                      description: Whether this interface should be protected by the
+                        firewall.
+                      type: boolean
+                    model:
+                      default: virtio
+                      description: Network Card Model.
+                      enum:
+                      - e1000
+                      - e1000e
+                      - rtl8139
+                      - virtio
+                      - vmxnet3
+                      type: string
+                    mtu:
+                      default: 1500
+                      description: Force MTU of network device.
+                      type: integer
+                      x-kubernetes-validations:
+                      - rule: self == 1 || ( self >= 576 && self <= 65520)
+                    name:
+                      description: Name of the network interface.
+                      minLength: 1
+                      type: string
+                    vlan:
+                      description: VLAN tag to apply to packets on this interface.
+                      maximum: 4094
+                      minimum: 1
+                      type: integer
+                  type: object
+                type: array
+              region:
+                description: Region is the Proxmox Cloud region where VM template
+                  will be created
+                minLength: 1
+                type: string
+              sourceImage:
+                description: SourceImage defines the source image for the VM boot
+                  disk.
+                properties:
+                  checksum:
+                    description: Checksum is a hash of the checksum.
+                    maxLength: 128
+                    minLength: 32
+                    type: string
+                  checksumType:
+                    description: ChecksumType is the algorithm to calculate the checksum
+                      of the file.
+                    enum:
+                    - md5
+                    - sha1
+                    - sha224
+                    - sha256
+                    - sha384
+                    - sha512
+                    type: string
+                  compression:
+                    description: Compression is the compression method to use for
+                      the image.
+                    enum:
+                    - gz
+                    - lzo
+                    - zst
+                    - bz2
+                    type: string
+                  imageName:
+                    description: ImageName is the prefix name of the destination image.
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                  url:
+                    description: URL is the location of the source image.
+                    pattern: ^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(/\S*)?$
+                    type: string
+                required:
+                - url
+                type: object
+              storageIDs:
+                description: |-
+                  StorageIDs is a list of storage IDs where the VM template and base image will be stored.
+                  Storage should supports images and import content types.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              tags:
+                description: Tags to apply to the VM template
+                items:
+                  type: string
+                maxItems: 10
+                type: array
+              vga:
+                description: VGA configuration
+                properties:
+                  memory:
+                    description: Sets the VGA memory in MiB.
+                    maximum: 512
+                    minimum: 4
+                    type: integer
+                  type:
+                    default: std
+                    description: Emulated VGA type.
+                    enum:
+                    - none
+                    - serial0
+                    - std
+                    - vmware
+                    type: string
+                type: object
+            required:
+            - sourceImage
+            - storageIDs
+            type: object
+          status:
+            description: Status defines the observed state of ProxmoxNodeTemplateClass
+            properties:
+              conditions:
+                description: Conditions contains signals for health and readiness
+                items:
+                  description: Condition aliases the upstream type and adds additional
+                    helper methods
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              imageID:
+                description: ImageID is the ID of the image.
+                type: string
+              installedZones:
+                description: |-
+                  InstalledZones is a list of nodes that VM template was prepared.
+                  This field is populated by the controller and should not be set manually.
+                items:
+                  type: string
+                type: array
+              resources:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Resources is the list of resources that have been provisioned.
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

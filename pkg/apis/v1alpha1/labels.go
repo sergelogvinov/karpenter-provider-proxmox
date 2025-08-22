@@ -23,6 +23,8 @@ import (
 )
 
 const (
+	TerminationFinalizer = apis.Group + "/termination"
+
 	// Labels that can be selected on and are propagated to the node
 	LabelInstanceFamily          = apis.Group + "/instance-family"           // c1, s1, m1, e1
 	LabelInstanceCPUManufacturer = apis.Group + "/instance-cpu-manufacturer" // host, kvm64, Broadwell, Skylake
@@ -32,10 +34,6 @@ const (
 
 	// github.com/awslabs/eks-node-viewer label so that it shows up.
 	LabelNodeViewer = "eks-node-viewer/instance-price"
-
-	// Internal labels that are propagated to the node
-	ProxmoxLabelKey   = apis.Group + "/node"
-	ProxmoxLabelValue = "owned"
 )
 
 func init() {

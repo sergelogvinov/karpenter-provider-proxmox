@@ -41,7 +41,7 @@ const (
 // +kubebuilder:object:generate=true
 // +kubebuilder:printcolumn:name="Zones",type="string",JSONPath=".status.resources.zones",description=""
 // +kubebuilder:printcolumn:name="Balance",type="string",JSONPath=".spec.placementStrategy.zoneBalance",description=""
-// +kubebuilder:printcolumn:name="Template",type="string",JSONPath=".spec.instanceTemplate.name",description=""
+// +kubebuilder:printcolumn:name="Template",type="string",JSONPath=".spec.instanceTemplateRef.name",description=""
 // +kubebuilder:printcolumn:name="Metadata",type="string",JSONPath=".spec.metadataOptions.type",description=""
 // +kubebuilder:printcolumn:name="Disk",type="string",JSONPath=".spec.bootDevice.size",description=""
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type==\"Ready\")].status",description=""
@@ -62,17 +62,18 @@ type ProxmoxNodeClass struct {
 // ProxmoxNodeClassSpec defines the desired state of ProxmoxNodeClass
 type ProxmoxNodeClassSpec struct {
 	// Region is the Proxmox Cloud region where nodes will be created
+	// +kubebuilder:validation:MinLength=1
 	// +optional
-	Region string `json:"region"`
+	Region string `json:"region,omitempty"`
 
 	// PlacementStrategy defines how nodes should be placed across zones
 	// +kubebuilder:default={"zoneBalance":"Balanced"}
 	// +optional
 	PlacementStrategy *PlacementStrategy `json:"placementStrategy,omitempty"`
 
-	// InstanceTemplate is the template of the VM to create
+	// InstanceTemplateRef is the template reference for the VM template
 	// +required
-	InstanceTemplate *InstanceTemplate `json:"instanceTemplate"`
+	InstanceTemplateRef *InstanceTemplateClassReference `json:"instanceTemplateRef,omitempty"`
 
 	// KubeletConfiguration defines kubelet config file
 	// +optional
@@ -97,7 +98,7 @@ type ProxmoxNodeClassSpec struct {
 	// SecurityGroups to apply to the VMs
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
-	SecurityGroups []SecurityGroupsTerm `json:"securityGroups,omitempty"`
+	SecurityGroups []SecurityGroups `json:"securityGroups,omitempty" hash:"ignore"`
 }
 
 // PlacementStrategy defines how nodes should be placed across zones
@@ -220,14 +221,13 @@ type BlockDevice struct {
 	Storage string `json:"storage,omitempty"`
 }
 
-type InstanceTemplate struct {
-	// Type is the type of the instance template
-	// +kubebuilder:validation:Enum={template}
+type InstanceTemplateClassReference struct {
+	// Kind of the referent; More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds"
+	// +kubebuilder:validation:Enum:={ProxmoxTemplate,ProxmoxUnmanagedTemplate}
 	// +required
-	Type string `json:"type"`
-
-	// Name is the name of the instance template
-	// +kubebuilder:validation:MinLength:=1
+	Kind string `json:"kind"`
+	// Name of the referent; More info: http://kubernetes.io/docs/user-guide/identifiers#names
+	// +kubebuilder:validation:MinLength=1
 	// +required
 	Name string `json:"name"`
 }
@@ -251,8 +251,8 @@ type MetadataOptions struct {
 	SecretRef *corev1.SecretReference `json:"secretRef,omitempty"`
 }
 
-// SecurityGroupsTerm defines a term to apply security groups
-type SecurityGroupsTerm struct {
+// SecurityGroups defines a term to apply security groups
+type SecurityGroups struct {
 	// Interface is the network interface to apply the security group
 	// +kubebuilder:default=net0
 	// +kubebuilder:validation:Pattern:="net[0-9]+"

@@ -20,9 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
@@ -103,17 +105,25 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				continue
 			}
 
-			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, zones)
+			templateIDs := nodeClass.GetTemplateIDs(region)
+
+			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, lo.Intersect(zones, nodeClass.GetZones(region)))
 			for _, zone := range zones {
-				instanceTemplate, err := p.instanceTemplateProvider.Get(ctx, nodeClass, region, zone)
-				if err != nil {
-					log.Error(err, "Failed to get instance template", "region", region, "zone", zone, "instanceType", instanceType.Name)
-					errs = append(errs, err)
+				templates := p.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
+					return c.Region == region && c.Zone == zone && slices.Contains(templateIDs, c.TemplateID)
+				})
+
+				if len(templates) == 0 {
+					log.Info("Failed to get instance template", "region", region, "zone", zone, "instanceType", instanceType.Name)
+
+					errs = append(errs, fmt.Errorf("no instance templates found in region %s and zone %s", region, zone))
 
 					continue
 				}
 
-				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone)
+				template := templates[0]
+
+				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, &template, instanceType, region, zone)
 				if err != nil {
 					log.Error(err, "Failed to create instance", "region", region, "zone", zone, "instanceType", instanceType.Name)
 					errs = append(errs, err)
@@ -121,7 +131,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 					continue
 				}
 
-				node.Labels[v1alpha1.LabelInstanceImageID] = instanceTemplate.TemplateHash
+				node.Labels[v1alpha1.LabelInstanceImageID] = template.TemplateHash
 
 				// FIXME: reserve capacity in creation stage
 				p.cloudCapacityProvider.UpdateNodeCapacityInZone(ctx, region, zone)
