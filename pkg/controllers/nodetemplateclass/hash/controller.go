@@ -47,21 +47,25 @@ func NewController(kubeClient client.Client) *Controller {
 }
 
 func (c *Controller) Name() string {
-	return "nodeclass.hash"
+	return "nodetemplateclass.hash"
 }
 
 // Reconcile executes a control loop for the resource
-func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	nodeClassCopy := nodeClass.DeepCopy()
-	nodeClassCopy.Annotations = lo.Assign(nodeClass.Annotations, map[string]string{
-		v1alpha1.AnnotationProxmoxNodeClassHash:        nodeClass.Hash(),
-		v1alpha1.AnnotationProxmoxNodeClassHashVersion: v1alpha1.ProxmoxNodeClassHashVersion,
+	if templateClass.Status.ImageID == "" || len(templateClass.Status.Zones) == 0 {
+		return reconcile.Result{}, nil
+	}
+
+	templateClassCopy := templateClass.DeepCopy()
+	templateClassCopy.Annotations = lo.Assign(templateClass.Annotations, map[string]string{
+		v1alpha1.AnnotationProxmoxTemplateClassHash:        templateClass.Hash(),
+		v1alpha1.AnnotationProxmoxTemplateClassHashVersion: v1alpha1.ProxmoxTemplateClassHashVersion,
 	})
 
-	if !equality.Semantic.DeepEqual(nodeClass, nodeClassCopy) {
-		if err := c.kubeClient.Patch(ctx, nodeClassCopy, client.MergeFrom(nodeClass)); err != nil {
+	if !equality.Semantic.DeepEqual(templateClass, templateClassCopy) {
+		if err := c.kubeClient.Patch(ctx, templateClassCopy, client.MergeFrom(templateClass)); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
@@ -73,7 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1alpha1.ProxmoxNodeClass{}).
+		For(&v1alpha1.ProxmoxTemplate{}).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 10,

@@ -19,66 +19,94 @@ package status
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
-	templateScanPeriod = 5 * time.Minute
+	templateScanPeriod = 15 * time.Second
 )
 
 type InstanceTemplate struct {
+	kubeClient               client.Client
 	instanceTemplateProvider instancetemplate.Provider
 }
 
 func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
-	log := log.FromContext(ctx)
-
-	if nodeClass.Spec.InstanceTemplate.Type != "template" {
-		nodeClass.Status.SelectedZones = nil
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Instance Template did not match the node class requirements")
-
-		return reconcile.Result{}, fmt.Errorf("instanceTemplate.Type must be 'template', got '%s'", nodeClass.Spec.InstanceTemplate.Type)
-	}
-
-	templates, err := i.instanceTemplateProvider.List(ctx, nodeClass)
+	template, err := i.resolveProxmoxTemplateFromNodeClass(ctx, nodeClass)
 	if err != nil {
-		log.Error(err, "listing images")
-
-		return reconcile.Result{}, err
-	}
-
-	if len(templates) == 0 {
-		nodeClass.Status.SelectedZones = nil
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Instance Template did not match the node class requirements")
-
-		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
-	}
-
-	zones := make([]string, 0, len(templates))
-	for _, template := range templates {
-		if slices.Contains(zones, template.Zone) {
-			continue
+		if errors.IsNotFound(err) {
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template resource reference did not find")
 		}
 
-		zones = append(zones, fmt.Sprintf("%s/%s", template.Region, template.Zone))
+		return reconcile.Result{}, fmt.Errorf("resolving TemplateClass from nodeClass failed: %w", err)
+	}
+
+	zones := template.GetZones()
+
+	if nodeClass.Spec.Region != "" {
+		zones = lo.Filter(zones, func(zone string, _ int) bool {
+			region := strings.SplitN(zone, "/", 2)[0]
+
+			return region == nodeClass.Spec.Region
+		})
 	}
 
 	nodeClass.Status.Resources = corev1.ResourceList{
 		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(zones))),
 	}
 	nodeClass.Status.SelectedZones = zones
+
+	if len(zones) == 0 {
+		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
+
+		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
+	}
+
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionInstanceTemplateReady)
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
+}
+
+func (i *InstanceTemplate) resolveProxmoxTemplateFromNodeClass(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (v1alpha1.ProxmoxCommonTemplate, error) {
+	ref := nodeClass.Spec.InstanceTemplateRef
+	if ref == nil {
+		return nil, fmt.Errorf("nodeClaim missing InstanceTemplateRef")
+	}
+
+	var obj client.Object
+
+	switch ref.Kind {
+	case "ProxmoxUnmanagedTemplate":
+		obj = &v1alpha1.ProxmoxUnmanagedTemplate{}
+	case "ProxmoxTemplate":
+		obj = &v1alpha1.ProxmoxTemplate{}
+	default:
+		return nil, fmt.Errorf("unsupported InstanceTemplateRef kind: %s", ref.Kind)
+	}
+
+	if err := i.kubeClient.Get(ctx, types.NamespacedName{Name: ref.Name}, obj); err != nil {
+		return nil, err
+	}
+
+	template, ok := obj.(v1alpha1.ProxmoxCommonTemplate)
+	if !ok {
+		return nil, fmt.Errorf("unsupported InstanceTemplateRef kind: %s", ref.Kind)
+	}
+
+	return template, nil
 }
