@@ -1,0 +1,40 @@
+# Karpenter CRD for Proxmox Virtual Machine templates
+
+## ProxmoxTemplate resource
+
+```yaml
+apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
+kind: ProxmoxTemplate
+metadata:
+  name: default
+spec:
+  sourceImage:
+    url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+    imageName: ubuntu-amd64.qcow2
+  storageIDs:
+    - local
+    - system
+  vga:
+    type: serial0
+  network:
+    - name: net0
+      bridge: vmbr0
+      firewall: true
+    - name: net1
+      bridge: vmbr1
+      mtu: 1400
+  tags:
+    - talos-k8s-proxmox
+    - karpenter
+```
+
+## ProxmoxUnmanagedTemplate resource
+
+```yaml
+apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
+kind: ProxmoxUnmanagedTemplate
+metadata:
+  name: default
+spec:
+  templateName: talos
+```

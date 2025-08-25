@@ -36,5 +36,9 @@ func init() {
 	scheme.Scheme.AddKnownTypes(gv,
 		&ProxmoxNodeClass{},
 		&ProxmoxNodeClassList{},
+		&ProxmoxTemplate{},
+		&ProxmoxTemplateList{},
+		&ProxmoxUnmanagedTemplate{},
+		&ProxmoxUnmanagedTemplateList{},
 	)
 }

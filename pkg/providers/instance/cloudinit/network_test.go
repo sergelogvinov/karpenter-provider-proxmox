@@ -39,8 +39,8 @@ func TestDefaultNetworkV1(t *testing.T) {
 			cloudinit.NetworkConfig{
 				Interfaces: []cloudinit.InterfaceConfig{
 					{
-						Name:     "net0",
-						MacAddr:  "00:11:22:33:44:55",
+						Name:     "eth0",
+						MacAddr:  "AA:11:22:33:44:55",
 						MTU:      1500,
 						DHCPv4:   false,
 						DHCPv6:   false,
@@ -61,8 +61,8 @@ func TestDefaultNetworkV1(t *testing.T) {
 			`version: 1
 config:
 - type: physical
-  name: "net0"
-  mac_address: "00:11:22:33:44:55"
+  name: eth0
+  mac_address: "aa:11:22:33:44:55"
   mtu: 1500
   subnets:
   - type: static
@@ -85,7 +85,7 @@ config:
 			cloudinit.NetworkConfig{
 				Interfaces: []cloudinit.InterfaceConfig{
 					{
-						Name:     "net0",
+						Name:     "eth0",
 						MacAddr:  "00:11:22:33:44:55",
 						MTU:      1500,
 						DHCPv4:   true,
@@ -104,12 +104,44 @@ config:
 			`version: 1
 config:
 - type: physical
-  name: "net0"
+  name: eth0
   mac_address: "00:11:22:33:44:55"
   mtu: 1500
   subnets:
   - type: dhcp
   - type: dhcp6
+- type: nameserver
+  address:
+  - "4.3.2.1"
+  - "1.2.3.4"
+`,
+		},
+		{
+			"NetworkV1-Saac",
+			cloudinit.DefaultNetworkV1,
+			cloudinit.NetworkConfig{
+				Interfaces: []cloudinit.InterfaceConfig{
+					{
+						Name:    "eth0",
+						MacAddr: "00:11:22:33:44:55",
+						MTU:     1500,
+						DHCPv4:  false,
+						DHCPv6:  false,
+					},
+				},
+				NameServers: []string{
+					"4.3.2.1",
+					"1.2.3.4",
+				},
+			},
+			`version: 1
+config:
+- type: physical
+  name: eth0
+  mac_address: "00:11:22:33:44:55"
+  mtu: 1500
+  subnets:
+  - type: ipv6_slaac
 - type: nameserver
   address:
   - "4.3.2.1"

@@ -41,10 +41,10 @@ type Controller struct {
 	cloudCapacityProvider cloudcapacity.Provider
 }
 
-func NewController(cloudCapacityProvider cloudcapacity.Provider) (*Controller, error) {
+func NewController(cloudCapacityProvider cloudcapacity.Provider) *Controller {
 	return &Controller{
 		cloudCapacityProvider: cloudCapacityProvider,
-	}, nil
+	}
 }
 
 func (c *Controller) Name() string {
