@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.2.0...v0.3.0) (2025-08-26)
+
+
+### Features
+
+* add proxmox vm-template controller and related configurations ([872beb6](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/872beb6a1f030057dc42c4f7a6684be53f008cb2))
+* drift instances ([c8afc81](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/c8afc818451771dde74f4f4c947b04ba046a2952))
+* kubelet reserved resources ([84d45ae](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/84d45aef7f0c769a1b969d5fe0ae06b8fd3d8f68))
+* nodeclass validation ([71394c4](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/71394c4c9752dda34dcf603b8b7484faf47d9f7d))
+
 ## [0.2.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.1.0...v0.2.0) (2025-08-18)
 
 

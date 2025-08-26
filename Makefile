@@ -99,6 +99,7 @@ gen-objects: ## generate the controller-gen related objects
 
 .PHONY: manifests
 manifests: ## generate the controller-gen kubernetes manifests
+	rm -rf pkg/apis/crds/*
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
 
@@ -156,6 +157,7 @@ helm-release: ## Helm Release
 docs:
 	@echo "Copying generated CRDs to Helm chart..."
 	@mkdir -p charts/karpenter-provider-proxmox/crds
+	@rm -rf charts/karpenter-provider-proxmox/crds/*
 	@cp pkg/apis/crds/*.yaml charts/karpenter-provider-proxmox/crds/
 	@yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
 	@echo "Generate to Helm chart deployment manifests..."

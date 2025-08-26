@@ -4,23 +4,23 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.1
-  name: proxmoxnodeunmanagedtemplateclasses.karpenter.proxmox.sinextra.dev
+  name: proxmoxunmanagedtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
   names:
     categories:
     - karpenter
-    kind: ProxmoxNodeUnmanagedTemplateClass
-    listKind: ProxmoxNodeUnmanagedTemplateClassList
-    plural: proxmoxnodeunmanagedtemplateclasses
-    singular: proxmoxnodeunmanagedtemplateclass
+    kind: ProxmoxUnmanagedTemplate
+    listKind: ProxmoxUnmanagedTemplateList
+    plural: proxmoxunmanagedtemplates
+    singular: proxmoxunmanagedtemplate
   scope: Cluster
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.resources.zones
       name: Zones
       type: string
-    - jsonPath: .spec.name
+    - jsonPath: .spec.templateName
       name: Name
       type: string
     - jsonPath: .status.conditions[?(@.type=="Ready")].status
@@ -32,7 +32,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ProxmoxNodeUnmanagedTemplateClass is the Schema for the ProxmoxNodeUnmanagedTemplateClass
+        description: ProxmoxUnmanagedTemplate is the Schema for the ProxmoxUnmanagedTemplate
           API
         properties:
           apiVersion:
@@ -53,22 +53,22 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec defines the desired state of ProxmoxNodeTemplateClass
+            description: Spec defines the desired state of ProxmoxUnmanagedTemplateSpec
             properties:
-              name:
-                description: Name Proxmox template.
-                minLength: 1
-                type: string
               region:
                 description: Region is the Proxmox Cloud region where VM template
                   will be created
                 minLength: 1
                 type: string
+              templateName:
+                description: TemplateName is the name of the Proxmox template.
+                minLength: 1
+                type: string
             required:
-            - name
+            - templateName
             type: object
           status:
-            description: Status defines the observed state of ProxmoxNodeTemplateClass
+            description: Status defines the observed state of ProxmoxUnmanagedTemplate
             properties:
               conditions:
                 description: Conditions contains signals for health and readiness
@@ -130,13 +130,6 @@ spec:
               imageID:
                 description: ImageID is the ID of the image.
                 type: string
-              installedZones:
-                description: |-
-                  InstalledZones is a list of nodes that VM template was prepared.
-                  This field is populated by the controller and should not be set manually.
-                items:
-                  type: string
-                type: array
               resources:
                 additionalProperties:
                   anyOf:
@@ -146,6 +139,13 @@ spec:
                   x-kubernetes-int-or-string: true
                 description: Resources is the list of resources that have been provisioned.
                 type: object
+              zones:
+                description: |-
+                  Zones is a list of nodes that VM template was prepared.
+                  This field is populated by the controller and should not be set manually.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true
