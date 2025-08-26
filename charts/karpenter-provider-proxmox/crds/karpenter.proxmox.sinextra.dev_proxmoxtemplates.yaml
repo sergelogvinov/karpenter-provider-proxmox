@@ -4,16 +4,16 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.1
-  name: proxmoxtemplateclasses.karpenter.proxmox.sinextra.dev
+  name: proxmoxtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
   names:
     categories:
     - karpenter
-    kind: ProxmoxTemplateClass
-    listKind: ProxmoxTemplateClassList
-    plural: proxmoxtemplateclasses
-    singular: proxmoxtemplateclass
+    kind: ProxmoxTemplate
+    listKind: ProxmoxTemplateList
+    plural: proxmoxtemplates
+    singular: proxmoxtemplate
   scope: Cluster
   versions:
   - additionalPrinterColumns:
@@ -38,8 +38,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ProxmoxTemplateClass is the Schema for the ProxmoxTemplateClass
-          API
+        description: ProxmoxTemplate is the Schema for the ProxmoxTemplate API
         properties:
           apiVersion:
             description: |-
@@ -59,7 +58,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: Spec defines the desired state of ProxmoxTemplateClass
+            description: Spec defines the desired state of ProxmoxTemplate
             properties:
               cpu:
                 default:
@@ -135,7 +134,10 @@ spec:
                       maximum: 4094
                       minimum: 1
                       type: integer
+                  required:
+                  - bridge
                   type: object
+                minItems: 1
                 type: array
               region:
                 description: Region is the Proxmox Cloud region where VM template
@@ -161,15 +163,6 @@ spec:
                     - sha256
                     - sha384
                     - sha512
-                    type: string
-                  compression:
-                    description: Compression is the compression method to use for
-                      the image.
-                    enum:
-                    - gz
-                    - lzo
-                    - zst
-                    - bz2
                     type: string
                   imageName:
                     description: ImageName is the prefix name of the destination image.
@@ -216,11 +209,12 @@ spec:
                     type: string
                 type: object
             required:
+            - network
             - sourceImage
             - storageIDs
             type: object
           status:
-            description: Status defines the observed state of ProxmoxTemplateClass
+            description: Status defines the observed state of ProxmoxTemplate
             properties:
               conditions:
                 description: Conditions contains signals for health and readiness
@@ -282,13 +276,6 @@ spec:
               imageID:
                 description: ImageID is the ID of the image.
                 type: string
-              installedZones:
-                description: |-
-                  InstalledZones is a list of nodes that VM template was prepared.
-                  This field is populated by the controller and should not be set manually.
-                items:
-                  type: string
-                type: array
               resources:
                 additionalProperties:
                   anyOf:
@@ -298,6 +285,13 @@ spec:
                   x-kubernetes-int-or-string: true
                 description: Resources is the list of resources that have been provisioned.
                 type: object
+              zones:
+                description: |-
+                  Zones is a list of nodes that VM template was prepared.
+                  This field is populated by the controller and should not be set manually.
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true
