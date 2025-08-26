@@ -133,8 +133,8 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 
 	instanceTypes := []*cloudprovider.InstanceType{}
 
-	for _, cpu := range []int{1, 2, 4, 8, 16, 32} {
-		for _, memFactor := range []int{2, 3, 4} {
+	for _, cpu := range []int{1, 2, 4, 8, 16} {
+		for _, memFactor := range []int{2, 3, 4, 8} {
 			name := makeGenericInstanceTypeName(cpu, memFactor)
 
 			mem := cpu * memFactor
