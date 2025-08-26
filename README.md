@@ -1,33 +1,37 @@
 # Karpenter Provider for Proxmox
 
-__On active development__
-
 ## Overview
 
-__Motivation__: I usually have more capacity on bare metal than I actually need. The only time I require extra capacity is during maintenance when I need to migrate workloads to another server. If a service becomes more popular, I simply rent additional servers. In cases where workloads are highly dynamic for short periods, I scale up by provisioning additional nodes from a cloud provider—following a hybrid cloud approach. This strategy is highly cost-effective since bare metal servers are generally cheaper than cloud instances.
+__Motivation__: Most of the time, my bare-metal servers have more capacity than I actually need.
+However, there are two situations where I require additional capacity:
 
-When I rent a server, I maximize its utilization by running as many virtual machines (VMs) as the hardware allows, distributing them according to NUMA architecture. This setup works perfect. However, sometimes Kubernetes spreads pods across different VMs, which can negatively impact network performance. Of course, we can use pod affinity to prevent this, but it requires additional management and fine-tuning.
+1. During maintenance – I need to migrate workloads from one server to another. In this case, I temporarily rent a virtual machine from a cloud provider (hybrid Kubernetes setup) and release it after maintenance is complete.
+2. When demand grows quickly – if a service suddenly becomes more popular, I add cloud VMs for rapid scale-up. Later, I replace them with a larger bare-metal server, which often costs the same or even less than renting VMs.
 
-This brings me to an idea: implementing a node autoscaler that can automatically create VMs on my Proxmox cluster as needed. This would eliminate the need to manually run terraform to add nodes, which is not the fastest process.
+When I rent a bare-metal server, I maximize its utilization by running as many VMs as the hardware allows, distributing them according to the NUMA architecture. This setup works very well. However, sometimes Kubernetes spreads pods across different VMs, which can reduce network performance. Of course, we can use pod affinity to prevent this, but it requires additional management and fine-tuning.
 
-The benefits of not fully utilizing all bare metal resources include:
-* `Power efficiency` – Free CPU cores and unused RAM can be switched to power-saving mode.
-* `Better CPU frequency boosting` – The system has extra power available to boost core frequencies when needed.
-* `Automated VM recreation` – VMs can be recreated on a schedule for improved manageability or to apply updates.
-* `CPU pinning` – VMs CPUs pinned to specific CPU cores on the host.
-* `NUMA node affinity` – VMs can be placed on the same NUMA node for better performance.
+This brings me to an idea: implementing a node autoscaler that can automatically create VMs on my Proxmox Cluster(s) as needed. This would eliminate the need to manually run terraform to add/delete nodes, which is not the fastest process.
+
+Also, having free resources can provide more advantages than we might initially expect:
+* `Power efficiency` – Idle CPU cores can be switched to power-saving mode, reducing overall energy usage and lowering system temperature.
+* `Better CPU frequency boosting` – With unused capacity, the system has additional power headroom to boost active core frequencies when needed.
+* `Automated VM recreation` – Using Karpenter framework, VMs can be automatically recreated if they become unhealthy or require upgrades (drift management).
+* `CPU pinning` – VMs can automatically have pinned vCPUs to specific host cores, improving cache locality and reducing latency.
+* `NUMA node affinity` – VMs can be scheduled on the same NUMA node to improve performance by minimizing cross-node communication. Achieving this with Kubernetes requires identical resource requests and limits for pods, which is not always possible.
 
 ## In Scope
 
-* [x] Dynamic creation and termination
-* [x] The best placement strategy for VMs across zones
-* [x] Cloud-init metadata delivery by cdrom
-* [x] Firewall security groups
-* [x] Kubelet config optimization
-* [x] VM clone template selection
+* [x] Dynamic VM creation and termination
+* [x] Cloud-init metadata delivery via CD-ROM
+* [x] Cloud-init Go-template metadata support (dynamic metadata based on instance type and node location)
+* [x] Firewall security group support
+* [x] Kubelet configuration tuning
+* [x] Predefined VM template selection
+* [x] Prepare VM templates via CRD
+* [x] VM optimization: Placement across zones
+* [x] VM optimization: Network performance
 * [ ] VM optimization: CPU pinning
 * [ ] VM optimization: NUMA node affinity
-* [x] VM optimization: Network performance
 
 ## Requirements
 
@@ -37,11 +41,35 @@ The benefits of not fully utilizing all bare metal resources include:
 
 ## Installation
 
-For details about how to install and deploy the Karpenter, see [Installation instruction](docs/install.md).
+Create a configuration file with credentials for your Proxmox cluster.
+Apply the configuration as a secret to the `kube-system` namespace.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: karpenter-provider-proxmox
+  namespace: kube-system
+stringData:
+  config.yaml: |
+    clusters:
+      - url: https://cluster-api-1.exmple.com:8006/api2/json
+        token_id: "kubernetes@pve!karpenter"
+        token_secret: "secret"
+        region: Region-1
+```
+
+Deploy the Karpenter Proxmox Helm chart.
+
+```shell
+helm upgrade -i -n kube-system karpenter-proxmox oci://ghcr.io/sergelogvinov/charts/karpenter-proxmox
+```
+
+For more details, see [Installation instruction](docs/install.md).
 
 ## Configuration
 
-Karpenter Node Class configuration:
+### Karpenter Proxmox Node Class configuration:
 
 ```yaml
 apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
@@ -53,6 +81,13 @@ spec:
   tags:
     - k8s
     - karpenter
+
+  # The Proxmox virtual machine template reference (required)
+  instanceTemplateRef:
+    # CRD resource kind: ProxmoxTemplate or ProxmoxUnmanagedTemplate
+    kind: ProxmoxTemplate
+    # The name of the resource
+    name: default
 
   metadataOptions:
     # How delivery the metadata to the VM, options: none or cdrom (required)
@@ -68,15 +103,16 @@ spec:
       interface: net0
 ```
 
-For more information, see [Karpenter Proxmox NodeClass](docs/nodeclass.md).
+For more details, see:
+- [Karpenter Proxmox NodeClass](docs/nodeclass.md).
+- [Proxmox Virtual Machine template configuration](docs/nodetemplateclass.md)
 
-Karpenter Node Pool configuration:
+### Karpenter Node Pool configuration:
 
 ```yaml
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  # Node pool name, it uses to create the node name for new VMs
   name: default
 spec:
   limits:
@@ -95,7 +131,25 @@ spec:
           values: ["amd64"]
 ```
 
-For more information, see [Karpenter Node Pool](https://karpenter.sh/docs/concepts/nodepools/)
+The requirements labels (key) can be:
+
+- `kubernetes.io/arch`: The CPU architecture of the node, e.g. [`amd64`, `arm64`].
+- `kubernetes.io/os`: The operating system of the node, e.g. [`linux`, `windows`].
+- `topology.kubernetes.io/zone`: The zone where the node is located, e.g. [`us-west-1a`, `us-east-1b`].
+- `topology.kubernetes.io/region`: The region where the node is located, e.g. [`us-west-1`, `us-east-1`].
+- `node.kubernetes.io/instance-type`: The instance type of the node, e.g. [`t1.2VCPU-6GB`, `m1.2VCPU-16GB`].
+
+Karpenter specific labels:
+
+- `karpenter.sh/capacity-type`: The capacity type of the node [`on-demand`, `spot`, `reserved`].
+- `karpenter.sh/nodepool`: The node pool to which the node belongs.
+- `karpenter.proxmox.sinextra.dev/instance-family`: The instance family of the node [`t1`,`s1`, `m1`]
+- `karpenter.proxmox.sinextra.dev/instance-cpu-manufacturer`: The CPU manufacturer of the instance [`host`,`kvm64`, `x86-64-v2-AES`]
+- `karpenter.proxmox.sinextra.dev/proxmoxnodeclass`: The Proxmox Node Class name of the node.
+
+For more details, see:
+- [Karpenter Instance Types](docs/instancetypes.md) for information about instance types.
+- [Karpenter Node Pool](https://karpenter.sh/docs/concepts/nodepools/) for information about node pools spec.
 
 ## Contributing
 
@@ -108,9 +162,9 @@ This [Code of Conduct](CODE_OF_CONDUCT.md) is adapted from the Contributor Coven
 
 ## References
 
-* [Karpenter](https://karpenter.sh/)
-* [Proxmox VE](https://www.proxmox.com/en/proxmox-ve)
-* [Proxmox CCM](https://github.com/sergelogvinov/proxmox-cloud-controller-manager)
+- [Karpenter](https://karpenter.sh/)
+- [Proxmox VE](https://www.proxmox.com/en/proxmox-ve)
+- [Proxmox CCM](https://github.com/sergelogvinov/proxmox-cloud-controller-manager)
 
 ## License
 
