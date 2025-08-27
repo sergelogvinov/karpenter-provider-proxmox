@@ -24,7 +24,50 @@ For example, `c1.4VCPU-8GB` represents an instance type from the `c1` family wit
 
 ## Customize instance types
 
-You can redefine the instance family and the list of instance types using a JSON configuration file.
+You can redefine the instance family and the list of instance types by providing a JSON configuration file.
+The controller includes the flag `-instance-types-file` or env `INSTANCE_TYPES_FILE`, which lets you specify the path to this custom instance types file.
+
+The file structure looks like this:
 
 ```json
+[
+  {
+    "name": "c1.1VCPU-2GB",
+    "capacity": {
+      "cpu": "1",
+      "ephemeral-storage": "30Gi",
+      "memory": "2Gi",
+      "pods": "64"
+    },
+    "overhead": {
+      "KubeReserved": {
+        "cpu": "20m",
+        "memory": "384Mi"
+      },
+      "SystemReserved": {
+        "cpu": "10m",
+        "memory": "64Mi"
+      },
+      "EvictionThreshold": {
+        "memory": "100Mi"
+      }
+    }
+  }
+]
 ```
+
+* `name`: The name of the instance type, following the convention `<family>.<size-of-instance>`.
+* `capacity`: The resource capacity of the instance type.
+  * `cpu`: The number of virtual CPUs.
+  * `ephemeral-storage`: The boot disk size.
+  * `memory`: The amount of memory.
+  * `pods`: The maximum number of pods.
+* `overhead`: The resource overhead for the instance type, applied in the kubelet configuration file.
+  * `KubeReserved`: The resources reserved for Kubernetes system components.
+    * `cpu`: The amount of CPU reserved for Kubernetes.
+    * `memory`: The amount of memory reserved for Kubernetes.
+  * `SystemReserved`: The resources reserved for the host system.
+    * `cpu`: The amount of CPU reserved for the host system.
+    * `memory`: The amount of memory reserved for the host system.
+  * `EvictionThreshold`: The eviction threshold for the instance type.
+    * `memory`: The minimum amount of free memory required before the eviction process is triggered.

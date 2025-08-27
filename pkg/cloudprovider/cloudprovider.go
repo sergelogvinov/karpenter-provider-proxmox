@@ -172,6 +172,8 @@ func (c CloudProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 }
 
 // Get retrieves a NodeClaim from the cloudprovider by its provider id
+// It uses for termination.finalize only (karpenter/pkg/controllers/node/termination/controller.go)
+// In future versions, we may need to provide more information.
 func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.NodeClaim, error) {
 	log := c.log.WithName("Get()").WithValues("providerID", providerID)
 
@@ -193,16 +195,18 @@ func (c CloudProvider) Get(ctx context.Context, providerID string) (*karpv1.Node
 			return nil, cloudprovider.NewNodeClaimNotFoundError(err)
 		}
 
-		return nil, fmt.Errorf("getting instance, %w", err)
+		return nil, fmt.Errorf("getting status of instance, %w", err)
 	}
 
-	// FIXME: make prediction by resources?
-	instanceType, err := c.resolveInstanceTypeFromNode(ctx, node)
-	if err != nil {
-		log.Error(err, "Failed to resolve instance type from node", "node", node.Name)
+	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: node.Name}, node); err != nil {
+		if errors.IsNotFound(err) {
+			return nil, cloudprovider.NewNodeClaimNotFoundError(err)
+		}
+
+		return nil, fmt.Errorf("getting node resource, %w", err)
 	}
 
-	return c.nodeToNodeClaim(ctx, instanceType, node)
+	return c.nodeToNodeClaim(ctx, nil, node)
 }
 
 // List retrieves all NodeClaims from the cloudprovider

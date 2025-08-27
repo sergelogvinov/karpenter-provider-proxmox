@@ -92,6 +92,11 @@ func applyKubernetesConfiguration(
 		if len(instanceType.Overhead.SystemReserved) > 0 {
 			kubeletConfig.SystemReserved = requestsToMap(instanceType.Overhead.SystemReserved)
 		}
+
+		if len(instanceType.Overhead.EvictionThreshold) > 0 && instanceType.Overhead.EvictionThreshold.Memory().String() != "" {
+			kubeletConfig.EvictionHard = DefaultEvictionHard
+			kubeletConfig.EvictionHard["memory.available"] = instanceType.Overhead.EvictionThreshold.Memory().String()
+		}
 	}
 
 	return kubeletConfig

@@ -19,7 +19,7 @@ package v1alpha1
 import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 const (
@@ -28,8 +28,6 @@ const (
 	// Labels that can be selected on and are propagated to the node
 	LabelInstanceFamily          = apis.Group + "/instance-family"           // c1, s1, m1, e1
 	LabelInstanceCPUManufacturer = apis.Group + "/instance-cpu-manufacturer" // host, kvm64, Broadwell, Skylake
-	LabelInstanceCPU             = apis.Group + "/instance-cpu"              // 1, 2, 4, 8
-	LabelInstanceMemory          = apis.Group + "/instance-memory"           // 1Gi, 2Gi, 4Gi, 8Gi
 	LabelInstanceImageID         = apis.Group + "/instance-image-id"         // image ID
 
 	// github.com/awslabs/eks-node-viewer label so that it shows up.
@@ -37,11 +35,10 @@ const (
 )
 
 func init() {
-	v1.RestrictedLabelDomains = v1.RestrictedLabelDomains.Insert(apis.Group)
-	v1.WellKnownLabels = v1.WellKnownLabels.Insert(
+	karpv1.RestrictedLabelDomains = karpv1.RestrictedLabelDomains.Insert(apis.Group)
+	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
 		LabelInstanceFamily,
 		LabelInstanceCPUManufacturer,
-		LabelInstanceCPU,
-		LabelInstanceMemory,
+		LabelInstanceImageID,
 	)
 }

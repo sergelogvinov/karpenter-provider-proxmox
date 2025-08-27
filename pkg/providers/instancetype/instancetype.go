@@ -18,19 +18,18 @@ package instancetype
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
-	"github.com/go-logr/logr"
-
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -49,31 +48,16 @@ type DefaultProvider struct {
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo []*cloudprovider.InstanceType
-	instanceTypes     []*cloudprovider.InstanceType
-
-	log logr.Logger
 }
 
 func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
-	log := log.FromContext(ctx).WithName("instancetype")
-
 	return &DefaultProvider{
 		cloudCapacityProvider: cloudCapacityProvider,
-		log:                   log,
+		instanceTypesInfo:     loadDefaultInstanceTypes(),
 	}
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
-	log := p.log.WithName("List()")
-
-	if len(p.instanceTypes) == 0 {
-		if err := p.UpdateInstanceTypes(ctx); err != nil {
-			log.Error(err, "Failed to update instance types")
-
-			return nil, fmt.Errorf("failed to update instance types: %w", err)
-		}
-	}
-
 	p.muInstanceTypes.RLock()
 	defer p.muInstanceTypes.RUnlock()
 
@@ -86,15 +70,16 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 	for _, item := range p.instanceTypesInfo {
 		instanceType := &cloudprovider.InstanceType{
 			Name:         item.Name,
-			Requirements: computeRequirements(item.Name, item.Offerings, regions),
+			Requirements: p.computeRequirements(item.Name, item.Offerings, regions),
 			Capacity:     item.Capacity.DeepCopy(),
 			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved:   item.Overhead.KubeReserved.DeepCopy(),
-				SystemReserved: item.Overhead.SystemReserved.DeepCopy(),
+				KubeReserved:      item.Overhead.KubeReserved.DeepCopy(),
+				SystemReserved:    item.Overhead.SystemReserved.DeepCopy(),
+				EvictionThreshold: item.Overhead.EvictionThreshold.DeepCopy(),
 			},
 		}
 
-		createOfferings(p.cloudCapacityProvider, instanceType, regions)
+		p.createOfferings(instanceType, regions)
 
 		instanceTypes = append(instanceTypes, instanceType)
 	}
@@ -110,15 +95,18 @@ func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.
 		if item.Name == name {
 			instanceType := &cloudprovider.InstanceType{
 				Name:         item.Name,
-				Requirements: computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
+				Requirements: p.computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
 				Capacity:     item.Capacity.DeepCopy(),
-				Overhead: &cloudprovider.InstanceTypeOverhead{
-					KubeReserved:   item.Overhead.KubeReserved.DeepCopy(),
-					SystemReserved: item.Overhead.SystemReserved.DeepCopy(),
-				},
+				Overhead:     &cloudprovider.InstanceTypeOverhead{},
 			}
 
-			createOfferings(p.cloudCapacityProvider, instanceType, p.cloudCapacityProvider.Regions())
+			if item.Overhead != nil {
+				instanceType.Overhead.KubeReserved = item.Overhead.KubeReserved.DeepCopy()
+				instanceType.Overhead.SystemReserved = item.Overhead.SystemReserved.DeepCopy()
+				instanceType.Overhead.EvictionThreshold = item.Overhead.EvictionThreshold.DeepCopy()
+			}
+
+			p.createOfferings(instanceType, p.cloudCapacityProvider.Regions())
 
 			return instanceType, nil
 		}
@@ -131,43 +119,14 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
 
-	instanceTypes := []*cloudprovider.InstanceType{}
-
-	for _, cpu := range []int{1, 2, 4, 8, 16} {
-		for _, memFactor := range []int{2, 3, 4, 8} {
-			name := makeGenericInstanceTypeName(cpu, memFactor)
-
-			mem := cpu * memFactor
-			pods := 110
-
-			switch {
-			case mem <= 1:
-				pods = 32
-			case mem < 2:
-				pods = 64
-			}
-
-			capacity := corev1.ResourceList{
-				corev1.ResourceCPU:              resource.MustParse(fmt.Sprintf("%d", cpu)),
-				corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dGi", mem)),
-				corev1.ResourcePods:             resource.MustParse(fmt.Sprintf("%d", pods)),
-				corev1.ResourceEphemeralStorage: resource.MustParse("30G"),
-			}
-
-			opts := cloudprovider.InstanceType{
-				Name:     name,
-				Capacity: capacity,
-				Overhead: &cloudprovider.InstanceTypeOverhead{
-					KubeReserved:   kubeReservedResources(&capacity),
-					SystemReserved: systemReservedResources(&capacity),
-				},
-			}
-
-			instanceTypes = append(instanceTypes, &opts)
+	if name := options.FromContext(ctx).InstanceTypesFilePath; name != "" {
+		instanceTypes, err := loadInstanceTypesFromFile(name)
+		if err != nil {
+			return err
 		}
-	}
 
-	p.instanceTypesInfo = instanceTypes
+		p.instanceTypesInfo = instanceTypes
+	}
 
 	return nil
 }
@@ -177,69 +136,6 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	defer p.muInstanceTypes.Unlock()
 
 	return nil
-}
-
-func systemReservedResources(_ *corev1.ResourceList) corev1.ResourceList {
-	return corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse("10m"),
-		corev1.ResourceMemory: resource.MustParse("64Mi"),
-	}
-}
-
-func kubeReservedResources(capacity *corev1.ResourceList) corev1.ResourceList {
-	cpuResource := resource.MustParse("100m")
-	memResource := resource.MustParse("384Mi")
-
-	cpu := capacity.Cpu().Value()
-	mem := capacity.Memory().Value() / 1024 / 1024
-
-	switch {
-	case cpu < 1:
-		cpuResource = resource.MustParse("10m")
-	case cpu < 2:
-		cpuResource = resource.MustParse("20m")
-	case cpu < 4:
-		cpuResource = resource.MustParse("50m")
-	}
-
-	switch {
-	case mem < 1:
-		memResource = resource.MustParse("128Mi")
-	case mem < 2:
-		memResource = resource.MustParse("192Mi")
-	case mem < 4:
-		memResource = resource.MustParse("256Mi")
-	case mem < 8:
-		memResource = resource.MustParse("384Mi")
-	}
-
-	resources := corev1.ResourceList{
-		corev1.ResourceCPU:    cpuResource,
-		corev1.ResourceMemory: memResource,
-	}
-
-	return resources
-}
-
-func makeGenericInstanceTypeName(cpu, memFactor int) string {
-	var family string
-
-	switch memFactor {
-	case 2:
-		family = "c" // cpu
-	case 3:
-		family = "t"
-	case 4:
-		family = "s" // standard
-	case 8:
-		family = "m" // memory
-	case 16:
-		family = "x" // in-memory applications
-	default:
-		family = "e"
-	}
-
-	return fmt.Sprintf("%s1.%dVCPU-%dGB", family, cpu, cpu*memFactor)
 }
 
 func priceFromResources(resources corev1.ResourceList) float64 {
@@ -258,13 +154,13 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	return price
 }
 
-func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudprovider.InstanceType, regions []string) {
+func (p *DefaultProvider) createOfferings(opts *cloudprovider.InstanceType, regions []string) {
 	opts.Offerings = []*cloudprovider.Offering{}
 	price := priceFromResources(opts.Capacity)
 
 	for _, region := range regions {
-		for _, zone := range cloudcapacityProvider.Zones(region) {
-			available := cloudcapacityProvider.FitInZone(region, zone, opts.Capacity)
+		for _, zone := range p.cloudCapacityProvider.Zones(region) {
+			available := p.cloudCapacityProvider.FitInZone(region, zone, opts.Capacity)
 
 			opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
 				Price:     price,
@@ -281,7 +177,7 @@ func createOfferings(cloudcapacityProvider cloudcapacity.Provider, opts *cloudpr
 	}
 }
 
-func computeRequirements(instanceTypeName string, _ []*cloudprovider.Offering, regions []string) scheduling.Requirements {
+func (p *DefaultProvider) computeRequirements(instanceTypeName string, _ []*cloudprovider.Offering, regions []string) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, instanceTypeName),
@@ -296,9 +192,71 @@ func computeRequirements(instanceTypeName string, _ []*cloudprovider.Offering, r
 		// Well Known to Proxmox
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(instanceTypeName, ".")[0]),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUManufacturer, corev1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpDoesNotExist),
 	)
 
 	return requirements
+}
+
+func loadInstanceTypesFromFile(name string) ([]*cloudprovider.InstanceType, error) {
+	instanceTypes := []*cloudprovider.InstanceType{}
+
+	data, err := os.ReadFile(name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read instance types file %s: %w", name, err)
+	}
+
+	instanceTypeStatic := []InstanceTypeStatic{}
+
+	if err := json.Unmarshal(data, &instanceTypeStatic); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal instance types %s: %w", name, err)
+	}
+
+	for _, i := range instanceTypeStatic {
+		instance := cloudprovider.InstanceType{
+			Name:     i.Name,
+			Capacity: i.Capacity,
+			Overhead: &cloudprovider.InstanceTypeOverhead{},
+		}
+
+		if i.Overhead != nil {
+			instance.Overhead.KubeReserved = i.Overhead.KubeReserved.DeepCopy()
+			instance.Overhead.SystemReserved = i.Overhead.SystemReserved.DeepCopy()
+			instance.Overhead.EvictionThreshold = i.Overhead.EvictionThreshold.DeepCopy()
+		}
+
+		instanceTypes = append(instanceTypes, &instance)
+	}
+
+	return instanceTypes, nil
+}
+
+func loadDefaultInstanceTypes() []*cloudprovider.InstanceType {
+	instanceTypes := []*cloudprovider.InstanceType{}
+
+	options := InstanceTypeOptions{
+		CPUs:              []int{1, 2, 4, 8, 16},
+		MemFactors:        []int{2, 3, 4, 8},
+		Storage:           30,
+		KubeletOverhead:   true,
+		SystemOverhead:    true,
+		EvictionThreshold: true,
+	}
+
+	for _, i := range options.Generate() {
+		instance := cloudprovider.InstanceType{
+			Name:     i.Name,
+			Capacity: i.Capacity,
+			Overhead: &cloudprovider.InstanceTypeOverhead{},
+		}
+
+		if i.Overhead != nil {
+			instance.Overhead.KubeReserved = i.Overhead.KubeReserved.DeepCopy()
+			instance.Overhead.SystemReserved = i.Overhead.SystemReserved.DeepCopy()
+			instance.Overhead.EvictionThreshold = i.Overhead.EvictionThreshold.DeepCopy()
+		}
+
+		instanceTypes = append(instanceTypes, &instance)
+	}
+
+	return instanceTypes
 }
