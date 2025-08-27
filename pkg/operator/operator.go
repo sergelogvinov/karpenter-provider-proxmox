@@ -69,7 +69,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	instanceTemplateProvider.UpdateInstanceTemplates(ctx)
 
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
-	instanceTypeProvider.UpdateInstanceTypes(ctx)
+	if err = instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "failed to update instance types")
+
+		os.Exit(1)
+	}
 
 	instanceProvider, err := instance.NewProvider(ctx, operator.KubernetesInterface, pxPool, cloudCapacityProvider, instanceTemplateProvider)
 	if err != nil {

@@ -60,7 +60,16 @@ func (c *CloudProvider) resolveInstanceTypeFromNode(ctx context.Context, node *c
 }
 
 func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudprovider.InstanceType, node *corev1.Node) (*karpv1.NodeClaim, error) {
-	nodeClaim := &karpv1.NodeClaim{}
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              node.Name,
+			CreationTimestamp: metav1.Time{Time: node.CreationTimestamp.Time},
+		},
+		Status: karpv1.NodeClaimStatus{
+			NodeName:   node.Name,
+			ProviderID: node.Spec.ProviderID,
+		},
+	}
 	labels := map[string]string{}
 	annotations := map[string]string{}
 
@@ -74,25 +83,32 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudpr
 		nodeClaim.Status.Capacity = lo.PickBy(instanceType.Capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
 		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
 	} else {
-		labels[karpv1.CapacityTypeLabelKey] = karpv1.CapacityTypeOnDemand
+		for _, key := range karpv1.WellKnownLabels.UnsortedList() {
+			if v, ok := node.Labels[key]; ok {
+				labels[key] = v
+			}
+		}
 
 		nodeClaim.Status.Capacity = node.Status.Capacity
 		nodeClaim.Status.Allocatable = node.Status.Allocatable
 	}
 
-	labels[corev1.LabelArchStable] = node.Status.NodeInfo.Architecture
-	labels[corev1.LabelOSStable] = node.Status.NodeInfo.OperatingSystem
+	for _, key := range []struct {
+		label string
+		value string
+	}{
+		{corev1.LabelArchStable, node.Status.NodeInfo.Architecture},
+		{corev1.LabelOSStable, node.Status.NodeInfo.OperatingSystem},
+		{corev1.LabelTopologyRegion, node.Labels[corev1.LabelTopologyRegion]},
+		{corev1.LabelTopologyZone, node.Labels[corev1.LabelTopologyZone]},
+	} {
+		if _, ok := labels[key.label]; !ok && key.value != "" {
+			labels[key.label] = key.value
+		}
+	}
 
-	labels[corev1.LabelTopologyRegion] = node.Labels[corev1.LabelTopologyRegion]
-	labels[corev1.LabelTopologyZone] = node.Labels[corev1.LabelTopologyZone]
-
-	nodeClaim.Name = node.Name
-	nodeClaim.Labels = labels
 	nodeClaim.Annotations = annotations
-	nodeClaim.CreationTimestamp = metav1.Time{Time: node.CreationTimestamp.Time}
-
-	nodeClaim.Status.NodeName = node.Name
-	nodeClaim.Status.ProviderID = node.Spec.ProviderID
+	nodeClaim.Labels = labels
 
 	if id, ok := node.Labels[v1alpha1.LabelInstanceImageID]; ok {
 		nodeClaim.Status.ImageID = id

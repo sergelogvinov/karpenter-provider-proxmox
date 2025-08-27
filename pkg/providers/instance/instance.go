@@ -147,9 +147,6 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {
-	log := log.FromContext(ctx).WithName("instance.Get()").WithValues("providerID", providerID)
-	log.Info("Get instance by providerID")
-
 	vmid, region, err := provider.ParseProviderID(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse providerID: %v", err)
@@ -157,35 +154,39 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 
 	vm, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
 	if err != nil {
-		if err == goproxmox.ErrVirtualMachineNotFound {
-			return nil, cloudprovider.NewNodeClaimNotFoundError(err)
-		}
-
-		return nil, fmt.Errorf("failed to get vm: %v", err)
+		return nil, err
 	}
 
-	// FIXME
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: vm.Name,
 			Labels: map[string]string{
-				corev1.LabelTopologyRegion:  region,
-				corev1.LabelTopologyZone:    vm.Node,
-				karpv1.CapacityTypeLabelKey: karpv1.CapacityTypeOnDemand,
+				corev1.LabelTopologyRegion: region,
+				corev1.LabelTopologyZone:   vm.Node,
 			},
-		},
-		Spec: corev1.NodeSpec{
-			ProviderID: providerID,
 		},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
 				Architecture:    karpv1.ArchitectureAmd64,
 				OperatingSystem: string(corev1.Linux),
 			},
+			Conditions: []corev1.NodeCondition{
+				{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				},
+			},
 		},
 	}
 
-	log.V(1).Info("Get instance", "node", vm.Name, "vmID", vm.VMID)
+	if vm.Status == "stopped" {
+		node.Status.Conditions = []corev1.NodeCondition{
+			{
+				Type:   corev1.NodeReady,
+				Status: corev1.ConditionFalse,
+			},
+		}
+	}
 
 	return node, nil
 }

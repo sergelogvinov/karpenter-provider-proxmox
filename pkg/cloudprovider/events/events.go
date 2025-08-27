@@ -19,7 +19,7 @@ package events
 import (
 	corev1 "k8s.io/api/core/v1"
 
-	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/events"
 )
 
@@ -27,7 +27,7 @@ const (
 	NodeClassResolutionReason = "NodeClassResolutionError"
 )
 
-func NodePoolFailedToResolveNodeClass(nodePool *v1.NodePool) events.Event {
+func NodePoolFailedToResolveNodeClass(nodePool *karpv1.NodePool) events.Event {
 	return events.Event{
 		InvolvedObject: nodePool,
 		Type:           corev1.EventTypeWarning,
@@ -37,7 +37,7 @@ func NodePoolFailedToResolveNodeClass(nodePool *v1.NodePool) events.Event {
 	}
 }
 
-func NodeClaimFailedToResolveNodeClass(nodeClaim *v1.NodeClaim) events.Event {
+func NodeClaimFailedToResolveNodeClass(nodeClaim *karpv1.NodeClaim) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClaim,
 		Type:           corev1.EventTypeWarning,

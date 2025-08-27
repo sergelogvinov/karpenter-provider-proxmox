@@ -144,7 +144,6 @@ Karpenter specific labels:
 - `karpenter.sh/capacity-type`: The capacity type of the node [`on-demand`, `spot`, `reserved`].
 - `karpenter.sh/nodepool`: The node pool to which the node belongs.
 - `karpenter.proxmox.sinextra.dev/instance-family`: The instance family of the node [`t1`,`s1`, `m1`]
-- `karpenter.proxmox.sinextra.dev/instance-cpu-manufacturer`: The CPU manufacturer of the instance [`host`,`kvm64`, `x86-64-v2-AES`]
 - `karpenter.proxmox.sinextra.dev/proxmoxnodeclass`: The Proxmox Node Class name of the node.
 
 For more details, see:

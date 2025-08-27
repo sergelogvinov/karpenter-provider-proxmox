@@ -110,4 +110,16 @@ type KubeletConfiguration struct {
 	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
 	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
 	KubeReserved map[string]string `yaml:"kubeReserved,omitempty"`
+	// A set of ResourceName=ResourceQuantity (e.g. cpu=200m,memory=150G,ephemeral-storage=1G,pid=100) pairs
+	// that describe resources reserved for kubernetes system components.
+	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
+	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
+	EvictionHard map[string]string `yaml:"evictionHard,omitempty"`
+}
+
+// kubernetes repo pkg/kubelet/eviction/defaults_others.go
+var DefaultEvictionHard = map[string]string{
+	"memory.available":  "100Mi",
+	"nodefs.available":  "10%",
+	"imagefs.available": "15%",
 }
