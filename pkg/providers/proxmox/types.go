@@ -39,6 +39,19 @@ type VMCloneRequest struct {
 	InstanceType string `json:"instanceType,omitempty"`
 }
 
+type VMCPU struct {
+	Flags *[]string `json:"flags,omitempty"`
+	Type  string    `json:"cputype,omitempty"`
+}
+
+func (r *VMCPU) UnmarshalString(s string) error {
+	return unmarshal(s, r)
+}
+
+func (r *VMCPU) ToString() (string, error) {
+	return marshal(r)
+}
+
 type VMSMBIOS struct {
 	Base64       *proxmox.IntOrBool `json:"base64,omitempty" `
 	Family       string             `json:"family,omitempty"`

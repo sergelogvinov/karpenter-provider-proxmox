@@ -83,14 +83,14 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudpr
 		nodeClaim.Status.Capacity = lo.PickBy(instanceType.Capacity, func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
 		nodeClaim.Status.Allocatable = lo.PickBy(instanceType.Allocatable(), func(_ corev1.ResourceName, v resource.Quantity) bool { return !resources.IsZero(v) })
 	} else {
-		for _, key := range karpv1.WellKnownLabels.UnsortedList() {
-			if v, ok := node.Labels[key]; ok {
-				labels[key] = v
-			}
-		}
-
 		nodeClaim.Status.Capacity = node.Status.Capacity
 		nodeClaim.Status.Allocatable = node.Status.Allocatable
+	}
+
+	for _, key := range karpv1.WellKnownLabels.UnsortedList() {
+		if labels[key] == "" && node.Labels[key] != "" {
+			labels[key] = node.Labels[key]
+		}
 	}
 
 	for _, key := range []struct {
@@ -99,10 +99,8 @@ func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudpr
 	}{
 		{corev1.LabelArchStable, node.Status.NodeInfo.Architecture},
 		{corev1.LabelOSStable, node.Status.NodeInfo.OperatingSystem},
-		{corev1.LabelTopologyRegion, node.Labels[corev1.LabelTopologyRegion]},
-		{corev1.LabelTopologyZone, node.Labels[corev1.LabelTopologyZone]},
 	} {
-		if _, ok := labels[key.label]; !ok && key.value != "" {
+		if labels[key.label] == "" && key.value != "" {
 			labels[key.label] = key.value
 		}
 	}

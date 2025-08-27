@@ -191,7 +191,8 @@ func (p *DefaultProvider) computeRequirements(instanceTypeName string, _ []*clou
 
 		// Well Known to Proxmox
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(instanceTypeName, ".")[0]),
-		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUManufacturer, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUType, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceImageID, corev1.NodeSelectorOpDoesNotExist),
 	)
 
 	return requirements

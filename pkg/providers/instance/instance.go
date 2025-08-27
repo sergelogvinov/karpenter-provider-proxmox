@@ -328,9 +328,13 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	log.V(1).Info("Starting VM", "vmID", newID)
 
-	if _, err = px.StartVMByID(ctx, zone, newID); err != nil {
+	vm, err := px.StartVMByID(ctx, zone, newID)
+	if err != nil {
 		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
 	}
+
+	cpu := goproxmox.VMCPU{}
+	cpu.UnmarshalString(vm.VirtualMachineConfig.CPU)
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -341,6 +345,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 				corev1.LabelInstanceTypeStable: instanceType.Name,
 				karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
 				v1alpha1.LabelInstanceFamily:   strings.Split(instanceType.Name, ".")[0],
+				v1alpha1.LabelInstanceCPUType:  cpu.Type,
 			},
 			Annotations:       map[string]string{},
 			CreationTimestamp: metav1.Now(),
