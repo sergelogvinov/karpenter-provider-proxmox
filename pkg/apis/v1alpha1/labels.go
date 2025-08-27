@@ -26,9 +26,9 @@ const (
 	TerminationFinalizer = apis.Group + "/termination"
 
 	// Labels that can be selected on and are propagated to the node
-	LabelInstanceFamily          = apis.Group + "/instance-family"           // c1, s1, m1, e1
-	LabelInstanceCPUManufacturer = apis.Group + "/instance-cpu-manufacturer" // host, kvm64, Broadwell, Skylake
-	LabelInstanceImageID         = apis.Group + "/instance-image-id"         // image ID
+	LabelInstanceFamily  = apis.Group + "/instance-family"   // c1, s1, m1, e1
+	LabelInstanceCPUType = apis.Group + "/instance-cpu-type" // host, kvm64, Broadwell, Skylake
+	LabelInstanceImageID = apis.Group + "/instance-image-id" // image ID
 
 	// github.com/awslabs/eks-node-viewer label so that it shows up.
 	LabelNodeViewer = "eks-node-viewer/instance-price"
@@ -38,7 +38,7 @@ func init() {
 	karpv1.RestrictedLabelDomains = karpv1.RestrictedLabelDomains.Insert(apis.Group)
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
 		LabelInstanceFamily,
-		LabelInstanceCPUManufacturer,
+		LabelInstanceCPUType,
 		LabelInstanceImageID,
 	)
 }
