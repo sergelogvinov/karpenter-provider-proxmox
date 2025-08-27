@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.3.0...v0.4.0) (2025-08-27)
+
+
+### Features
+
+* additional node labels ([b2db7ea](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b2db7ea69f912e438f89dc5c73b66d8ed08859cc))
+* custom instance types ([c495448](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/c495448d03e35e29bcb00984bba2587b8f7f7d9b))
+
 ## [0.3.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.2.0...v0.3.0) (2025-08-26)
 
 
