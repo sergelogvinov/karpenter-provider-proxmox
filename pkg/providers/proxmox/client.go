@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/luthermonson/go-proxmox"
+	"github.com/patrickmn/go-cache"
 
 	"k8s.io/utils/ptr"
 )
@@ -31,6 +33,8 @@ import (
 // APIClient Proxmox API client object.
 type APIClient struct {
 	*proxmox.Client
+
+	lastVmID *cache.Cache
 }
 
 // NewAPIClient initializes a GO-Proxmox API client.
@@ -43,7 +47,8 @@ func NewAPIClient(ctx context.Context, url string, options ...proxmox.Option) (*
 	// }
 
 	return &APIClient{
-		Client: client,
+		Client:   client,
+		lastVmID: cache.New(5*time.Minute, 10*time.Minute),
 	}, nil
 }
 
@@ -104,6 +109,10 @@ func (c *APIClient) FindVMTemplateByName(ctx context.Context, zone, name string)
 func (c *APIClient) GetNextID(ctx context.Context, vmid int) (int, error) {
 	var ret string
 
+	if _, found := c.lastVmID.Get(strconv.Itoa(vmid)); found {
+		return c.GetNextID(ctx, vmid+1)
+	}
+
 	data := make(map[string]interface{})
 	data["vmid"] = vmid
 
@@ -114,6 +123,8 @@ func (c *APIClient) GetNextID(ctx context.Context, vmid int) (int, error) {
 
 		return 0, err
 	}
+
+	c.lastVmID.SetDefault(strconv.Itoa(vmid), struct{}{})
 
 	return strconv.Atoi(ret)
 }
@@ -156,6 +167,8 @@ func (c *APIClient) DeleteVMByID(ctx context.Context, nodeName string, vmID int)
 	if _, err := vm.Delete(ctx); err != nil {
 		return fmt.Errorf("cannot delete vm with id %d: %w", vmID, err)
 	}
+
+	c.lastVmID.SetDefault(strconv.Itoa(vmID), struct{}{})
 
 	return nil
 }

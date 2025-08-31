@@ -241,7 +241,6 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
 	}
 
-	// FIXME: Need random ID generator
 	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get next id: %v", err)

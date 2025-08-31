@@ -25,7 +25,7 @@ SHA ?= $(shell git describe --match=none --always --abbrev=7 --dirty)
 TAG ?= $(VERSION)
 
 GO_LDFLAGS := -s -w
-GO_LDFLAGS += -X sigs.k8s.io/karpenter/pkg/operator.Version=$(VERSION)
+GO_LDFLAGS += -X sigs.k8s.io/karpenter/pkg/operator.Version=$(TAG)
 
 OS ?= $(shell go env GOOS)
 ARCH ?= $(shell go env GOARCH)
