@@ -92,8 +92,8 @@ spec:
   metadataOptions:
     # How delivery the metadata to the VM, options: none or cdrom (required)
     type: none|cdrom
-    # SecretRef is used if the type is `cdrom`, that contains cloud-init metadata templates
-    secretRef:
+    # templatesRef is used if the type is `cdrom`, that contains cloud-init metadata templates
+    templatesRef:
       name: ubuntu-k8s
       namespace: kube-system
 
