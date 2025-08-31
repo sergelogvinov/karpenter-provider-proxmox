@@ -57,8 +57,15 @@ spec:
     # - `user-data` - Userdata for cloud-init
     # - `meta-data` - Metadata for cloud-init
     # - `network-config` - Network configuration for cloud-init
-    secretRef:
+    templatesRef:
       name: metadata-templates
+      namespace: kube-system
+
+    # valuesRef is a reference to user-defined values.
+    # All keys from this reference can be accessed in templates as .Values.<key>
+    # Optional
+    valuesRef:
+      name: user-data-values
       namespace: kube-system
 
   # SecurityGroups to apply to the VMs
@@ -90,7 +97,12 @@ spec:
 
 * `metadataOptions` - Contains parameters for specifying the cloud-init metadata. Optional, defaults type is `none`.
   - `type` - The type of the metadata to expose to the VMs. Valid values: `none` or `cdrom`.
-  - `secretRef` - Used if the type is `cdrom`. It references a secret that contains cloud-init metadata.
+  - `templatesRef` - Used if the type is `cdrom`. It references a secret that contains cloud-init metadata templates.
+    - `name` - the secret name
+    - `namespace` - the namespace of the secret
+  - `valuesRef` - Used to reference a secret that contains user-defined values (Optional)
+    All keys from this reference can be accessed in templates as `.Values.<key>`
+    This is especially useful when working with FluxCD or other GitOps tools
     - `name` - the secret name
     - `namespace` - the namespace of the secret
 
@@ -130,15 +142,15 @@ The default file contents are:
 ```
 
 Accessible values in template:
-* `Hostname` - The hostname of the Proxmox VM.
-* `InstanceID` - The unique identifier for the Proxmox VM ID.
-* `InstanceType` - The type of the instance.
-* `ProviderID` - The provider-specific identifier `proxmox://<Region>/<VMID>`.
-* `Region` - The region where the VM is located.
-* `Zone` - The zone where the VM is located.
-* `Tags` - The tags associated with the NodeClass.
-* `NodeClassName` - The name of the NodeClass.
-* `KubeletConfiguration` - The configuration for the Kubelet. Optional. See original [documentation](https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration) for more information.
+* `.Metadata.Hostname` - The hostname of the Proxmox VM.
+* `.Metadata.InstanceID` - The unique identifier for the Proxmox VM ID.
+* `.Metadata.InstanceType` - The type of the instance.
+* `.Metadata.ProviderID` - The provider-specific identifier `proxmox://<Region>/<VMID>`.
+* `.Metadata.Region` - The region where the VM is located.
+* `.Metadata.Zone` - The zone where the VM is located.
+* `.Metadata.Tags` - The tags associated with the NodeClass.
+* `.Kubernetes.RootCA` - The Kubernetes cluster root CA certificate.
+* `.Kubernetes.KubeletConfiguration` - The configuration for the Kubelet. Optional. See original [documentation](https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration) for more information.
   - `CPUManagerPolicy` - The CPU manager policy
   - `CPUCFSQuota` - The CFS quota
   - `CPUCFSQuotaPeriod` - The CFS quota period
@@ -148,6 +160,7 @@ Accessible values in template:
   - `ClusterDNS` - The DNS servers for the cluster.
   - `MaxPods` - The maximum number of pods that can be run on the node.
   - and many more, see crd file [here](/pkg/apis/v1alpha1/nodeclass.go).
+* `.Values.<key>` - User-defined values for the instance.
 
 Original template is located here [userdata.go](/pkg/providers/instance/cloudinit/userdata.go).
 
@@ -181,6 +194,7 @@ Accessible values in template:
 * `ProviderID` - The provider-specific identifier `proxmox://<Region>/<VMID>`.
 * `Region` - The region where the VM is located.
 * `Zone` - The zone where the VM is located.
+* `Tags` - The tags associated with the proxmox virtual machine.
 
 Original template is located here [metadata.go](/pkg/providers/instance/cloudinit/metadata.go).
 

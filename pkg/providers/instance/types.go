@@ -24,11 +24,13 @@ import (
 
 // UserDataValues is cloud-init template values
 type UserDataValues struct {
-	cloudinit.MetaData
+	Metadata   cloudinit.MetaData
+	Kubernetes Kubernetes
+	Values     map[string]string
+}
 
-	Tags          []string
-	NodeClassName string
-
+type Kubernetes struct {
+	RootCA               string
 	KubeletConfiguration *KubeletConfiguration
 }
 

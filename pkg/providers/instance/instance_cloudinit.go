@@ -20,6 +20,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/luthermonson/go-proxmox"
 
@@ -133,11 +135,35 @@ func (p *DefaultProvider) generateCloudInitVars(
 	zone string,
 	vm *proxmox.VirtualMachine,
 ) (string, string, string, string, error) {
-	secretKey := nodeClass.Spec.MetadataOptions.SecretRef
+	systemNamespace := strings.TrimSpace(os.Getenv("SYSTEM_NAMESPACE"))
+	if systemNamespace == "" {
+		systemNamespace = "kube-system"
+	}
 
+	cm, err := p.kubernetesInterface.CoreV1().ConfigMaps(systemNamespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("failed to get configmap %s/kube-root-ca.crt: %v", systemNamespace, err)
+	}
+
+	rootCA := cm.Data["ca.crt"]
+
+	secretKey := nodeClass.Spec.MetadataOptions.TemplatesRef
 	secret, err := p.kubernetesInterface.CoreV1().Secrets(secretKey.Namespace).Get(ctx, secretKey.Name, metav1.GetOptions{})
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to get secret %s/%s: %v", secretKey.Namespace, secretKey.Name, err)
+	}
+
+	values := map[string]string{}
+	if nodeClass.Spec.MetadataOptions.ValuesRef != nil && nodeClass.Spec.MetadataOptions.ValuesRef.Name != "" && nodeClass.Spec.MetadataOptions.ValuesRef.Namespace != "" {
+		valuesKey := nodeClass.Spec.MetadataOptions.ValuesRef
+		secret, err := p.kubernetesInterface.CoreV1().Secrets(valuesKey.Namespace).Get(ctx, valuesKey.Name, metav1.GetOptions{})
+		if err != nil {
+			return "", "", "", "", fmt.Errorf("failed to get secret %s/%s: %v", valuesKey.Namespace, valuesKey.Name, err)
+		}
+
+		for k, v := range secret.Data {
+			values[k] = string(v)
+		}
 	}
 
 	metadataValues := cloudinit.MetaData{
@@ -147,15 +173,18 @@ func (p *DefaultProvider) generateCloudInitVars(
 		ProviderID:   provider.GetProviderID(region, int(vm.VMID)),
 		Region:       region,
 		Zone:         zone,
+		Tags:         nodeClass.Spec.Tags,
 	}
 
 	userdataValues := UserDataValues{
-		MetaData:             metadataValues,
-		NodeClassName:        nodeClass.Name,
-		Tags:                 nodeClass.Spec.Tags,
-		KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
+		Metadata: metadataValues,
+		Kubernetes: Kubernetes{
+			RootCA:               rootCA,
+			KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
+		},
+		Values: values,
 	}
-	userdataValues.KubeletConfiguration.ProviderID = metadataValues.ProviderID
+	userdataValues.Kubernetes.KubeletConfiguration.ProviderID = metadataValues.ProviderID
 
 	userdata := string(secret.Data["user-data"])
 	if userdata == "" {
