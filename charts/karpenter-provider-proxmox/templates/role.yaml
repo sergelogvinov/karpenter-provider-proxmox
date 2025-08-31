@@ -23,3 +23,22 @@ rules:
   - update
   resourceNames:
   - proxmox-karpenter-leader-election
+# Metadata templates options
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  resourceNames:
+  - kube-root-ca.crt
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
