@@ -1,0 +1,39 @@
+version: v1alpha1
+debug: false
+persist: true
+machine:
+  type: worker
+  token: {{ .Values.machineToken }}
+  ca:
+    crt: {{ .Values.machineCA }}
+  kubelet:
+    image: ghcr.io/siderolabs/kubelet:{{ .Values.kubeVersion }}
+    defaultRuntimeSeccompProfileEnabled: true
+    extraArgs:
+      register-with-taints: "karpenter.sh/unregistered=:NoExecute"
+    extraConfig:
+      {{- .Kubernetes.KubeletConfiguration | toYamlPretty | nindent 6 }}
+  install:
+    wipe: true
+  features:
+      rbac: true
+      stableHostname: true
+      apidCheckExtKeyUsage: true
+      diskQuotaSupport: true
+cluster:
+  id: {{ .Values.clusterID }}
+  secret: {{ .Values.clusterSecret }}
+  controlPlane:
+    endpoint: {{ .Values.clusterEndpoint }}
+  clusterName: {{ .Values.clusterName}}
+  discovery:
+    enabled: false
+  network:
+    dnsDomain: cluster.local
+    podSubnets:
+      - 10.244.0.0/16
+    serviceSubnets:
+      - 10.96.0.0/12
+  token: {{ .Values.clusterToken }}
+  ca:
+    crt: {{ .Kubernetes.RootCA | b64enc | quote }}

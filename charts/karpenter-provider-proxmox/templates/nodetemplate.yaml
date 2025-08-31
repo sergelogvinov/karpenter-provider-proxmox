@@ -1,0 +1,13 @@
+{{- range $name, $template := .Values.customResources.nodeTemplate }}
+{{- if $template.enabled }}
+---
+apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
+kind: {{ $template.kind }}
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "karpenter-provider-proxmox.labels" $ | nindent 4 }}
+spec:
+  {{- $template.spec | toYaml | nindent 2 }}
+{{- end }}
+{{- end }}

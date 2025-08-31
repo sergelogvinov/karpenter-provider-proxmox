@@ -213,9 +213,9 @@ spec:
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
-                  secretRef:
+                  templatesRef:
                     description: |-
-                      SecretRef is a reference to the secret that contains cloud-init metadata.
+                      templatesRef is a reference to the secret that contains cloud-init metadata templates.
                       Secret must contain the following keys, each key is optional:
                       - `user-data` - Userdata for cloud-init
                       - `meta-data` - Metadata for cloud-init
@@ -240,6 +240,20 @@ spec:
                     - none
                     - cdrom
                     type: string
+                  valuesRef:
+                    description: valuesRef is a reference to the secret that contains
+                      cloud-init custom template values.
+                    properties:
+                      name:
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                 type: object
               placementStrategy:
                 default:

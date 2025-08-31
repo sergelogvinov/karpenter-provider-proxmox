@@ -205,3 +205,51 @@ extraVolumeMounts:
   # - mountPath: /etc/ssl/certs/ca-certificates.crt
   #   name: ca
   #   subPath: ca.crt
+
+customResources:
+  nodeClass:
+    default:
+      # -- Create Proxmox Node Class 'default'
+      enabled: false
+      # -- Raw spec of ProxmoxNodeClass
+      # refs: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/nodeclass.md
+      spec:
+        instanceTemplateRef:
+          kind: ProxmoxUnmanagedTemplate
+          name: default
+        bootDevice:
+          size: 30Gi
+        securityGroups:
+          - name: kubernetes
+            interface: net0
+        tags:
+          - karpenter
+
+  nodePools:
+    default:
+      # -- Create Karpenter Node Pool 'default'
+      enabled: false
+      # -- Raw spec of Node Pool
+      # refs: https://karpenter.sh/docs/concepts/nodepools
+      spec:
+        limits:
+          cpu: "64"
+          memory: 512Gi
+        template:
+          spec:
+            nodeClassRef:
+              group: karpenter.proxmox.sinextra.dev
+              kind: ProxmoxNodeClass
+              name: default
+
+  nodeTemplate:
+    default:
+      # -- Create Proxmox Virtual Machine Template 'default'
+      enabled: false
+      # -- Kind of template
+      # can be: ProxmoxUnmanagedTemplate or ProxmoxTemplate
+      kind: ProxmoxUnmanagedTemplate
+      # -- Raw spec of Template
+      # refs: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/nodetemplateclass.md
+      spec:
+        templateName: talos

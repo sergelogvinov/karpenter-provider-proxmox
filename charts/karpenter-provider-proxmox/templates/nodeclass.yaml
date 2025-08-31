@@ -1,0 +1,13 @@
+{{- range $name, $class := .Values.customResources.nodeClass }}
+{{- if $class.enabled }}
+---
+apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
+kind: ProxmoxNodeClass
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "karpenter-provider-proxmox.labels" $ | nindent 4 }}
+spec:
+  {{- $class.spec | toYaml | nindent 2 }}
+{{- end }}
+{{- end }}

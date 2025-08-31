@@ -1,6 +1,6 @@
 # karpenter-provider-proxmox
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.3.0](https://img.shields.io/badge/AppVersion-v0.3.0-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.3.0](https://img.shields.io/badge/AppVersion-v0.3.0-informational?style=flat-square)
 
 Karpenter for Proxmox VE.
 
@@ -101,3 +101,10 @@ helm upgrade -i --namespace=kube-system -f karpenter-provider-proxmox.yaml \
 | extraArgs | list | `[]` | Any extra arguments for Karpenter |
 | extraVolumes | list | `[]` | Additional volumes for Pods |
 | extraVolumeMounts | list | `[]` | Additional volume mounts for Pods |
+| customResources.nodeClass.default.enabled | bool | `false` | Create Proxmox Node Class 'default' |
+| customResources.nodeClass.default.spec | object | `{"bootDevice":{"size":"30Gi"},"instanceTemplateRef":{"kind":"ProxmoxUnmanagedTemplate","name":"default"},"securityGroups":[{"interface":"net0","name":"kubernetes"}],"tags":["karpenter"]}` | Raw spec of ProxmoxNodeClass refs: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/nodeclass.md |
+| customResources.nodePools.default.enabled | bool | `false` | Create Karpenter Node Pool 'default' |
+| customResources.nodePools.default.spec | object | `{"limits":{"cpu":"64","memory":"512Gi"},"template":{"spec":{"nodeClassRef":{"group":"karpenter.proxmox.sinextra.dev","kind":"ProxmoxNodeClass","name":"default"}}}}` | Raw spec of Node Pool refs: https://karpenter.sh/docs/concepts/nodepools |
+| customResources.nodeTemplate.default.enabled | bool | `false` | Create Proxmox Virtual Machine Template 'default' |
+| customResources.nodeTemplate.default.kind | string | `"ProxmoxUnmanagedTemplate"` | Kind of template can be: ProxmoxUnmanagedTemplate or ProxmoxTemplate |
+| customResources.nodeTemplate.default.spec | object | `{"templateName":"talos"}` | Raw spec of Template refs: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/nodetemplateclass.md |
