@@ -242,13 +242,17 @@ type MetadataOptions struct {
 	// +optional
 	Type string `json:"type,omitempty"`
 
-	// SecretRef is a reference to the secret that contains cloud-init metadata.
+	// templatesRef is a reference to the secret that contains cloud-init metadata templates.
 	// Secret must contain the following keys, each key is optional:
 	// - `user-data` - Userdata for cloud-init
 	// - `meta-data` - Metadata for cloud-init
 	// - `network-config` - Network configuration for cloud-init
 	// +optional
-	SecretRef *corev1.SecretReference `json:"secretRef,omitempty"`
+	TemplatesRef *corev1.SecretReference `json:"templatesRef,omitempty"`
+
+	// valuesRef is a reference to the secret that contains cloud-init custom template values.
+	// +optional
+	ValuesRef *corev1.SecretReference `json:"valuesRef,omitempty"`
 }
 
 // SecurityGroups defines a term to apply security groups

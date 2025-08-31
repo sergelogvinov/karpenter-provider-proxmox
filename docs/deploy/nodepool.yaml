@@ -41,8 +41,11 @@ spec:
     name: default
   metadataOptions:
     type: cdrom
-    secretRef:
+    templatesRef:
       name: talos-template
+      namespace: kube-system
+    valuesRef:
+      name: talos-values
       namespace: kube-system
   kubeletConfiguration:
     allowedUnsafeSysctls: [net.core.somaxconn]
