@@ -1,0 +1,13 @@
+{{- range $name, $pool := .Values.customResources.nodePools }}
+{{- if $pool.enabled }}
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "karpenter-provider-proxmox.labels" $ | nindent 4 }}
+spec:
+  {{- $pool.spec | toYaml | nindent 2 }}
+{{- end }}
+{{- end }}

@@ -215,9 +215,9 @@ spec:
                 description: MetadataOptions for the generated launch template of
                   provisioned nodes.
                 properties:
-                  secretRef:
+                  templatesRef:
                     description: |-
-                      SecretRef is a reference to the secret that contains cloud-init metadata.
+                      templatesRef is a reference to the secret that contains cloud-init metadata templates.
                       Secret must contain the following keys, each key is optional:
                       - `user-data` - Userdata for cloud-init
                       - `meta-data` - Metadata for cloud-init
@@ -242,6 +242,20 @@ spec:
                     - none
                     - cdrom
                     type: string
+                  valuesRef:
+                    description: valuesRef is a reference to the secret that contains
+                      cloud-init custom template values.
+                    properties:
+                      name:
+                        description: name is unique within a namespace to reference
+                          a secret resource.
+                        type: string
+                      namespace:
+                        description: namespace defines the space within which the
+                          secret name must be unique.
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                 type: object
               placementStrategy:
                 default:
@@ -1718,7 +1732,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1731,7 +1745,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1782,7 +1796,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1792,9 +1806,15 @@ rules:
   - apiGroups: ["karpenter.proxmox.sinextra.dev"]
     resources: ["proxmoxnodeclasses"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["karpenter.proxmox.sinextra.dev"]
+    resources: ["proxmoxtemplates","proxmoxunmanagedtemplates"]
+    verbs: ["get", "list", "watch"]
   # Write
   - apiGroups: ["karpenter.proxmox.sinextra.dev"]
-    resources: ["proxmoxnodeclasses", "proxmoxnodeclasses/status"]
+    resources: ["proxmoxnodeclasses","proxmoxnodeclasses/status"]
+    verbs: ["patch", "update"]
+  - apiGroups: ["karpenter.proxmox.sinextra.dev"]
+    resources: ["proxmoxtemplates","proxmoxtemplates/status","proxmoxunmanagedtemplates","proxmoxunmanagedtemplates/status"]
     verbs: ["patch", "update"]
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole-core.yaml
@@ -1803,7 +1823,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1823,7 +1843,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1844,7 +1864,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
@@ -1867,6 +1887,25 @@ rules:
   - update
   resourceNames:
   - proxmox-karpenter-leader-election
+# Metadata templates options
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  resourceNames:
+  - kube-root-ca.crt
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
 ---
 # Source: karpenter-provider-proxmox/templates/rolebinding.yaml
 kind: RoleBinding
@@ -1890,7 +1929,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.1.0
+    helm.sh/chart: karpenter-provider-proxmox-0.2.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.3.0"
