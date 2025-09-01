@@ -116,6 +116,8 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: cloud-config
               mountPath: /etc/proxmox
               readOnly: true
@@ -151,6 +153,8 @@ spec:
             matchLabels:
               {{- include "karpenter-provider-proxmox.selectorLabels" . | nindent 14 }}
       volumes:
+        - name: tmp
+          emptyDir: {}
         {{- if .Values.existingConfigSecret }}
         - name: cloud-config
           secret:
