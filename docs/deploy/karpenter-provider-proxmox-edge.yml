@@ -1732,7 +1732,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1745,7 +1745,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1796,7 +1796,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1827,7 +1827,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1847,7 +1847,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1868,7 +1868,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1933,7 +1933,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.2
+    helm.sh/chart: karpenter-provider-proxmox-0.2.3
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -2019,6 +2019,8 @@ spec:
           resources:
             null
           volumeMounts:
+            - name: tmp
+              mountPath: /tmp
             - name: cloud-config
               mountPath: /etc/proxmox
               readOnly: true
@@ -2046,6 +2048,8 @@ spec:
               app.kubernetes.io/name: karpenter-provider-proxmox
               app.kubernetes.io/instance: karpenter-provider-proxmox
       volumes:
+        - name: tmp
+          emptyDir: {}
         - name: cloud-config
           secret:
             secretName: karpenter-provider-proxmox
