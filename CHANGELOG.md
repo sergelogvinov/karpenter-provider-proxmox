@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.3.0...v0.4.0) (2025-09-01)
+
+
+### Features
+
+* add custom values to cloud-init templates ([e813c30](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e813c300a10b31d73026cf8bd05b1dc679552994))
+* additional node labels ([b2db7ea](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b2db7ea69f912e438f89dc5c73b66d8ed08859cc))
+* custom instance types ([c495448](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/c495448d03e35e29bcb00984bba2587b8f7f7d9b))
+* remember proxmox virtual machine last id ([5db4e02](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/5db4e02d073dbb423b855832d0642a24ebd0da14))
+
+
+### Bug Fixes
+
+* **chart:** rbac permission for crds ([e1eb558](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e1eb558b9e68826c11c02de8d9944a419d19388c))
+
 ## [0.3.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.2.0...v0.3.0) (2025-08-26)
 
 
