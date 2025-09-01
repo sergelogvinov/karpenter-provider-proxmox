@@ -34,3 +34,7 @@ rules:
   - apiGroups: ["karpenter.proxmox.sinextra.dev"]
     resources: ["proxmoxtemplates","proxmoxtemplates/status","proxmoxunmanagedtemplates","proxmoxunmanagedtemplates/status"]
     verbs: ["patch", "update"]
+  # Metadata secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["list", "watch"]
