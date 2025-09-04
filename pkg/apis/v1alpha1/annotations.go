@@ -36,4 +36,7 @@ const (
 
 	// AnnotationProxmoxTemplateClassHashVersion is the annotation key for the version of the hash function
 	AnnotationProxmoxTemplateClassHashVersion = apis.Group + "/proxmoxtemplateclass-hash-version"
+
+	// AnnotationProxmoxCloudInitStatus is the annotation key for the status of the ProxmoxCloudInit
+	AnnotationProxmoxCloudInitStatus = apis.Group + "/proxmoxcloudinit-status"
 )
