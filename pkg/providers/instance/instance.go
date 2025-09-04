@@ -50,6 +50,9 @@ type Provider interface {
 	Get(ctx context.Context, providerID string) (*corev1.Node, error)
 	Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
 
+	UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error
+	UpdateTags(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error
+
 	DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
 }
 
@@ -223,6 +226,81 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 	if err = p.cluster.DeleteVMByIDInRegion(ctx, region, vm); err != nil {
 		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
+	}
+
+	return nil
+}
+
+func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
+	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+	}
+
+	if region == "" {
+		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+
+	px, err := p.cluster.GetProxmoxCluster(region)
+	if err != nil {
+		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+	}
+
+	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
+	for i, sg := range nodeClass.Spec.SecurityGroups {
+		rules[i] = &proxmox.FirewallRule{
+			Enable: 1,
+			Pos:    i,
+			Type:   "group",
+			Action: sg.Name,
+			Iface:  sg.Interface,
+		}
+	}
+
+	return px.UpdateVMFirewallRules(ctx, vmid, zone, rules)
+}
+
+func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
+	tags := lo.Uniq(nodeClass.Spec.Tags)
+	slices.Sort(tags)
+
+	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+	}
+
+	if region == "" {
+		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+
+	px, err := p.cluster.GetProxmoxCluster(region)
+	if err != nil {
+		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+	}
+
+	node, err := px.Node(ctx, zone)
+	if err != nil {
+		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
+	}
+
+	vm, err := node.VirtualMachine(ctx, vmid)
+	if err != nil {
+		return fmt.Errorf("unable to find vm with id %d: %w", vmid, err)
+	}
+
+	if vm.HasTag(proxmox.MakeTag(proxmox.TagCloudInit)) {
+		tags = append(tags, proxmox.MakeTag(proxmox.TagCloudInit))
+	}
+
+	if !slices.Equal(strings.Split(vm.Tags, ";"), tags) {
+		vm.Config(ctx, proxmox.VirtualMachineOption{
+			Name:  "tags",
+			Value: strings.Join(tags, ";"),
+		})
 	}
 
 	return nil

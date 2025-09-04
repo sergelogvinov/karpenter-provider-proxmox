@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 
+	nodeclaiminplaceupdate "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/inplaceupdate"
 	nodeclaimlifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/lifecycle"
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
@@ -50,6 +51,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	cloudCapacityProvider cloudcapacity.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
+		nodeclaiminplaceupdate.NewController(kubeClient, instanceProvider),
 		nodeclaimlifecycle.NewController(kubeClient, cloudProvider, instanceProvider),
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, instanceTemplateProvider),
