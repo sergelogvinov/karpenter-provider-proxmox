@@ -75,6 +75,39 @@ func (p *DefaultProvider) attachCloudInitISO(
 	return nil
 }
 
+func (p *DefaultProvider) detachCloudInitISO(
+	ctx context.Context,
+	region string,
+	zone string,
+	vmID int,
+) error {
+	px, err := p.cluster.GetProxmoxCluster(region)
+	if err != nil {
+		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+	}
+
+	node, err := px.Node(ctx, zone)
+	if err != nil {
+		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
+	}
+
+	vm, err := node.VirtualMachine(ctx, vmID)
+	if err != nil {
+		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
+	}
+
+	if vm.HasTag(proxmox.MakeTag(proxmox.TagCloudInit)) {
+		err = vm.UnmountCloudInitISO(ctx, "ide2")
+		if err != nil {
+			return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
+		}
+
+		vm.RemoveTag(ctx, proxmox.MakeTag(proxmox.TagCloudInit))
+	}
+
+	return nil
+}
+
 func applyKubernetesConfiguration(
 	nodeClass *v1alpha1.ProxmoxNodeClass,
 	instanceType *cloudprovider.InstanceType,

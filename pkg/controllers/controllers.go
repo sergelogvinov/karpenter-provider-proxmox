@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 
+	nodeclaimlifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/lifecycle"
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
 	nodetemplateclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/hash"
@@ -30,6 +31,7 @@ import (
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	"k8s.io/utils/clock"
@@ -43,10 +45,12 @@ import (
 func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
+	instanceProvider instance.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
+		nodeclaimlifecycle.NewController(kubeClient, cloudProvider, instanceProvider),
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, instanceTemplateProvider),
 		nodetemplateclasshash.NewController(kubeClient),

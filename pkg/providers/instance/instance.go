@@ -49,6 +49,8 @@ type Provider interface {
 	Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error)
 	Get(ctx context.Context, providerID string) (*corev1.Node, error)
 	Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
+
+	DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
 }
 
 type DefaultProvider struct {
@@ -221,6 +223,22 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 	if err = p.cluster.DeleteVMByIDInRegion(ctx, region, vm); err != nil {
 		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
+	}
+
+	return nil
+}
+
+func (p *DefaultProvider) DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
+	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to parse providerID: %v", err)
+	}
+
+	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
+
+	err = p.detachCloudInitISO(ctx, region, zone, vmid)
+	if err != nil {
+		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmid, region, err)
 	}
 
 	return nil
