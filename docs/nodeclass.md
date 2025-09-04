@@ -41,7 +41,7 @@ spec:
     storage: lvm
 
   # Tags to apply to the VMs after creation
-  # Optional
+  # Optional, in place update supported
   tags:
     - karpenter
 
@@ -69,7 +69,7 @@ spec:
       namespace: kube-system
 
   # SecurityGroups to apply to the VMs
-  # Optional: if not set, no security groups will be applied to the VMs
+  # Optional, in place update supported
   securityGroups:
     - name: kubernetes
       # Interface to apply the security group
@@ -94,6 +94,7 @@ spec:
   - `storage` - The Proxmox storage id where the boot device will be created.
 
 * `tags` - A list of tags to apply to the VMs after creation. Optional.
+  This option supports in-place update.
 
 * `metadataOptions` - Contains parameters for specifying the cloud-init metadata. Optional, defaults type is `none`.
   - `type` - The type of the metadata to expose to the VMs. Valid values: `none` or `cdrom`.
@@ -107,6 +108,7 @@ spec:
     - `namespace` - the namespace of the secret
 
 * `securityGroups` - A list of security groups to apply to the VMs. Optional.
+  This option supports in-place update.
   - `name` - The name of the security group.
   - `interface` - The interface to apply the security group.
 

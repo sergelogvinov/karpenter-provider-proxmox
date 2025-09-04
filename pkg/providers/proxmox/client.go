@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -301,6 +302,47 @@ func (c *APIClient) CreateVMFirewallRules(ctx context.Context, vmID int, nodeNam
 		for _, rule := range rules {
 			if err := vm.FirewallRulesCreate(ctx, rule); err != nil {
 				return fmt.Errorf("failed to set firewall rule for vm %d: %v", vmID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *APIClient) UpdateVMFirewallRules(ctx context.Context, vmID int, nodeName string, rules []*proxmox.FirewallRule) error {
+	node, err := c.Node(ctx, nodeName)
+	if err != nil {
+		return fmt.Errorf("unable to find node with name %s: %w", nodeName, err)
+	}
+
+	vm, err := node.VirtualMachine(ctx, vmID)
+	if err != nil {
+		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
+	}
+
+	oldRules, err := vm.FirewallGetRules(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall rules for vm %d: %v", vmID, err)
+	}
+
+	n := len(oldRules)
+	if n < len(rules) {
+		n = len(rules)
+	}
+
+	for i := range n {
+		switch {
+		case i < len(oldRules) && i < len(rules) && !reflect.DeepEqual(oldRules[i], rules[i]):
+			if err := vm.FirewallRulesUpdate(ctx, rules[i]); err != nil {
+				return fmt.Errorf("failed to update firewall rule for vm %d: %v", vmID, err)
+			}
+		case i < len(oldRules) && i >= len(rules):
+			if err := vm.FirewallRulesDelete(ctx, i); err != nil {
+				return fmt.Errorf("failed to delete old firewall rule for vm %d: %v", vmID, err)
+			}
+		case i >= len(oldRules) && i < len(rules):
+			if err := vm.FirewallRulesCreate(ctx, rules[i]); err != nil {
+				return fmt.Errorf("failed to create new firewall rule for vm %d: %v", vmID, err)
 			}
 		}
 	}
