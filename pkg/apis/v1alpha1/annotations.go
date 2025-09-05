@@ -40,6 +40,9 @@ const (
 	// AnnotationProxmoxCloudInitStatus is the annotation key for the status of the ProxmoxCloudInit
 	AnnotationProxmoxCloudInitStatus = apis.Group + "/proxmoxcloudinit-status"
 
+	// AnnotationProxmoxCloudInitToken is the annotation key for the kubelet bootstrap token id
+	AnnotationProxmoxCloudInitToken = apis.Group + "/proxmoxcloudinit-token"
+
 	// AnnotationProxmoxNodeInPlaceUpdateHash is the annotation key for the hash of the in-place update
 	AnnotationProxmoxNodeInPlaceUpdateHash = apis.Group + "/proxmoxnodeinplaceupdate-hash"
 )

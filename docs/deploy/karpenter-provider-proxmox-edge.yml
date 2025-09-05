@@ -5,7 +5,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.1
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: proxmoxnodeclasses.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -400,7 +400,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.1
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: proxmoxtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -703,7 +703,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.1
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: proxmoxunmanagedtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -860,7 +860,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.1
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: nodeclaims.karpenter.sh
 spec:
   group: karpenter.sh
@@ -1062,9 +1062,8 @@ spec:
                       description: Required. The taint key to be applied to a node.
                       type: string
                     timeAdded:
-                      description: |-
-                        TimeAdded represents the time at which the taint was added.
-                        It is only written for NoExecute taints.
+                      description: TimeAdded represents the time at which the taint
+                        was added.
                       format: date-time
                       type: string
                     value:
@@ -1092,9 +1091,8 @@ spec:
                       description: Required. The taint key to be applied to a node.
                       type: string
                     timeAdded:
-                      description: |-
-                        TimeAdded represents the time at which the taint was added.
-                        It is only written for NoExecute taints.
+                      description: TimeAdded represents the time at which the taint
+                        was added.
                       format: date-time
                       type: string
                     value:
@@ -1241,7 +1239,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.1
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: nodepools.karpenter.sh
 spec:
   group: karpenter.sh
@@ -1558,9 +1556,8 @@ spec:
                                 a node.
                               type: string
                             timeAdded:
-                              description: |-
-                                TimeAdded represents the time at which the taint was added.
-                                It is only written for NoExecute taints.
+                              description: TimeAdded represents the time at which
+                                the taint was added.
                               format: date-time
                               type: string
                             value:
@@ -1590,9 +1587,8 @@ spec:
                                 a node.
                               type: string
                             timeAdded:
-                              description: |-
-                                TimeAdded represents the time at which the taint was added.
-                                It is only written for NoExecute taints.
+                              description: TimeAdded represents the time at which
+                                the taint was added.
                               format: date-time
                               type: string
                             value:
@@ -1732,7 +1728,7 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1745,7 +1741,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1796,7 +1792,7 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1827,7 +1823,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1847,7 +1843,7 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1861,6 +1857,46 @@ subjects:
     name: karpenter-provider-proxmox
     namespace: kube-system
 ---
+# Source: karpenter-provider-proxmox/templates/clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
+  labels:
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
+    app.kubernetes.io/name: karpenter-provider-proxmox
+    app.kubernetes.io/instance: karpenter-provider-proxmox
+    app.kubernetes.io/version: "v0.4.0"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:node-bootstrapper
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:bootstrappers:karpenter:proxmox
+---
+# Source: karpenter-provider-proxmox/templates/clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
+  labels:
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
+    app.kubernetes.io/name: karpenter-provider-proxmox
+    app.kubernetes.io/instance: karpenter-provider-proxmox
+    app.kubernetes.io/version: "v0.4.0"
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:certificates.k8s.io:certificatesigningrequests:nodeclient
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:bootstrappers:karpenter:proxmox
+---
 # Source: karpenter-provider-proxmox/templates/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -1868,7 +1904,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"
@@ -1911,6 +1947,32 @@ rules:
   - list
   - watch
 ---
+# Source: karpenter-provider-proxmox/templates/role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: karpenter-provider-proxmox:bootstrap
+  namespace: kube-system
+  labels:
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
+    app.kubernetes.io/name: karpenter-provider-proxmox
+    app.kubernetes.io/instance: karpenter-provider-proxmox
+    app.kubernetes.io/version: "v0.4.0"
+    app.kubernetes.io/managed-by: Helm
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
 # Source: karpenter-provider-proxmox/templates/rolebinding.yaml
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1926,6 +1988,21 @@ subjects:
   name: karpenter-provider-proxmox
   namespace: kube-system
 ---
+# Source: karpenter-provider-proxmox/templates/rolebinding.yaml
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: karpenter-provider-proxmox:bootstrap
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: karpenter-provider-proxmox:bootstrap
+subjects:
+- kind: ServiceAccount
+  name: karpenter-provider-proxmox
+  namespace: kube-system
+---
 # Source: karpenter-provider-proxmox/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -1933,7 +2010,7 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.3
+    helm.sh/chart: karpenter-provider-proxmox-0.2.4
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
     app.kubernetes.io/version: "v0.4.0"

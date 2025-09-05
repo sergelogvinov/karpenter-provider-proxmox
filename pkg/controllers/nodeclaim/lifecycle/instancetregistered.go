@@ -26,6 +26,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	proxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/cloudprovider"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -36,8 +37,9 @@ import (
 )
 
 type InstanceRegistered struct {
-	kubeClient       client.Client
-	instanceProvider instance.Provider
+	kubeClient                  client.Client
+	kubernetesBootstrapProvider bootstrap.Provider
+	instanceProvider            instance.Provider
 }
 
 func (i *InstanceRegistered) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim) (reconcile.Result, error) {
@@ -60,6 +62,13 @@ func (i *InstanceRegistered) Reconcile(ctx context.Context, nodeClaim *karpv1.No
 
 	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
 		err = i.instanceProvider.DetachCloudInit(ctx, nodeClaim)
+		if err != nil {
+			return reconcile.Result{RequeueAfter: 5 * time.Second}, err
+		}
+	}
+
+	if nodeClaim.Annotations[v1alpha1.AnnotationProxmoxCloudInitToken] != "" {
+		err = i.kubernetesBootstrapProvider.DeleteToken(ctx, nodeClaim.Annotations[v1alpha1.AnnotationProxmoxCloudInitToken])
 		if err != nil {
 			return reconcile.Result{RequeueAfter: 5 * time.Second}, err
 		}

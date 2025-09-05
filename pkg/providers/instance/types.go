@@ -31,6 +31,7 @@ type UserDataValues struct {
 
 type Kubernetes struct {
 	RootCA               string
+	BootstrapToken       string
 	KubeletConfiguration *KubeletConfiguration
 }
 

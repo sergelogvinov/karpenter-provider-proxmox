@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
@@ -38,11 +39,12 @@ func init() {
 type Operator struct {
 	*operator.Operator
 
-	ProxmoxPool              *pxpool.ProxmoxPool
-	CloudCapacityProvider    cloudcapacity.Provider
-	InstanceProvider         instance.Provider
-	InstanceTemplateProvider instancetemplate.Provider
-	InstanceTypeProvider     instancetype.Provider
+	ProxmoxPool                 *pxpool.ProxmoxPool
+	CloudCapacityProvider       cloudcapacity.Provider
+	KubernetesBootstrapProvider bootstrap.Provider
+	InstanceProvider            instance.Provider
+	InstanceTemplateProvider    instancetemplate.Provider
+	InstanceTypeProvider        instancetype.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -62,6 +64,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
+	kubernetesBootstrapProvider := bootstrap.NewProvider(ctx, operator.KubernetesInterface)
+
 	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
 	cloudCapacityProvider.UpdateNodeCapacity(ctx)
 
@@ -75,7 +79,14 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
-	instanceProvider, err := instance.NewProvider(ctx, operator.KubernetesInterface, pxPool, cloudCapacityProvider, instanceTemplateProvider)
+	instanceProvider, err := instance.NewProvider(
+		ctx,
+		operator.KubernetesInterface,
+		kubernetesBootstrapProvider,
+		pxPool,
+		cloudCapacityProvider,
+		instanceTemplateProvider,
+	)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")
 
@@ -83,11 +94,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 
 	return ctx, &Operator{
-		Operator:                 operator,
-		ProxmoxPool:              pxPool,
-		CloudCapacityProvider:    cloudCapacityProvider,
-		InstanceTemplateProvider: instanceTemplateProvider,
-		InstanceTypeProvider:     instanceTypeProvider,
-		InstanceProvider:         instanceProvider,
+		Operator:                    operator,
+		ProxmoxPool:                 pxPool,
+		CloudCapacityProvider:       cloudCapacityProvider,
+		KubernetesBootstrapProvider: kubernetesBootstrapProvider,
+		InstanceTemplateProvider:    instanceTemplateProvider,
+		InstanceTypeProvider:        instanceTypeProvider,
+		InstanceProvider:            instanceProvider,
 	}
 }

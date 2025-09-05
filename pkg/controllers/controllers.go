@@ -31,6 +31,7 @@ import (
 	nodetemplateunmanagedclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/status"
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
@@ -46,13 +47,14 @@ import (
 func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider,
+	kubernetesBootstrapProvider bootstrap.Provider,
 	instanceProvider instance.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclaiminplaceupdate.NewController(kubeClient, instanceProvider),
-		nodeclaimlifecycle.NewController(kubeClient, cloudProvider, instanceProvider),
+		nodeclaimlifecycle.NewController(kubeClient, kubernetesBootstrapProvider, cloudProvider, instanceProvider),
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, instanceTemplateProvider),
 		nodetemplateclasshash.NewController(kubeClient),

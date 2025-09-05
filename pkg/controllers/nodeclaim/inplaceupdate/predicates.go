@@ -30,23 +30,22 @@ type inPlaceChangedPredicate struct {
 var _ predicate.Predicate = inPlaceChangedPredicate{}
 
 func (p inPlaceChangedPredicate) Delete(e event.DeleteEvent) bool {
-	// We never want updates on delete
 	return false
 }
 
 func (p inPlaceChangedPredicate) Update(e event.UpdateEvent) bool {
 	if e.ObjectOld == nil || e.ObjectNew == nil {
-		return true
+		return false
 	}
 
 	typedOld, ok := e.ObjectOld.(*v1alpha1.ProxmoxNodeClass)
 	if !ok {
-		return true
+		return false
 	}
 
 	typedNew, ok := e.ObjectNew.(*v1alpha1.ProxmoxNodeClass)
 	if !ok {
-		return true
+		return false
 	}
 
 	return typedOld.InPlaceHash() != typedNew.InPlaceHash()

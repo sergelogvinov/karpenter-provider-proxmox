@@ -100,8 +100,9 @@ gen-objects: ## generate the controller-gen related objects
 .PHONY: manifests
 manifests: ## generate the controller-gen kubernetes manifests
 	rm -rf pkg/apis/crds/*
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
+	$(CONTROLLER_GEN) crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
+	$(CONTROLLER_GEN) crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
+	$(CONTROLLER_GEN) rbac:roleName=karpenter-provider-proxmox paths="./pkg/..." output:rbac:dir=pkg/apis/rbac
 
 .PHONY: install
 install: ## Install

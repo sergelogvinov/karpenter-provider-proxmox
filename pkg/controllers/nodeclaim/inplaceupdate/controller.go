@@ -87,6 +87,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		return reconcile.Result{}, nil
 	}
 
+	if nodeClaim.Status.ProviderID == "" {
+		return reconcile.Result{}, nil
+	}
+
 	nodeClass, err := c.resolveNodeClassFromNodeClaim(ctx, nodeClaim)
 	if err != nil {
 		return reconcile.Result{}, err

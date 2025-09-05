@@ -28,6 +28,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
@@ -57,24 +58,27 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	kubernetesInterface      kubernetes.Interface
-	cluster                  *pxpool.ProxmoxPool
-	cloudCapacityProvider    cloudcapacity.Provider
-	instanceTemplateProvider instancetemplate.Provider
+	kubernetesInterface         kubernetes.Interface
+	kubernetesBootstrapProvider bootstrap.Provider
+	cluster                     *pxpool.ProxmoxPool
+	cloudCapacityProvider       cloudcapacity.Provider
+	instanceTemplateProvider    instancetemplate.Provider
 }
 
 func NewProvider(
 	ctx context.Context,
 	kubernetesInterface kubernetes.Interface,
+	kubernetesBootstrapProvider bootstrap.Provider,
 	cluster *pxpool.ProxmoxPool,
 	cloudCapacityProvider cloudcapacity.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 ) (*DefaultProvider, error) {
 	return &DefaultProvider{
-		kubernetesInterface:      kubernetesInterface,
-		cluster:                  cluster,
-		cloudCapacityProvider:    cloudCapacityProvider,
-		instanceTemplateProvider: instanceTemplateProvider,
+		kubernetesInterface:         kubernetesInterface,
+		kubernetesBootstrapProvider: kubernetesBootstrapProvider,
+		cluster:                     cluster,
+		cloudCapacityProvider:       cloudCapacityProvider,
+		instanceTemplateProvider:    instanceTemplateProvider,
 	}, nil
 }
 

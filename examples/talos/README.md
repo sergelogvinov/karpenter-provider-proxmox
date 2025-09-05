@@ -84,15 +84,13 @@ cluster:
   controlPlane:
     endpoint: {{ .Values.clusterEndpoint }}
   clusterName: {{ .Values.clusterName}}
-  discovery:
-    enabled: false
   network:
     dnsDomain: cluster.local
     podSubnets:
       - 10.244.0.0/16
     serviceSubnets:
       - 10.96.0.0/12
-  token: {{ .Values.clusterToken }}
+  token: {{ .Kubernetes.BootstrapToken }}
   ca:
     crt: {{ .Kubernetes.RootCA | b64enc | quote }}
 ```
@@ -117,8 +115,6 @@ stringData:
   clusterSecret: ...
   clusterEndpoint: "https://api.example.com:6443"
   clusterName: proxmox
-  clusterToken: ...
-  clusterCA: ...
   kubeletVersion: v1.33.4
 ```
 

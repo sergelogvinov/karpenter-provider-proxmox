@@ -63,6 +63,7 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			op.KubernetesBootstrapProvider,
 			op.InstanceProvider,
 			op.InstanceTemplateProvider,
 			op.CloudCapacityProvider,

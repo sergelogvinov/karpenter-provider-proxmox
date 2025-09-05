@@ -152,6 +152,7 @@ Accessible values in template:
 * `.Metadata.Zone` - The zone where the VM is located.
 * `.Metadata.Tags` - The tags associated with the NodeClass.
 * `.Kubernetes.RootCA` - The Kubernetes cluster root CA certificate.
+* `.Kubernetes.BootstrapToken` - The token used for bootstrapping the node.
 * `.Kubernetes.KubeletConfiguration` - The configuration for the Kubelet. Optional. See original [documentation](https://pkg.go.dev/k8s.io/kubelet/config/v1beta1#KubeletConfiguration) for more information.
   - `CPUManagerPolicy` - The CPU manager policy
   - `CPUCFSQuota` - The CFS quota
@@ -197,6 +198,7 @@ Accessible values in template:
 * `Region` - The region where the VM is located.
 * `Zone` - The zone where the VM is located.
 * `Tags` - The tags associated with the proxmox virtual machine.
+* `NodeClass` - The name of the NodeClass the VM is associated with.
 
 Original template is located here [metadata.go](/pkg/providers/instance/cloudinit/metadata.go).
 
