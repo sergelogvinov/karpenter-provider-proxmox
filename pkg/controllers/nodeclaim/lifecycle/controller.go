@@ -22,6 +22,7 @@ import (
 	"github.com/awslabs/operatorpkg/reasonable"
 	"go.uber.org/multierr"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -51,14 +52,15 @@ type Controller struct {
 	instanceRegistered *InstanceRegistered
 }
 
-func NewController(kubeClient client.Client, cloudProvider cloudprovider.CloudProvider, instanceProvider instance.Provider) *Controller {
+func NewController(kubeClient client.Client, kubernetesBootstrapProvider bootstrap.Provider, cloudProvider cloudprovider.CloudProvider, instanceProvider instance.Provider) *Controller {
 	return &Controller{
 		kubeClient:       kubeClient,
 		cloudProvider:    cloudProvider,
 		instanceProvider: instanceProvider,
 		instanceRegistered: &InstanceRegistered{
-			kubeClient:       kubeClient,
-			instanceProvider: instanceProvider,
+			kubeClient:                  kubeClient,
+			kubernetesBootstrapProvider: kubernetesBootstrapProvider,
+			instanceProvider:            instanceProvider,
 		},
 	}
 }

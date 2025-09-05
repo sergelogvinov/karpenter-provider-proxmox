@@ -26,6 +26,7 @@ type MetaData struct {
 	Region       string
 	Zone         string
 	Tags         []string
+	NodeClass    string
 }
 
 // NetworkConfig contains network configuration for the instance.

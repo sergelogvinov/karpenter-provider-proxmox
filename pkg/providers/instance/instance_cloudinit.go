@@ -199,6 +199,11 @@ func (p *DefaultProvider) generateCloudInitVars(
 		}
 	}
 
+	bootstrapToken, err := p.kubernetesBootstrapProvider.CreateToken(ctx, nodeClaim)
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("failed to create bootstrap token: %v", err)
+	}
+
 	metadataValues := cloudinit.MetaData{
 		Hostname:     nodeClaim.Name,
 		InstanceID:   fmt.Sprintf("%d", vm.VMID),
@@ -207,12 +212,14 @@ func (p *DefaultProvider) generateCloudInitVars(
 		Region:       region,
 		Zone:         zone,
 		Tags:         nodeClass.Spec.Tags,
+		NodeClass:    nodeClass.Name,
 	}
 
 	userdataValues := UserDataValues{
 		Metadata: metadataValues,
 		Kubernetes: Kubernetes{
 			RootCA:               rootCA,
+			BootstrapToken:       bootstrapToken,
 			KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
 		},
 		Values: values,

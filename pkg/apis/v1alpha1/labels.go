@@ -30,6 +30,8 @@ const (
 	LabelInstanceCPUType = apis.Group + "/instance-cpu-type" // host, kvm64, Broadwell, Skylake
 	LabelInstanceImageID = apis.Group + "/instance-image-id" // image ID
 
+	LabelBootstrapToken = apis.Group + "/bootstrap-token" // bootstrap token
+
 	// github.com/awslabs/eks-node-viewer label so that it shows up.
 	LabelNodeViewer = "eks-node-viewer/instance-price"
 )
