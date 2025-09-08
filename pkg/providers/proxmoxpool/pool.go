@@ -22,6 +22,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	proxmox "github.com/luthermonson/go-proxmox"
 
@@ -32,13 +34,15 @@ import (
 
 // ProxmoxCluster defines a Proxmox cluster configuration.
 type ProxmoxCluster struct {
-	URL         string `yaml:"url"`
-	Insecure    bool   `yaml:"insecure,omitempty"`
-	TokenID     string `yaml:"token_id,omitempty"`
-	TokenSecret string `yaml:"token_secret,omitempty"`
-	Username    string `yaml:"username,omitempty"`
-	Password    string `yaml:"password,omitempty"`
-	Region      string `yaml:"region,omitempty"`
+	URL             string `yaml:"url"`
+	Insecure        bool   `yaml:"insecure,omitempty"`
+	TokenID         string `yaml:"token_id,omitempty"`
+	TokenIDFile     string `yaml:"token_id_file,omitempty"`
+	TokenSecret     string `yaml:"token_secret,omitempty"`
+	TokenSecretFile string `yaml:"token_secret_file,omitempty"`
+	Username        string `yaml:"username,omitempty"`
+	Password        string `yaml:"password,omitempty"`
+	Region          string `yaml:"region,omitempty"`
 }
 
 // ProxmoxPool is a Proxmox client pool of proxmox clusters.
@@ -61,6 +65,24 @@ func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool
 				}
 
 				options = append(options, proxmox.WithHTTPClient(&http.Client{Transport: httpTr}))
+			}
+
+			if cfg.TokenID == "" && cfg.TokenIDFile != "" {
+				var err error
+
+				cfg.TokenID, err = readValueFromFile(cfg.TokenIDFile)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if cfg.TokenSecret == "" && cfg.TokenSecretFile != "" {
+				var err error
+
+				cfg.TokenSecret, err = readValueFromFile(cfg.TokenSecretFile)
+				if err != nil {
+					return nil, err
+				}
 			}
 
 			if cfg.Username != "" && cfg.Password != "" {
@@ -111,6 +133,7 @@ func (c *ProxmoxPool) CheckClusters(ctx context.Context) error {
 			return fmt.Errorf("failed to get cluster info in region %s, error: %v", region, err)
 		}
 
+		// Check if we can have permission to list VMs
 		vms, err := pxCluster.Resources(ctx, "vm")
 		if err != nil {
 			return fmt.Errorf("failed to get list of VMs in region %s, error: %v", region, err)
@@ -298,3 +321,16 @@ func (c *ProxmoxPool) DeleteVMByIDInRegion(ctx context.Context, region string, v
 
 // 	return ""
 // }
+
+func readValueFromFile(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file '%s': %w", path, err)
+	}
+
+	return strings.TrimSpace(string(content)), nil
+}
