@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.4.0...v0.5.0) (2025-09-08)
+
+
+### Features
+
+* api credentials as files ([93e21c1](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/93e21c12d7ccdaf5b546aad408592351435e79dc))
+* detach cloud-init iso ([e2e4419](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e2e441917610ac56ad84caffd39ffc0441d88fdc))
+* in place update ([a0cad4d](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a0cad4da3efc4792fbca3a9ee159c03e41ca30cd))
+* kubelet bootstrap token ([384b22c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/384b22c71cf357b1e0e9e331143c146dcce3a3f4))
+
+
+### Bug Fixes
+
+* **chart:** rbac permission for provider ([afc83e1](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/afc83e1c247aec263b007caf6e7b2fe0f66458e8))
+* **chart:** writible folder ([8beb809](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8beb809bb9b24d5da1e3223d8e678402d082491f))
+
 ## [0.4.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.3.0...v0.4.0) (2025-09-01)
 
 
