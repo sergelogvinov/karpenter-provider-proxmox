@@ -25,14 +25,14 @@ go.work.sum
 .env
 
 #
+/_cfgs/
 /bin/
 /dist/
 /vendor/
 /karpenter-provider-proxmox*
 /kubeconfig
 /kubeconfig*
-/cloud.yaml
-/_cfgs/
+/*.yaml
 
 # IDEs and editors
 /.idea

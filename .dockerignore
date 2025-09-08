@@ -8,10 +8,12 @@
 #
 _cfgs/
 bin/
+dist/
+vendor/
 charts/
 docs/
+examples/
 hack/
-vendor/
 Dockerfile
 
 # other
@@ -19,6 +21,7 @@ Dockerfile
 *.yml
 *.zip
 *.sql
+/*.yaml/
 
 # cosign
 /cosign.key
