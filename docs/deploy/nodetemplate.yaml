@@ -5,6 +5,9 @@ metadata:
   name: default
 spec:
   templateName: talos
+  # tags:
+  #   - talos
+  #   - talos-k8s-proxmox
 ---
 apiVersion: karpenter.proxmox.sinextra.dev/v1alpha1
 kind: ProxmoxTemplate

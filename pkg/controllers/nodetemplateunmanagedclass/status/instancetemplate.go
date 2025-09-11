@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
@@ -36,8 +38,26 @@ type InstanceTemplate struct {
 }
 
 func (i *InstanceTemplate) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error) {
+	if err := templateClass.Validate(); err != nil {
+		templateClass.Status.Zones = nil
+		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplateValidation", err.Error())
+
+		return reconcile.Result{}, nil
+	}
+
 	templates := i.instanceTemplateProvider.ListWithFilter(ctx, func(info *instancetemplate.InstanceTemplateInfo) bool {
-		return info.Name == templateClass.Spec.TemplateName && (templateClass.Spec.Region == "" || info.Region == templateClass.Spec.Region)
+		if (templateClass.Spec.TemplateName != "" && info.Name != templateClass.Spec.TemplateName) ||
+			(templateClass.Spec.Region != "" && info.Region != templateClass.Spec.Region) {
+			return false
+		}
+
+		if len(templateClass.Spec.Tags) > 0 {
+			if !lo.Every(info.TemplateTags, templateClass.Spec.Tags) {
+				return false
+			}
+		}
+
+		return true
 	})
 	if len(templates) == 0 {
 		templateClass.Status.Zones = nil

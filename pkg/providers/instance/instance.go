@@ -26,13 +26,13 @@ import (
 	"github.com/luthermonson/go-proxmox"
 	"github.com/samber/lo"
 
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
-	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"

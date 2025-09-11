@@ -155,6 +155,11 @@ For more details, see:
 Contributions are welcomed and appreciated!
 See [Contributing](CONTRIBUTING.md) for our guidelines.
 
+## Community, discussion and support
+
+If you have any questions or want to get the latest project news, you can connect with us in the following ways:
+- __Using and Deploying Karpenter?__ Reach out in the [#karpenter](https://kubernetes.slack.com/archives/C02SFFZSA2K) channel in the [Kubernetes slack](https://slack.k8s.io/) to ask questions about configuring or troubleshooting Karpenter.
+
 ## Code of Conduct
 
 This [Code of Conduct](CODE_OF_CONDUCT.md) is adapted from the Contributor Covenant, version 1.4.

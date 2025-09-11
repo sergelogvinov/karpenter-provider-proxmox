@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package proxmoxpool provides a pool of Telmate/proxmox-api-go/proxmox clients
+// Package proxmoxpool provides a pool of Proxmox API GO clients
 package proxmoxpool
 
 import (
@@ -27,7 +27,7 @@ import (
 
 	proxmox "github.com/luthermonson/go-proxmox"
 
-	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 
 	"k8s.io/klog/v2"
 )

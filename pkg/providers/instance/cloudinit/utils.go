@@ -23,7 +23,7 @@ import (
 
 	"github.com/luthermonson/go-proxmox"
 
-	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 )
 
 func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig) NetworkConfig {
