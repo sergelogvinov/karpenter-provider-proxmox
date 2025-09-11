@@ -60,13 +60,23 @@ spec:
                   will be created
                 minLength: 1
                 type: string
+              tags:
+                description: |-
+                  Tags to find the Proxmox template.
+                  If specified, all tags must be present in the template.
+                items:
+                  type: string
+                maxItems: 10
+                minItems: 1
+                type: array
               templateName:
                 description: TemplateName is the name of the Proxmox template.
                 minLength: 1
                 type: string
-            required:
-            - templateName
             type: object
+            x-kubernetes-validations:
+            - message: at least one of templateName or tags must be specified
+              rule: has(self.templateName) || has(self.tags)
           status:
             description: Status defines the observed state of ProxmoxUnmanagedTemplate
             properties:

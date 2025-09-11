@@ -309,7 +309,7 @@ func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
 					continue
 				}
 
-				info.TemplateTags = strings.Split(vmRes.Tags, ",")
+				info.TemplateTags = strings.Split(vmRes.Tags, ";")
 				info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(vmRes.VirtualMachineConfig.Meta, hashstructure.FormatV2, nil)))
 
 				if vmRes.VirtualMachineConfig != nil {

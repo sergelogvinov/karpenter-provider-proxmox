@@ -25,9 +25,9 @@ import (
 	"github.com/luthermonson/go-proxmox"
 	"github.com/samber/lo"
 
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	goproxmox "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmox"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )

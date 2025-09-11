@@ -46,6 +46,7 @@ type ProxmoxUnmanagedTemplate struct {
 }
 
 // ProxmoxUnmanagedTemplateSpec defines the desired state of ProxmoxUnmanagedTemplate
+// +kubebuilder:validation:XValidation:rule="has(self.templateName) || has(self.tags)",message="at least one of templateName or tags must be specified"
 type ProxmoxUnmanagedTemplateSpec struct {
 	// Region is the Proxmox Cloud region where VM template will be created
 	// +kubebuilder:validation:MinLength=1
@@ -54,8 +55,15 @@ type ProxmoxUnmanagedTemplateSpec struct {
 
 	// TemplateName is the name of the Proxmox template.
 	// +kubebuilder:validation:MinLength=1
-	// +required
-	TemplateName string `json:"templateName"`
+	// +optional
+	TemplateName string `json:"templateName,omitempty"` // Probably should rename to Name
+
+	// Tags to find the Proxmox template.
+	// If specified, all tags must be present in the template.
+	// +kubebuilder:validation:MinItems:=1
+	// +kubebuilder:validation:MaxItems:=10
+	// +optional
+	Tags []string `json:"tags,omitempty"`
 }
 
 func (in *ProxmoxUnmanagedTemplate) Hash() string {
@@ -64,6 +72,14 @@ func (in *ProxmoxUnmanagedTemplate) Hash() string {
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
 	})))
+}
+
+func (in *ProxmoxUnmanagedTemplate) Validate() (err error) {
+	if in.Spec.TemplateName == "" && len(in.Spec.Tags) == 0 {
+		return fmt.Errorf("at least one of templateName or tags must be specified")
+	}
+
+	return nil
 }
 
 // ProxmoxUnmanagedTemplateList contains a list of ProxmoxUnmanagedTemplate

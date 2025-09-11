@@ -103,8 +103,15 @@ kind: ProxmoxUnmanagedTemplate
 metadata:
   name: default
 spec:
-  # The name of the Proxmox template (Required)
-  templateName: talos
+  # At least one of templateName or tags must be specified.
+
+  # The name of the Proxmox template (Optional)
+  templateName: linux-k8s-distribution
+
+  # Tags to find the Proxmox template (Optional)
+  # If specified, all tags must be present in the template.
+  tags:
+    - karpenter
 ```
 
 The Karpenter plugin searches all Proxmox nodes for the specified template name.
