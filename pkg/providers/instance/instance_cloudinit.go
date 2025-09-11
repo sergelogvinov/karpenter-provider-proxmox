@@ -26,6 +26,7 @@ import (
 	"github.com/luthermonson/go-proxmox"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
@@ -256,11 +257,18 @@ func (p *DefaultProvider) generateCloudInitVars(
 
 	networkconfig := string(secret.Data["network-config"])
 	if networkconfig == "" {
-		networkconfig = cloudinit.DefaultNetworkV1
+		networkconfig = cloudinit.DefaultNetworkV2
 	}
 
 	if networkconfig != "" {
-		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig))
+		ifaces := map[string]cloudcapacity.NetworkIfaceInfo{}
+
+		net := p.cloudCapacityProvider.GetNetwork(region, zone)
+		if net != nil {
+			ifaces = net.Ifaces
+		}
+
+		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig, ifaces))
 		if err != nil {
 			return "", "", "", "", fmt.Errorf("failed to execute network-config template: %v", err)
 		}

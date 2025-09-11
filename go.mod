@@ -3,6 +3,7 @@ module github.com/sergelogvinov/karpenter-provider-proxmox
 go 1.25.1
 
 require (
+	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20250804204931-57066b748e19
 	github.com/go-logr/logr v1.4.3
 	github.com/luthermonson/go-proxmox v0.2.3-0.20250815182455-16138a778fb5

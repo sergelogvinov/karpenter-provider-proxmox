@@ -56,6 +56,7 @@ type Provider interface {
 	FitInZone(region, zone string, req corev1.ResourceList) bool
 
 	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
+	GetNetwork(region string, node string, filter ...func(*NodeNetworkIfaceInfo) bool) *NodeNetworkIfaceInfo
 }
 
 type DefaultProvider struct {
@@ -68,6 +69,9 @@ type DefaultProvider struct {
 
 	muStorageInfo sync.RWMutex
 	storageInfo   map[string]NodeStorageCapacityInfo
+
+	muNetworkInfo sync.RWMutex
+	networkInfo   map[string]NodeNetworkIfaceInfo
 
 	log logr.Logger
 }
@@ -106,6 +110,22 @@ type NodeStorageCapacityInfo struct {
 	Zones []string
 }
 
+type NodeNetworkIfaceInfo struct {
+	// Name is the name of the node.
+	Name string
+	// Region is the region of the node.
+	Region string
+	// Ifaces is the network interfaces of the node.
+	Ifaces map[string]NetworkIfaceInfo
+}
+
+type NetworkIfaceInfo struct {
+	Address4 string
+	Address6 string
+	Gateway4 string
+	Gateway6 string
+}
+
 type StorageOption func(*NodeStorageCapacityInfo)
 
 type NodeCapacity struct {
@@ -134,7 +154,11 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
 
+	p.muNetworkInfo.Lock()
+	defer p.muNetworkInfo.Unlock()
+
 	capacityInfo := make(map[string]NodeCapacityInfo)
+	networkIfaceInfo := make(map[string]NodeNetworkIfaceInfo)
 	zoneList := make(map[string][]string)
 
 	for _, region := range p.pool.GetRegions() {
@@ -192,6 +216,34 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 				},
 				Allocatable: allocatable,
 			}
+
+			networks, err := node.Networks(ctx, "any_bridge")
+			if err != nil {
+				log.Error(err, "Failed to get network interfaces for node", "node", item.Node, "region", region)
+			}
+
+			ifaces := map[string]NetworkIfaceInfo{}
+
+			for _, net := range networks {
+				if net.Active == 0 || (net.CIDR6 == "" && net.CIDR == "") {
+					continue
+				}
+
+				ifaces[net.Iface] = NetworkIfaceInfo{
+					Address4: net.CIDR,
+					Address6: net.CIDR6,
+					Gateway4: net.Gateway,
+					Gateway6: net.Gateway6,
+				}
+			}
+
+			if len(ifaces) > 0 {
+				networkIfaceInfo[key] = NodeNetworkIfaceInfo{
+					Name:   item.Node,
+					Region: region,
+					Ifaces: ifaces,
+				}
+			}
 		}
 
 		zoneList[region] = nodes
@@ -200,6 +252,7 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 	log.V(1).Info("Syncing finished", "nodes", len(capacityInfo))
 
 	p.capacityInfo = capacityInfo
+	p.networkInfo = networkIfaceInfo
 	p.zoneList = zoneList
 
 	return nil
@@ -401,6 +454,28 @@ func (p *DefaultProvider) GetStorage(region string, storage string, filter ...fu
 		for _, f := range filter {
 			if f(&storage) {
 				return &storage
+			}
+		}
+	}
+
+	return nil
+}
+
+func (p *DefaultProvider) GetNetwork(region string, node string, filter ...func(*NodeNetworkIfaceInfo) bool) *NodeNetworkIfaceInfo {
+	p.muNetworkInfo.RLock()
+	defer p.muNetworkInfo.RUnlock()
+
+	key := fmt.Sprintf("%s/%s", region, node)
+	if info, ok := p.networkInfo[key]; ok {
+		network := info
+
+		if len(filter) == 0 {
+			return &network
+		}
+
+		for _, f := range filter {
+			if f(&network) {
+				return &network
 			}
 		}
 	}

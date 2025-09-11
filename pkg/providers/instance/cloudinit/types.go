@@ -42,9 +42,16 @@ type InterfaceConfig struct {
 	MacAddr  string   `yaml:"mac_address,omitempty"`
 	DHCPv4   bool     `yaml:"dhcp4,omitempty"`
 	DHCPv6   bool     `yaml:"dhcp6,omitempty"`
+	SLAAC    bool     `yaml:"slaac,omitempty"`
 	Address4 []string `yaml:"addresses4,omitempty"`
 	Address6 []string `yaml:"addresses6,omitempty"`
 	Gateway4 string   `yaml:"gateway4,omitempty"`
 	Gateway6 string   `yaml:"gateway6,omitempty"`
 	MTU      uint32   `yaml:"mtu,omitempty"`
+
+	// Hypervisor specific fields
+	NodeAddress4 string `yaml:"node_address4,omitempty"`
+	NodeAddress6 string `yaml:"node_address6,omitempty"`
+	NodeGateway4 string `yaml:"node_gateway4,omitempty"`
+	NodeGateway6 string `yaml:"node_gateway6,omitempty"`
 }

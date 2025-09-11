@@ -142,8 +142,9 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 	}
 
 	nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-		v1alpha1.AnnotationProxmoxNodeClassHash:        nodeClass.Hash(),
-		v1alpha1.AnnotationProxmoxNodeClassHashVersion: v1alpha1.ProxmoxNodeClassHashVersion,
+		v1alpha1.AnnotationProxmoxNodeClassHash:         nodeClass.Hash(),
+		v1alpha1.AnnotationProxmoxNodeClassHashVersion:  v1alpha1.ProxmoxNodeClassHashVersion,
+		v1alpha1.AnnotationProxmoxNodeInPlaceUpdateHash: nodeClass.InPlaceHash(),
 	})
 
 	return nc, nil
