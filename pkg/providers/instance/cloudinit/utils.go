@@ -24,9 +24,10 @@ import (
 	"github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 )
 
-func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig) NetworkConfig {
+func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig, nodeIfaces map[string]cloudcapacity.NetworkIfaceInfo) NetworkConfig {
 	network := NetworkConfig{}
 
 	if vmc.Nameserver != "" {
@@ -57,6 +58,24 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig)
 			MacAddr: params.Virtio,
 		}
 
+		if i, ok := nodeIfaces[params.Bridge]; ok {
+			if i.Address4 != "" {
+				iface.NodeAddress4 = i.Address4
+			}
+
+			if i.Address6 != "" {
+				iface.NodeAddress6 = i.Address6
+			}
+
+			if i.Gateway4 != "" {
+				iface.NodeGateway4 = i.Gateway4
+			}
+
+			if i.Gateway6 != "" {
+				iface.NodeGateway6 = i.Gateway6
+			}
+		}
+
 		ipparams := goproxmox.VMCloudInitIPConfig{}
 		if ipconfig, ok := ipconfigs[fmt.Sprintf("ipconfig%d", inx)]; ok {
 			if err := ipparams.UnmarshalString(ipconfig); err != nil {
@@ -80,6 +99,23 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig)
 				case "dhcp":
 					iface.DHCPv6 = true
 				case "auto":
+					iface.SLAAC = true
+					// Some CNI plugins block SLAAC address assignment, so we generate
+					// a static IPv6 address from the node address if it's available.
+					//
+					// if iface.NodeAddress6 != "" {
+					// 	ipv6, err := slaac(iface.MacAddr, iface.NodeAddress6)
+					// 	if err == nil {
+					// 		iface.Address6 = []string{ipv6}
+					// 	}
+
+					// 	if iface.Gateway4 == "" {
+					// 		ipv6, err := cidrhost(iface.NodeAddress6)
+					// 		if err == nil {
+					// 			iface.Gateway6 = ipv6
+					// 		}
+					// 	}
+					// }
 				default:
 					iface.Address6 = []string{ipparams.IPv6}
 				}

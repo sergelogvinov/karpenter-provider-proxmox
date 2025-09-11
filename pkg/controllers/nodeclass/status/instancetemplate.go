@@ -70,6 +70,10 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 
 	for _, region := range i.cloudCapacityProvider.Regions() {
 		storage := i.cloudCapacityProvider.GetStorage(region, nodeClass.Spec.BootDevice.Storage)
+		if storage == nil {
+			continue
+		}
+
 		for _, z := range storage.Zones {
 			key := fmt.Sprintf("%s/%s/", region, z)
 

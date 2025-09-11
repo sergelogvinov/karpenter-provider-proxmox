@@ -39,14 +39,18 @@ config:
   {{- end }}
   {{- if $iface.DHCPv6 }}
   - type: dhcp6
-  {{- else if $iface.Address6 }}{{- range $iface.Address6 }}
+  {{- else if and $iface.Address6 $iface.Gateway6 }}{{- range $iface.Address6 }}
   - type: static6
     address: {{ . | quote }}
     gateway: {{ $iface.Gateway6 | quote }}
   {{- end }}
+  {{- else if $iface.SLAAC }}{{- if $iface.NodeAddress6 }}
+  - type: static6
+    address: {{ $iface.NodeAddress6 | cidrslaac $iface.MacAddr | quote }}
+    gateway: {{ $iface.NodeAddress6 | cidrhost | quote }}
   {{- else }}
   - type: ipv6_slaac
-  {{- end }}
+  {{- end }}{{- end }}
   {{- end }}
 {{- if .NameServers }}
 - type: nameserver
@@ -64,6 +68,56 @@ config:
 `
 
 	// DefaultNetworkV2 is default cloud-init network configuration version 2
-	DefaultNetworkV2 = `version: 2
-config: []`
+	DefaultNetworkV2 = `network:
+  version: 2
+  renderer: networkd
+  ethernets:
+{{- range $iface := .Interfaces }}
+    {{ $iface.Name }}:
+      match:
+        macaddress: {{ $iface.MacAddr | lower | quote }}
+{{- if ne $iface.MTU 0 }}
+      mtu: {{ $iface.MTU }}
+{{- end }}
+{{- if $iface.DHCPv4 }}
+      dhcp4: {{ $iface.DHCPv4 }}
+{{- end }}
+{{- if $iface.DHCPv6 }}
+      dhcp6: {{ $iface.DHCPv6 }}
+{{- end }}
+{{- if or $iface.Address4 $iface.Address6 }}
+      addresses:
+{{- range $iface.Address4 }}
+      - {{ . | quote }}
+{{- end }}
+{{- range $iface.Address6 }}
+      - {{ . | quote }}
+{{- end }}
+{{- if $iface.Gateway4 }}
+      gateway4: {{ $iface.Gateway4 | quote }}
+{{- end }}
+{{- if $iface.Gateway6 }}
+      gateway6: {{ $iface.Gateway6 | quote }}
+{{- end }}
+{{- else if $iface.SLAAC }}{{- if $iface.NodeAddress6 }}
+      addresses:
+      - {{ $iface.NodeAddress6 | cidrslaac $iface.MacAddr | quote }}
+      gateway6: {{ $iface.NodeAddress6 | cidrhost | quote }}
+  {{- end }}
+{{- end }}
+{{- if or $.NameServers $.SearchDomains }}
+      nameservers:
+{{- if $.NameServers }}
+        addresses:
+{{- range $.NameServers }}
+        - {{ . | quote }}
+{{- end }}{{- end }}
+{{- if $.SearchDomains }}
+        search:
+{{- range $.SearchDomains }}
+        - {{ . | quote }}
+{{- end }}{{- end }}
+{{- end }}
+{{- end }}
+`
 )

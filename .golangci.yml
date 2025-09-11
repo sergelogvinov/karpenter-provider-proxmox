@@ -85,6 +85,8 @@ linters:
         - fmt.Fprintln
         - fmt.Fprintf
         - fmt.Fprint
+    interfacebloat:
+      max: 15
     goconst:
       min-len: 3
       min-occurrences: 3

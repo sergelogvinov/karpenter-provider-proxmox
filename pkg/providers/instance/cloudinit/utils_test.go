@@ -45,7 +45,7 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 				Net0:         "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1500",
 				Net1:         "virtio=BC:24:11:EE:9A:23,bridge=vmbr1,firewall=0,mtu=1400",
 				IPConfig0:    "ip=dhcp,ip6=auto",
-				IPConfig1:    "ip=1.2.3.4",
+				IPConfig1:    "ip=1.2.3.4/24",
 				Nameserver:   "1.1.1.1 2001:4860:4860::8888",
 				Searchdomain: "example.com",
 			},
@@ -55,11 +55,12 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 						Name:    "eth0",
 						MacAddr: "BC:24:11:CD:B9:41",
 						DHCPv4:  true,
+						SLAAC:   true,
 					},
 					{
 						Name:     "eth1",
 						MacAddr:  "BC:24:11:EE:9A:23",
-						Address4: []string{"1.2.3.4"},
+						Address4: []string{"1.2.3.4/24"},
 					},
 				},
 				NameServers:   []string{"1.1.1.1", "2001:4860:4860::8888"},
@@ -70,7 +71,7 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.name), func(t *testing.T) {
-			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template)
+			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template, nil)
 			assert.Equal(tt.network, result)
 		})
 	}
