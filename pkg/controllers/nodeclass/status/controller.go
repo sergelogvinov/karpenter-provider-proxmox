@@ -23,7 +23,7 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -49,10 +49,10 @@ type Controller struct {
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, instanceTemplateProvider instancetemplate.Provider) *Controller {
+func NewController(kubeClient client.Client, cloudCapacityProvider cloudcapacity.Provider) *Controller {
 	return &Controller{
 		kubeClient:               kubeClient,
-		instanceTemplateProvider: &InstanceTemplate{kubeClient: kubeClient, instanceTemplateProvider: instanceTemplateProvider},
+		instanceTemplateProvider: &InstanceTemplate{kubeClient: kubeClient, cloudCapacityProvider: cloudCapacityProvider},
 		metadataOptions:          &MetadataOptions{kubeClient: kubeClient},
 	}
 }

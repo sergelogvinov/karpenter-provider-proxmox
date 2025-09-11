@@ -26,7 +26,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -42,8 +42,8 @@ const (
 )
 
 type InstanceTemplate struct {
-	kubeClient               client.Client
-	instanceTemplateProvider instancetemplate.Provider
+	kubeClient            client.Client
+	cloudCapacityProvider cloudcapacity.Provider
 }
 
 func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
@@ -66,12 +66,27 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 		})
 	}
 
-	nodeClass.Status.Resources = corev1.ResourceList{
-		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(zones))),
-	}
-	nodeClass.Status.SelectedZones = zones
+	availableZones := []string{}
 
-	if len(zones) == 0 {
+	for _, region := range i.cloudCapacityProvider.Regions() {
+		storage := i.cloudCapacityProvider.GetStorage(region, nodeClass.Spec.BootDevice.Storage)
+		for _, z := range storage.Zones {
+			key := fmt.Sprintf("%s/%s/", region, z)
+
+			if zone, ok := lo.Find(zones, func(item string) bool {
+				return strings.HasPrefix(item, key)
+			}); ok {
+				availableZones = append(availableZones, zone)
+			}
+		}
+	}
+
+	nodeClass.Status.Resources = corev1.ResourceList{
+		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(availableZones))),
+	}
+	nodeClass.Status.SelectedZones = availableZones
+
+	if len(availableZones) == 0 {
 		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
