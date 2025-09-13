@@ -10,12 +10,21 @@ assignees: ""
 
 ### Description
 
-### Logs
+### CRD Statuses
+
+Check the status of the following CRDs, use describe command if status is not `Ready`
+
+- kubectl get ProxmoxTemplate -A
+- kubectl get ProxmoxUnmanagedTemplate -A
+- kubectl get ProxmoxNodeClass -A
+- kubectl get NodePool -A
 
 ### Environment
 
 - Karpenter version:
 - Kubernetes version: [`kubectl version --short`]
+- Helm chart version:
+- Proxmox version:
 
 ### Community Note
 

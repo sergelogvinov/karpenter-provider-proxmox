@@ -17,5 +17,25 @@ limitations under the License.
 package cloudinit
 
 const (
-	DefaultUserdata = `#cloud-config`
+	DefaultUserdata = `#cloud-config
+hostname: {{ .Metadata.Hostname }}
+manage_etc_hosts: true
+
+users:
+  - name: karpenter
+    gecos: Kubernetes User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [users]
+    shell: /bin/bash
+    {{- with get .Values "SSHAuthorizedKeys" }}
+    ssh_authorized_keys:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+
+write_files:
+  - path: /etc/karpenter.yaml
+    content: |
+      {{- . | toYamlPretty | nindent 6  }}
+    owner: root:root
+`
 )

@@ -57,6 +57,7 @@ var genericMap = map[string]interface{}{
 	"regexReplaceAll": regexReplaceAll,
 
 	// String slice functions:
+	"get":      get,
 	"getValue": getValue,
 
 	// Encoding functions:
@@ -68,6 +69,7 @@ var genericMap = map[string]interface{}{
 	"contains":  func(substr string, str string) bool { return strings.Contains(str, substr) },
 	"hasPrefix": func(substr string, str string) bool { return strings.HasPrefix(str, substr) },
 	"hasSuffix": func(substr string, str string) bool { return strings.HasSuffix(str, substr) },
+	"hasKey":    hasKey,
 
 	// Network functions:
 	"cidrhost":  cidrhost, // cidrhost "10.12.112.0/20" 16 -> 10.12.112.16
@@ -152,18 +154,21 @@ func ternary(vt any, vf any, v bool) any {
 	return vf
 }
 
+// toJson returns the JSON encoding of the given value.
 func toJson(v any) string {
 	output, _ := json.Marshal(v) //nolint: errchkjson
 
 	return string(output)
 }
 
+// toPrettyJson returns the pretty-printed JSON encoding of the given value.
 func toPrettyJson(v any) string {
 	output, _ := json.MarshalIndent(v, "", "  ") //nolint: errchkjson
 
 	return string(output)
 }
 
+// toYaml returns the YAML encoding of the given value.
 func toYaml(v any) string {
 	var output bytes.Buffer
 
@@ -173,6 +178,7 @@ func toYaml(v any) string {
 	return strings.TrimSuffix(output.String(), "\n")
 }
 
+// toYamlPretty returns the pretty-printed YAML encoding of the given value.
 func toYamlPretty(v any) string {
 	var output bytes.Buffer
 
@@ -181,6 +187,17 @@ func toYamlPretty(v any) string {
 	encoder.Encode(v)
 
 	return strings.TrimSuffix(output.String(), "\n")
+}
+
+// hasKey returns true if the given map has the given key.
+func hasKey(m map[string]interface{}, key string) bool {
+	if empty(m) {
+		return false
+	}
+
+	_, ok := m[key]
+
+	return ok
 }
 
 // quote returns a string representation of the given values, quoted.
@@ -238,10 +255,34 @@ func regexFind(regex string, s string) (string, error) {
 	return r.FindString(s), nil
 }
 
+// get returns the value for the given key in the given map, or an empty string if the key does not exist.
+func get(m map[string]interface{}, key string) interface{} {
+	if val, ok := m[key]; ok {
+		return val
+	}
+
+	return ""
+}
+
+// getValue returns the value for the given key in a semicolon-separated key=value string.
+func getValue(source string, key string) string {
+	parts := strings.Split(source, ";")
+	for _, part := range parts {
+		kv := strings.Split(part, "=")
+		if kv[0] == key {
+			return kv[1]
+		}
+	}
+
+	return ""
+}
+
+// base64encode returns the base64 encoding of the given string.
 func base64encode(v string) string {
 	return base64.StdEncoding.EncodeToString([]byte(v))
 }
 
+// base64decode returns the base64 decoding of the given string.
 func base64decode(v string) (string, error) {
 	data, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
@@ -251,6 +292,7 @@ func base64decode(v string) (string, error) {
 	return string(data), nil
 }
 
+// cidrhost returns the IP address of the given host number in the given CIDR.
 func cidrhost(cidr string, hostnum ...int) (string, error) {
 	ip, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -269,6 +311,7 @@ func cidrhost(cidr string, hostnum ...int) (string, error) {
 	return ip.String(), nil
 }
 
+// slaac returns the SLAAC address for the given MAC address in the given IPv6 CIDR.
 func slaac(mac string, cidr string) (string, error) {
 	_, ipnet, err := net.ParseCIDR(cidr)
 	if err != nil {
@@ -300,16 +343,4 @@ func slaac(mac string, cidr string) (string, error) {
 	}
 
 	return ipnet.String(), nil
-}
-
-func getValue(source string, key string) string {
-	parts := strings.Split(source, ";")
-	for _, part := range parts {
-		kv := strings.Split(part, "=")
-		if kv[0] == key {
-			return kv[1]
-		}
-	}
-
-	return ""
 }

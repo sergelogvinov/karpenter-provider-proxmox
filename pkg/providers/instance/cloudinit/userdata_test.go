@@ -33,7 +33,7 @@ write_files:
   - path: /etc/hostname
     permissions: 0o600
     defer: true
-    content: {{ .Hostname }}
+    content: {{ .Metadata.Hostname }}
   - path: /etc/kubernetes/kubelet.conf
     permissions: 0o600
     defer: true
@@ -47,12 +47,12 @@ func TestUserData(t *testing.T) {
 
 	region := "test-region"
 	zone := "test-zone"
-	metadata := struct {
-		cloudinit.MetaData
-
+	data := struct {
+		Metadata             cloudinit.MetaData
 		KubeletConfiguration *instance.KubeletConfiguration
+		Values               map[string]interface{}
 	}{
-		MetaData: cloudinit.MetaData{
+		Metadata: cloudinit.MetaData{
 			Hostname:     "hostname-1",
 			InstanceID:   "100",
 			InstanceType: "t1.2VCPU-6GB",
@@ -65,6 +65,9 @@ func TestUserData(t *testing.T) {
 			TopologyManagerPolicy: "best-effort",
 			ProviderID:            provider.GetProviderID(region, 100),
 		},
+		Values: map[string]interface{}{
+			"SSHAuthorizedKeys": []string{"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu..."},
+		},
 	}
 
 	tests := []struct {
@@ -76,13 +79,49 @@ func TestUserData(t *testing.T) {
 		{
 			name:     "Default",
 			template: cloudinit.DefaultUserdata,
-			values:   metadata,
-			result:   "#cloud-config",
+			values:   data,
+			result: `#cloud-config
+hostname: hostname-1
+manage_etc_hosts: true
+
+users:
+  - name: karpenter
+    gecos: Kubernetes User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [users]
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...
+
+write_files:
+  - path: /etc/karpenter.yaml
+    content: |
+      metadata:
+        hostname: hostname-1
+        instanceid: "100"
+        instanceuuid: ""
+        instancetype: t1.2VCPU-6GB
+        providerid: proxmox://test-region/100
+        region: test-region
+        zone: test-zone
+        tags: []
+        nodeclass: ""
+      kubeletconfiguration:
+        topologyManagerPolicy: best-effort
+        allowedUnsafeSysctls:
+          - kernel.msgmax
+          - kernel.shmmax
+        providerID: proxmox://test-region/100
+      values:
+        SSHAuthorizedKeys:
+          - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...
+    owner: root:root
+`,
 		},
 		{
 			name:     "CustomUserdata",
 			template: Userdata,
-			values:   metadata,
+			values:   data,
 			result: `#cloud-config
 package_update: true
 write_files:
