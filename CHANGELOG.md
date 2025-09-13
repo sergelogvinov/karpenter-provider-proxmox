@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.5.0...v0.6.0) (2025-09-13)
+
+
+### Features
+
+* expose proxmox host bridge ips ([5333bcc](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/5333bccd239262e8514f6fc061d1bd82d97d24ee))
+* search template by tags ([8eb4906](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8eb49068607f8582c01b34314ca1242be07466dc))
+
+
+### Bug Fixes
+
+* check storage for nodeclass status ([a887794](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a887794bc56b79a0c314dd2feabc6acade3dc137))
+
 ## [0.5.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.4.0...v0.5.0) (2025-09-08)
 
 
