@@ -137,10 +137,30 @@ The secret must contain the following keys, each key is optional.
 
 Official documentation can be found [here](https://cloudinit.readthedocs.io/en/latest/topics/examples.html#user-data).
 
-The default file contents are:
+The default file contents are, it helps to understand accessible values in template:
 
 ```yaml
 #cloud-config
+hostname: {{ .Metadata.Hostname }}
+manage_etc_hosts: true
+
+users:
+  - name: karpenter
+    gecos: Kubernetes User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: [users]
+    shell: /bin/bash
+    {{- if hasKey .Values "SSHAuthorizedKeys" }}{{- with .Values.SSHAuthorizedKeys }}
+    ssh_authorized_keys:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
+
+write_files:
+  - path: /etc/karpenter.yaml
+    content: |
+      {{ . | toYamlPretty | nindent 6  }}
+    owner: root:root
 ```
 
 Accessible values in template:
@@ -224,6 +244,4 @@ Currently the provider supports network config version 1.
 ## Template functions
 
 The templates support several functions that let you customize Cloud-Init metadata based on the instance’s location or size.
-You can find the full list of available functions here [functions.go](/pkg/providers/instance/cloudinit/functions.go)
-
-Those functions was inspired by Helm [Template Functions and Pipelines](https://helm.sh/docs/chart_template_guide/functions_and_pipelines/).
+See descriptions and examples of all supported functions in the [Template function list](functions.md).
