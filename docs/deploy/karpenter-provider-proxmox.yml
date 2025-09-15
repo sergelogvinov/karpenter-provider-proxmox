@@ -760,13 +760,23 @@ spec:
                   will be created
                 minLength: 1
                 type: string
+              tags:
+                description: |-
+                  Tags to find the Proxmox template.
+                  If specified, all tags must be present in the template.
+                items:
+                  type: string
+                maxItems: 10
+                minItems: 1
+                type: array
               templateName:
                 description: TemplateName is the name of the Proxmox template.
                 minLength: 1
                 type: string
-            required:
-            - templateName
             type: object
+            x-kubernetes-validations:
+            - message: at least one of templateName or tags must be specified
+              rule: has(self.templateName) || has(self.tags)
           status:
             description: Status defines the observed state of ProxmoxUnmanagedTemplate
             properties:
@@ -1728,10 +1738,10 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
 ---
@@ -1741,10 +1751,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -1792,10 +1802,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -1823,10 +1833,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1843,10 +1853,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1863,10 +1873,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1883,10 +1893,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -1904,10 +1914,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -1954,10 +1964,10 @@ metadata:
   name: karpenter-provider-proxmox:bootstrap
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2010,10 +2020,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.2.5
+    helm.sh/chart: karpenter-provider-proxmox-0.3.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.5.0"
+    app.kubernetes.io/version: "v0.6.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1
@@ -2052,7 +2062,7 @@ spec:
             readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/sergelogvinov/karpenter-provider-proxmox:v0.5.0"
+          image: "ghcr.io/sergelogvinov/karpenter-provider-proxmox:v0.6.0"
           imagePullPolicy: Always
           args:
             - -cloud-config=/etc/proxmox/config.yaml

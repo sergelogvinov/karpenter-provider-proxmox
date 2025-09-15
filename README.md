@@ -25,6 +25,7 @@ Also, having free resources can provide more advantages than we might initially 
 * [x] Cloud-init metadata delivery via CD-ROM
 * [x] Cloud-init Go-template metadata support (dynamic metadata based on instance type and node location)
 * [x] Firewall security group support
+* [x] Kubelet short-lived join tokens
 * [x] Kubelet configuration tuning
 * [x] Predefined VM template selection
 * [x] Prepare VM templates via CRD

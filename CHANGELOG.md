@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.6.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.5.0...v0.6.0) (2025-09-15)
+
+
+### Features
+
+* add hasTag func ([0f34c30](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/0f34c30930ef97fa6cdc17c74eab67793c1aeae3))
+* expose proxmox host bridge ips ([5333bcc](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/5333bccd239262e8514f6fc061d1bd82d97d24ee))
+* network config in user-metadata template ([0011441](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/001144120b25cda70f672ad7b9eae6a82bb7bdbc))
+* search template by tags ([8eb4906](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8eb49068607f8582c01b34314ca1242be07466dc))
+
+
+### Bug Fixes
+
+* check storage for nodeclass status ([a887794](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a887794bc56b79a0c314dd2feabc6acade3dc137))
+* user-data template ([0c3c52e](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/0c3c52e8d7136c8d5bc3d5ac69555df8915eec2a))
+
 ## [0.5.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.4.0...v0.5.0) (2025-09-08)
 
 
