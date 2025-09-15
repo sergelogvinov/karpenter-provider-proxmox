@@ -29,7 +29,7 @@ users:
     shell: /bin/bash
     {{- with get .Values "SSHAuthorizedKeys" }}
     ssh_authorized_keys:
-      {{- toYaml . | nindent 6 }}
+      {{- toYaml (split . ",") | nindent 6 }}
     {{- end }}
 
 write_files:

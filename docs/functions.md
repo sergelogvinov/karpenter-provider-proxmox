@@ -87,6 +87,18 @@ The Cloud-Init provider supports several template functions that can be used to 
   {{ trimPrefix "hello" "he" }} -> llo
   ```
 
+* `split` - the function to split the string by the given separator and return a slice of strings.
+
+  ```yaml
+  {{ split "a,b,c" "," }} -> [a b c]
+  ```
+
+* `join` - the function to join a slice of strings with the given separator.
+
+  ```yaml
+  {{ join (list "a" "b" "c") "," }} -> a,b,c
+  ```
+
 * `replace` - the function to replace all occurrences of the old string with the new string.
 
   ```yaml

@@ -44,7 +44,7 @@ write_files:
     permissions: 0o600
     defer: true
     content: |
-      {{- .Metadata.Tags | toYamlPretty | nindent 6 }}
+      {{- join .Metadata.Tags "," | nindent 6 }}
 {{- end }}
 `
 )
@@ -57,7 +57,7 @@ func TestUserData(t *testing.T) {
 	data := struct {
 		Metadata             cloudinit.MetaData
 		KubeletConfiguration *instance.KubeletConfiguration
-		Values               map[string]interface{}
+		Values               map[string]string
 	}{
 		Metadata: cloudinit.MetaData{
 			Hostname:     "hostname-1",
@@ -74,8 +74,8 @@ func TestUserData(t *testing.T) {
 			TopologyManagerPolicy: "best-effort",
 			ProviderID:            provider.GetProviderID(region, 100),
 		},
-		Values: map[string]interface{}{
-			"SSHAuthorizedKeys": []string{"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu..."},
+		Values: map[string]string{
+			"SSHAuthorizedKeys": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...,ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...",
 		},
 	}
 
@@ -101,6 +101,7 @@ users:
     shell: /bin/bash
     ssh_authorized_keys:
       - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...
+      - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...
 
 write_files:
   - path: /etc/karpenter.yaml
@@ -124,8 +125,7 @@ write_files:
           - kernel.shmmax
         providerID: proxmox://test-region/100
       values:
-        SSHAuthorizedKeys:
-          - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...
+        SSHAuthorizedKeys: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...,ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...
     owner: root:root
 `,
 		},
@@ -153,8 +153,7 @@ write_files:
     permissions: 0o600
     defer: true
     content: |
-      - tag1
-      - tag2
+      tag1,tag2
 `,
 		},
 	}
