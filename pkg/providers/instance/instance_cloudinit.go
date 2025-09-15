@@ -25,6 +25,7 @@ import (
 
 	"github.com/luthermonson/go-proxmox"
 
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
@@ -205,10 +206,14 @@ func (p *DefaultProvider) generateCloudInitVars(
 		return "", "", "", "", fmt.Errorf("failed to create bootstrap token: %v", err)
 	}
 
+	smbios1 := goproxmox.VMSMBIOS{}
+	smbios1.UnmarshalString(vm.VirtualMachineConfig.SMBios1)
+
 	metadataValues := cloudinit.MetaData{
 		Hostname:     nodeClaim.Name,
 		InstanceID:   fmt.Sprintf("%d", vm.VMID),
 		InstanceType: instanceType.Name,
+		InstanceUUID: smbios1.UUID,
 		ProviderID:   provider.GetProviderID(region, int(vm.VMID)),
 		Region:       region,
 		Zone:         zone,

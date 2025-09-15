@@ -50,6 +50,8 @@ var genericMap = map[string]interface{}{
 	"trim":       strings.TrimSpace,
 	"trimSuffix": func(a, b string) string { return strings.TrimSuffix(b, a) },
 	"trimPrefix": func(a, b string) string { return strings.TrimPrefix(b, a) },
+	"split":      strings.Split,
+	"join":       strings.Join,
 
 	"replace":         func(o, n, s string) string { return strings.ReplaceAll(s, o, n) },
 	"regexFind":       regexFind,
@@ -191,7 +193,7 @@ func toYamlPretty(v any) string {
 }
 
 // hasKey returns true if the given map has the given key.
-func hasKey(m map[string]interface{}, key string) bool {
+func hasKey(m map[string]any, key string) bool {
 	if empty(m) {
 		return false
 	}
@@ -271,7 +273,7 @@ func regexFind(regex string, s string) (string, error) {
 }
 
 // get returns the value for the given key in the given map, or an empty string if the key does not exist.
-func get(m map[string]interface{}, key string) interface{} {
+func get(m map[string]string, key string) string {
 	if val, ok := m[key]; ok {
 		return val
 	}
