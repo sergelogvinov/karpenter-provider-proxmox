@@ -216,8 +216,18 @@ func (p *DefaultProvider) generateCloudInitVars(
 		NodeClass:    nodeClass.Name,
 	}
 
+	ifaces := map[string]cloudcapacity.NetworkIfaceInfo{}
+
+	net := p.cloudCapacityProvider.GetNetwork(region, zone)
+	if net != nil {
+		ifaces = net.Ifaces
+	}
+
+	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig, ifaces)
+
 	userdataValues := UserDataValues{
 		Metadata: metadataValues,
+		Network:  networkValues,
 		Kubernetes: Kubernetes{
 			RootCA:               rootCA,
 			BootstrapToken:       bootstrapToken,
@@ -261,14 +271,7 @@ func (p *DefaultProvider) generateCloudInitVars(
 	}
 
 	if networkconfig != "" {
-		ifaces := map[string]cloudcapacity.NetworkIfaceInfo{}
-
-		net := p.cloudCapacityProvider.GetNetwork(region, zone)
-		if net != nil {
-			ifaces = net.Ifaces
-		}
-
-		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig, ifaces))
+		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, networkValues)
 		if err != nil {
 			return "", "", "", "", fmt.Errorf("failed to execute network-config template: %v", err)
 		}
