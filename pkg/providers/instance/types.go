@@ -25,6 +25,7 @@ import (
 // UserDataValues is cloud-init template values
 type UserDataValues struct {
 	Metadata   cloudinit.MetaData
+	Network    cloudinit.NetworkConfig
 	Kubernetes Kubernetes
 	Values     map[string]string
 }
