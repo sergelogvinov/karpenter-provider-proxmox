@@ -150,22 +150,22 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     groups: [users]
     shell: /bin/bash
-    {{- if hasKey .Values "SSHAuthorizedKeys" }}{{- with .Values.SSHAuthorizedKeys }}
+    {{- with get .Values "SSHAuthorizedKeys" }}
     ssh_authorized_keys:
-      {{- toYaml . | nindent 6 }}
-    {{- end }}
+      {{- toYaml (split . ",") | nindent 6 }}
     {{- end }}
 
 write_files:
   - path: /etc/karpenter.yaml
     content: |
-      {{ . | toYamlPretty | nindent 6  }}
+      {{- . | toYamlPretty | nindent 6  }}
     owner: root:root
 ```
 
 Accessible values in template:
 * `.Metadata.Hostname` - The hostname of the Proxmox VM.
 * `.Metadata.InstanceID` - The unique identifier for the Proxmox VM ID.
+* `.Metadata.InstanceUUID` - The unique identifier for the Proxmox VM UUID.
 * `.Metadata.InstanceType` - The type of the instance.
 * `.Metadata.ProviderID` - The provider-specific identifier `proxmox://<Region>/<VMID>`.
 * `.Metadata.Region` - The region where the VM is located.
