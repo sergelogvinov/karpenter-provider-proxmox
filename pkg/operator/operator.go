@@ -27,6 +27,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,6 +46,7 @@ type Operator struct {
 	InstanceProvider            instance.Provider
 	InstanceTemplateProvider    instancetemplate.Provider
 	InstanceTypeProvider        instancetype.Provider
+	NodeIpamController          nodeipam.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -69,6 +71,9 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
 	cloudCapacityProvider.UpdateNodeCapacity(ctx)
 
+	nodeIpamController := nodeipam.NewDefaultProvider(ctx, operator.KubernetesInterface, cloudCapacityProvider)
+	nodeIpamController.UpdateNodeCIDR(ctx)
+
 	instanceTemplateProvider := instancetemplate.NewDefaultProvider(ctx, pxPool, cloudCapacityProvider)
 	instanceTemplateProvider.UpdateInstanceTemplates(ctx)
 
@@ -85,6 +90,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		kubernetesBootstrapProvider,
 		pxPool,
 		cloudCapacityProvider,
+		nodeIpamController,
 		instanceTemplateProvider,
 	)
 	if err != nil {
@@ -101,5 +107,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTemplateProvider:    instanceTemplateProvider,
 		InstanceTypeProvider:        instanceTypeProvider,
 		InstanceProvider:            instanceProvider,
+		NodeIpamController:          nodeIpamController,
 	}
 }

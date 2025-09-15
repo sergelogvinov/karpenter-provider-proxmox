@@ -21,13 +21,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"net"
 	"reflect"
 	"regexp"
 	"strings"
 	"text/template"
 
-	gocidr "github.com/apparentlymart/go-cidr/cidr"
+	utilsip "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/ip"
 
 	goYaml "sigs.k8s.io/yaml/goyaml.v3"
 )
@@ -75,8 +74,8 @@ var genericMap = map[string]interface{}{
 	"b64dec": base64decode,
 
 	// Network functions:
-	"cidrhost":  cidrhost, // cidrhost "10.12.112.0/20" 16 -> 10.12.112.16
-	"cidrslaac": slaac,    // "2001:db8:1::/64" | slaac "00:1A:2B:3C:4D:5E" -> 2001:db8:1::21a:2bff:fe3c:4d5e
+	"cidrhost":  utilsip.CIDRHost, // cidrhost "10.12.112.0/20" 16 -> 10.12.112.16
+	"cidrslaac": utilsip.Slaac,    // "2001:db8:1::/64" | slaac "00:1A:2B:3C:4D:5E" -> 2001:db8:1::21a:2bff:fe3c:4d5e
 }
 
 // ExecuteTemplate executes a template with the given data.
@@ -307,57 +306,4 @@ func base64decode(v string) (string, error) {
 	}
 
 	return string(data), nil
-}
-
-// cidrhost returns the IP address of the given host number in the given CIDR.
-func cidrhost(cidr string, hostnum ...int) (string, error) {
-	ip, ipnet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return "", err
-	}
-
-	if len(hostnum) == 0 {
-		return ip.String(), nil
-	}
-
-	ip, err = gocidr.Host(ipnet, hostnum[0])
-	if err != nil {
-		return "", err
-	}
-
-	return ip.String(), nil
-}
-
-// slaac returns the SLAAC address for the given MAC address in the given IPv6 CIDR.
-func slaac(mac string, cidr string) (string, error) {
-	_, ipnet, err := net.ParseCIDR(cidr)
-	if err != nil {
-		return "", err
-	}
-
-	hw, err := net.ParseMAC(mac)
-	if err != nil {
-		return "", err
-	}
-
-	ones, _ := ipnet.Mask.Size()
-	if ones > 112 {
-		return "", fmt.Errorf("slaac generator requires a mask of /64 to /112")
-	}
-
-	eui64 := net.IPv6zero
-	copy(eui64, ipnet.IP.To16())
-
-	copy(eui64[8:11], hw[0:3])
-	copy(eui64[13:16], hw[3:6])
-	eui64[11] = 0xFF
-	eui64[12] = 0xFE
-	eui64[8] ^= 0x02
-
-	l := ones / 8
-	for i := 15; i >= l; i-- {
-		ipnet.IP[i] = eui64[i]
-	}
-
-	return ipnet.String(), nil
 }

@@ -2,6 +2,8 @@ module github.com/sergelogvinov/karpenter-provider-proxmox
 
 go 1.25.1
 
+// replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
+
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20250804204931-57066b748e19
@@ -10,7 +12,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.51.0
-	github.com/sergelogvinov/go-proxmox v0.0.0-20250913072643-2097684ff6c8
+	github.com/sergelogvinov/go-proxmox v0.0.0-20250917044054-1af35c793934
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
@@ -76,7 +78,7 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 	golang.org/x/time v0.13.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
-	google.golang.org/protobuf v1.36.8 // indirect
+	google.golang.org/protobuf v1.36.9 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	k8s.io/apiextensions-apiserver v0.34.1 // indirect

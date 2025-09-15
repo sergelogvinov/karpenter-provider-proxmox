@@ -21,6 +21,7 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 
+	nodeipamctl "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/node/ipam"
 	nodeclaiminplaceupdate "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/inplaceupdate"
 	nodeclaimlifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/lifecycle"
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
@@ -35,6 +36,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 
 	"k8s.io/utils/clock"
 
@@ -51,6 +53,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	instanceProvider instance.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
+	nodeIpamProvider nodeipam.Provider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclaiminplaceupdate.NewController(kubeClient, instanceProvider),
@@ -63,6 +66,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
 		cloudcapacitynodeload.NewController(cloudCapacityProvider),
+		nodeipamctl.NewController(kubeClient, nodeIpamProvider),
 	}
 
 	return controllers
