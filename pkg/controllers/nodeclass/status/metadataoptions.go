@@ -49,22 +49,22 @@ func (i *MetadataOptions) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pro
 
 			return reconcile.Result{}, fmt.Errorf("metadataOptions.TemplatesRef is required when metadataOptions.Type is 'cdrom'")
 		}
-	}
 
-	secret := &corev1.Secret{}
-	secretKey := client.ObjectKey{
-		Name:      nodeClass.Spec.MetadataOptions.TemplatesRef.Name,
-		Namespace: nodeClass.Spec.MetadataOptions.TemplatesRef.Namespace,
-	}
-
-	if err := i.kubeClient.Get(ctx, secretKey, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceMetadataOptionsReady, "MetadataOptionsNotFound", "Metadata secret resource not found")
-
-			return reconcile.Result{RequeueAfter: metadataScanPeriod}, nil
+		secret := &corev1.Secret{}
+		secretKey := client.ObjectKey{
+			Name:      nodeClass.Spec.MetadataOptions.TemplatesRef.Name,
+			Namespace: nodeClass.Spec.MetadataOptions.TemplatesRef.Namespace,
 		}
 
-		return reconcile.Result{}, err
+		if err := i.kubeClient.Get(ctx, secretKey, secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceMetadataOptionsReady, "MetadataOptionsNotFound", "Metadata TemplatesRef secret resource not found")
+
+				return reconcile.Result{RequeueAfter: metadataScanPeriod}, nil
+			}
+
+			return reconcile.Result{}, err
+		}
 	}
 
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionInstanceMetadataOptionsReady)

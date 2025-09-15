@@ -33,6 +33,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
@@ -62,6 +63,7 @@ type DefaultProvider struct {
 	kubernetesBootstrapProvider bootstrap.Provider
 	cluster                     *pxpool.ProxmoxPool
 	cloudCapacityProvider       cloudcapacity.Provider
+	nodeIpamProvider            nodeipam.Provider
 	instanceTemplateProvider    instancetemplate.Provider
 }
 
@@ -71,6 +73,7 @@ func NewProvider(
 	kubernetesBootstrapProvider bootstrap.Provider,
 	cluster *pxpool.ProxmoxPool,
 	cloudCapacityProvider cloudcapacity.Provider,
+	nodeIpamController nodeipam.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 ) (*DefaultProvider, error) {
 	return &DefaultProvider{
@@ -78,6 +81,7 @@ func NewProvider(
 		kubernetesBootstrapProvider: kubernetesBootstrapProvider,
 		cluster:                     cluster,
 		cloudCapacityProvider:       cloudCapacityProvider,
+		nodeIpamProvider:            nodeIpamController,
 		instanceTemplateProvider:    instanceTemplateProvider,
 	}, nil
 }
@@ -399,6 +403,11 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	newID, err = px.CloneVM(ctx, int(vmTemplateID), vmOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
+	}
+
+	err = p.instanceNetworkSetup(ctx, region, zone, newID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to configure networking for vm %d in region %s: %v", newID, region, err)
 	}
 
 	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))

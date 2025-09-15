@@ -67,6 +67,7 @@ func main() {
 			op.InstanceProvider,
 			op.InstanceTemplateProvider,
 			op.CloudCapacityProvider,
+			op.NodeIpamController,
 		)...).
 		Start(ctx)
 }

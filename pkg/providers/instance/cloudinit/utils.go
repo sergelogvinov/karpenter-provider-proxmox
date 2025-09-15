@@ -17,6 +17,7 @@ limitations under the License.
 package cloudinit
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,6 +26,12 @@ import (
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+)
+
+const (
+	IPv4DHCP  = "dhcp"
+	IPv6DHCP  = "dhcp"
+	IPv6SLAAC = "auto"
 )
 
 func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig, nodeIfaces map[string]cloudcapacity.NetworkIfaceInfo) NetworkConfig {
@@ -59,21 +66,10 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 		}
 
 		if i, ok := nodeIfaces[params.Bridge]; ok {
-			if i.Address4 != "" {
-				iface.NodeAddress4 = i.Address4
-			}
-
-			if i.Address6 != "" {
-				iface.NodeAddress6 = i.Address6
-			}
-
-			if i.Gateway4 != "" {
-				iface.NodeGateway4 = i.Gateway4
-			}
-
-			if i.Gateway6 != "" {
-				iface.NodeGateway6 = i.Gateway6
-			}
+			iface.NodeAddress4 = i.Address4
+			iface.NodeAddress6 = i.Address6
+			iface.NodeGateway4 = i.Gateway4
+			iface.NodeGateway6 = i.Gateway6
 		}
 
 		ipparams := goproxmox.VMCloudInitIPConfig{}
@@ -82,47 +78,25 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 				continue
 			}
 
+			iface.Gateway4 = ipparams.GatewayIPv4
 			if ipparams.IPv4 != "" {
-				if ipparams.IPv4 == "dhcp" {
+				if ipparams.IPv4 == IPv4DHCP {
 					iface.DHCPv4 = true
 				} else {
 					iface.Address4 = []string{ipparams.IPv4}
 				}
 			}
 
-			if ipparams.GatewayIPv4 != "" {
-				iface.Gateway4 = ipparams.GatewayIPv4
-			}
-
+			iface.Gateway6 = ipparams.GatewayIPv6
 			if ipparams.IPv6 != "" {
 				switch ipparams.IPv6 {
-				case "dhcp":
+				case IPv6DHCP:
 					iface.DHCPv6 = true
-				case "auto":
+				case IPv6SLAAC:
 					iface.SLAAC = true
-					// Some CNI plugins block SLAAC address assignment, so we generate
-					// a static IPv6 address from the node address if it's available.
-					//
-					// if iface.NodeAddress6 != "" {
-					// 	ipv6, err := slaac(iface.MacAddr, iface.NodeAddress6)
-					// 	if err == nil {
-					// 		iface.Address6 = []string{ipv6}
-					// 	}
-
-					// 	if iface.Gateway4 == "" {
-					// 		ipv6, err := cidrhost(iface.NodeAddress6)
-					// 		if err == nil {
-					// 			iface.Gateway6 = ipv6
-					// 		}
-					// 	}
-					// }
 				default:
 					iface.Address6 = []string{ipparams.IPv6}
 				}
-			}
-
-			if ipparams.GatewayIPv6 != "" {
-				iface.Gateway6 = ipparams.GatewayIPv6
 			}
 		}
 
@@ -130,4 +104,56 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 	}
 
 	return network
+}
+
+func SetNetworkConfig(ctx context.Context, vm *proxmox.VirtualMachine, networkConfig NetworkConfig) error {
+	if len(networkConfig.Interfaces) == 0 {
+		return fmt.Errorf("no network interfaces found")
+	}
+
+	vmOptions := []proxmox.VirtualMachineOption{}
+
+	for _, iface := range networkConfig.Interfaces {
+		key := fmt.Sprintf("ipconfig%s", iface.Name[3:])
+
+		ipconfig := goproxmox.VMCloudInitIPConfig{
+			GatewayIPv4: iface.Gateway4,
+			GatewayIPv6: iface.Gateway6,
+		}
+
+		if len(iface.Address4) > 0 {
+			ipconfig.IPv4 = iface.Address4[0]
+		}
+
+		if len(iface.Address6) > 0 {
+			ipconfig.IPv6 = iface.Address6[0]
+		}
+
+		if iface.DHCPv4 {
+			ipconfig.IPv4 = "dhcp"
+		}
+
+		switch {
+		case iface.DHCPv6:
+			ipconfig.IPv6 = "dhcp"
+		case iface.SLAAC:
+			ipconfig.IPv6 = "auto"
+		}
+
+		val, err := ipconfig.ToString()
+		if err != nil {
+			return fmt.Errorf("failed to marshal ipconfig for interface %s: %v", iface.Name, err)
+		}
+
+		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: key, Value: val})
+	}
+
+	if len(vmOptions) > 0 {
+		_, err := vm.Config(ctx, vmOptions...)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
