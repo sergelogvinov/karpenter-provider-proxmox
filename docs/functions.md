@@ -51,6 +51,12 @@ The Cloud-Init provider supports several template functions that can be used to 
   {{ nindent 4 "hello\nworld" }} -> "\n    hello\n    world"
   ```
 
+* `quote` - the function to wrap the string in double quotes.
+
+  ```yaml
+  {{ quote "hello" }} -> "hello"
+  ```
+
 * `upper` - the function to convert the string to uppercase.
 
   ```yaml
@@ -105,6 +111,19 @@ The Cloud-Init provider supports several template functions that can be used to 
   {{ regexReplaceAll "a(x*)b" "-ab-axxb-" "${1}W" }} -> -W-xxW-
   ```
 
+### String slice functions
+
+* `get` - the function to get the value from the string slice by index.
+
+  ```yaml
+  {{ get (dict "a" 1 "b" 2) "a" }} -> 1
+  ```
+
+* `getValue` - the function to get the value from the map by key.
+
+  ```yaml
+  {{ getValue "ds=nocloud;i=1234" "i" }} -> 1234
+  ```
 
 ### Conditional functions
 
@@ -138,6 +157,12 @@ The Cloud-Init provider supports several template functions that can be used to 
   {{ hasKey (dict "a" 1 "b" 2) "a" }} -> true
   ```
 
+* `hasTag` - the function to return true if the string slice contains the specified tag.
+
+  ```yaml
+  {{ hasTag (list "tag1" "tag2") "tag2" }} -> true
+  ```
+
 ### Encoding functions
 
 * `b64enc` - the function to return the base64-encoded string.
@@ -150,15 +175,6 @@ The Cloud-Init provider supports several template functions that can be used to 
   ```yaml
   {{ b64dec "aGVsbG8=" }} -> hello
   ```
-
-### String slice functions
-
-* `getValue` - the function to get the value from the map by key.
-
-  ```yaml
-  {{ getValue "ds=nocloud;i=1234" "i" }} -> 1234
-  ```
-
 
 ### Network functions
 

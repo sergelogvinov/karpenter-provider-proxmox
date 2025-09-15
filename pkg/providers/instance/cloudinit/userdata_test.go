@@ -39,6 +39,13 @@ write_files:
     defer: true
     content: |
       {{- .KubeletConfiguration | toYamlPretty | nindent 6 }}
+{{- if hasTag .Metadata.Tags "tag2" }}
+  - path: /etc/kubernetes/kubelet-labels.conf
+    permissions: 0o600
+    defer: true
+    content: |
+      {{- .Metadata.Tags | toYamlPretty | nindent 6 }}
+{{- end }}
 `
 )
 
@@ -59,6 +66,8 @@ func TestUserData(t *testing.T) {
 			ProviderID:   provider.GetProviderID(region, 100),
 			Region:       region,
 			Zone:         zone,
+			Tags:         []string{"tag1", "tag2"},
+			NodeClass:    "node-class-1",
 		},
 		KubeletConfiguration: &instance.KubeletConfiguration{
 			AllowedUnsafeSysctls:  []string{"kernel.msgmax", "kernel.shmmax"},
@@ -104,8 +113,10 @@ write_files:
         providerid: proxmox://test-region/100
         region: test-region
         zone: test-zone
-        tags: []
-        nodeclass: ""
+        tags:
+          - tag1
+          - tag2
+        nodeclass: node-class-1
       kubeletconfiguration:
         topologyManagerPolicy: best-effort
         allowedUnsafeSysctls:
@@ -138,6 +149,12 @@ write_files:
         - kernel.msgmax
         - kernel.shmmax
       providerID: proxmox://test-region/100
+  - path: /etc/kubernetes/kubelet-labels.conf
+    permissions: 0o600
+    defer: true
+    content: |
+      - tag1
+      - tag2
 `,
 		},
 	}

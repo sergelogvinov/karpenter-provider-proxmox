@@ -60,16 +60,17 @@ var genericMap = map[string]interface{}{
 	"get":      get,
 	"getValue": getValue,
 
-	// Encoding functions:
-	"b64enc": base64encode,
-	"b64dec": base64decode,
-
 	// Flow Control functions:
 	"empty":     empty,
 	"contains":  func(substr string, str string) bool { return strings.Contains(str, substr) },
 	"hasPrefix": func(substr string, str string) bool { return strings.HasPrefix(str, substr) },
 	"hasSuffix": func(substr string, str string) bool { return strings.HasSuffix(str, substr) },
 	"hasKey":    hasKey,
+	"hasTag":    hasTag,
+
+	// Encoding functions:
+	"b64enc": base64encode,
+	"b64dec": base64decode,
 
 	// Network functions:
 	"cidrhost":  cidrhost, // cidrhost "10.12.112.0/20" 16 -> 10.12.112.16
@@ -198,6 +199,20 @@ func hasKey(m map[string]interface{}, key string) bool {
 	_, ok := m[key]
 
 	return ok
+}
+
+func hasTag(tags []string, tag string) bool {
+	if empty(tags) || empty(tag) {
+		return false
+	}
+
+	for _, t := range tags {
+		if t == tag {
+			return true
+		}
+	}
+
+	return false
 }
 
 // quote returns a string representation of the given values, quoted.
