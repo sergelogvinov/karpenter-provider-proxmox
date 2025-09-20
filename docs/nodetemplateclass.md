@@ -45,6 +45,17 @@ spec:
   # Can be one of pc, q35
   machine: q35
 
+  agent:
+    # Enable/disable QEMU Guest Agent (Optional)
+    enabled: true
+    # Type of the guest agent (Optional)
+    # Can be one of virtio, isa
+    type: virtio
+    # Enable/disable freeze the filesystem on backup (Optional)
+    fsFreezeOnBackup: true
+    # Enable/disable fstrim for cloned disks (Optional)
+    fsTrimClonedDisks: false
+
   # CPU configuration.
   cpu:
     # CPU type (Optional)
@@ -80,6 +91,31 @@ spec:
       vlan: 15
       # Interface should be protected by the firewall (Optional)
       firewall: true
+
+      # IP configuration for this interface (Optional)
+      # If not specified, DHCP for IPv4 and Auto for IPv6 will be used.
+      # Address4 and Address6 must include the prefix length.
+      address4: 192.168.0.0/24
+      address6: fd00::/64
+      # Default gateway for IPv4 and IPv6 (Optional)
+      gateway4: 192.168.0.1
+      gateway6: fd00::1
+      # DNS servers for this interface (Optional)
+      dnsServers:
+        - 1.1.1.1
+        - 2001:4860:4860::8888
+
+  # List of PCI devices to attach to the VM template
+  # Supported Resource Mapping devices only.
+  pciDevices:
+    - # Mapping is the group
+      mapping: nvidia
+      # MDev Type (Optional)
+      mdev: nvidia-660
+      # Enable/disable PCIe (Optional)
+      pcie: true
+      # Use as default VGA (Optional)
+      xvga: false
 
   # Tags to apply to the template (Optional)
   tags:
