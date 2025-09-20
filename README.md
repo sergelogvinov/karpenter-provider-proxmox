@@ -29,6 +29,7 @@ Also, having free resources can provide more advantages than we might initially 
 * [x] Kubelet configuration tuning
 * [x] Predefined VM template selection
 * [x] Prepare VM templates via CRD
+* [x] Simple IPAM (IP Address Management) for VM network interfaceses
 * [x] VM optimization: Placement across zones
 * [x] VM optimization: Network performance
 * [ ] VM optimization: CPU pinning
