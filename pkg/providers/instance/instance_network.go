@@ -104,6 +104,10 @@ func (p *DefaultProvider) generateNetworkIPs(networkConfig *cloudinit.NetworkCon
 						if ipnet.Contains(nodenet.IP) {
 							nodenet.IP = nodeip
 							subnet = nodenet.String()
+
+							if iface.Gateway4 == "" {
+								iface.Gateway4 = nodeip.String()
+							}
 						}
 					}
 

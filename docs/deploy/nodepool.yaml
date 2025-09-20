@@ -43,9 +43,11 @@ spec:
     type: cdrom
     templatesRef:
       name: talos-template
+      # name: talos-template-empty
       namespace: kube-system
     valuesRef:
       name: talos-values
+      # name: talos-template-empty
       namespace: kube-system
   kubeletConfiguration:
     allowedUnsafeSysctls: [net.core.somaxconn]

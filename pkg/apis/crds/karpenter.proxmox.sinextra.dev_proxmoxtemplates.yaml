@@ -60,6 +60,30 @@ spec:
           spec:
             description: Spec defines the desired state of ProxmoxTemplate
             properties:
+              agent:
+                description: QemuGuestAgent enables the QEMU Guest Agent service in
+                  the VM template.
+                properties:
+                  enabled:
+                    default: false
+                    description: Enable QEMU Guest Agent service in the VM template.
+                    type: boolean
+                  fsFreezeOnBackup:
+                    description: FsFreezeOnBackup enables the file system freeze operation
+                      during backup.
+                    type: boolean
+                  fsTrimClonedDisks:
+                    description: FsTrimClonedDisks enables the discard/TRIM operation
+                      on cloned disks.
+                    type: boolean
+                  type:
+                    default: virtio
+                    description: Type of QEMU Guest Agent channel.
+                    enum:
+                    - virtio
+                    - isa
+                    type: string
+                type: object
               cpu:
                 default:
                   type: x86-64-v2-AES
@@ -101,14 +125,36 @@ spec:
                   description: Network defines the network configuration for the VM
                     template
                   properties:
+                    address4:
+                      description: Address4 ip address with prefix length
+                      minLength: 1
+                      type: string
+                    address6:
+                      description: Address6 ip address with prefix length
+                      minLength: 1
+                      type: string
                     bridge:
                       description: Bridge to attach the network device to.
                       minLength: 1
                       type: string
+                    dnsServers:
+                      description: DNS Servers
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
                     firewall:
                       description: Whether this interface should be protected by the
                         firewall.
                       type: boolean
+                    gateway4:
+                      description: Gateway4 Address
+                      minLength: 1
+                      type: string
+                    gateway6:
+                      description: Gateway6 Address
+                      minLength: 1
+                      type: string
                     model:
                       default: virtio
                       description: Network Card Model.
@@ -138,6 +184,32 @@ spec:
                   - bridge
                   type: object
                 minItems: 1
+                type: array
+              pciDevices:
+                description: |-
+                  PCIDevices is a list of PCI devices to attach to the VM template
+                  Supported Mapping devices only
+                items:
+                  description: PCIDevice defines a PCI device to attach to the VM
+                    template
+                  properties:
+                    mapping:
+                      description: Mapping is the PCI address of the device to attach.
+                      minLength: 1
+                      type: string
+                    mdev:
+                      description: MDev is the mediated device type to attach.
+                      type: string
+                    pcie:
+                      description: PCIE indicates if the device is a PCI Express device.
+                      type: boolean
+                    xvga:
+                      description: XVGA indicates that GPU set to primary display.
+                      type: boolean
+                  required:
+                  - mapping
+                  type: object
+                maxItems: 5
                 type: array
               region:
                 description: Region is the Proxmox Cloud region where VM template

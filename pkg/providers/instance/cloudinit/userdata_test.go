@@ -92,6 +92,11 @@ func TestUserData(t *testing.T) {
 			result: `#cloud-config
 hostname: hostname-1
 manage_etc_hosts: true
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - [ systemctl, enable, --now, qemu-guest-agent.service ]
 
 users:
   - name: karpenter

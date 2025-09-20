@@ -113,6 +113,14 @@ func SetNetworkConfig(ctx context.Context, vm *proxmox.VirtualMachine, networkCo
 
 	vmOptions := []proxmox.VirtualMachineOption{}
 
+	if len(networkConfig.NameServers) > 0 {
+		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "nameserver", Value: strings.Join(networkConfig.NameServers, " ")})
+	}
+
+	if len(networkConfig.SearchDomains) > 0 {
+		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "searchdomain", Value: strings.Join(networkConfig.SearchDomains, " ")})
+	}
+
 	for _, iface := range networkConfig.Interfaces {
 		key := fmt.Sprintf("ipconfig%s", iface.Name[3:])
 

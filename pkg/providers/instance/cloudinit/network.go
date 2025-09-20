@@ -34,7 +34,9 @@ config:
   {{- else if $iface.Address4 }}{{- range $iface.Address4 }}
   - type: static
     address: {{ . | quote }}
+    {{- if $iface.Gateway4 }}
     gateway: {{ $iface.Gateway4 | quote }}
+    {{- end }}
   {{- end }}{{- end }}
   {{- end }}
   {{- if $iface.DHCPv6 }}
@@ -42,7 +44,9 @@ config:
   {{- else if and $iface.Address6 $iface.Gateway6 }}{{- range $iface.Address6 }}
   - type: static6
     address: {{ . | quote }}
+    {{- if $iface.Gateway6 }}
     gateway: {{ $iface.Gateway6 | quote }}
+    {{- end }}
   {{- end }}
   {{- else if $iface.SLAAC }}{{- if $iface.NodeAddress6 }}
   - type: static6
@@ -58,11 +62,8 @@ config:
   {{- range .NameServers }}
   - {{ . | quote }}
   {{- end }}
-  {{- if .SearchDomains }}
-  search:
-  {{- range .SearchDomains }}
-  - {{ . | quote }}
-  {{- end }}
+  {{- with .SearchDomains }}
+  search: {{- . | toYaml | nindent 2 }}
   {{- end }}
 {{- end }}
 `
@@ -93,16 +94,23 @@ config:
 {{- range $iface.Address6 }}
       - {{ . | quote }}
 {{- end }}
+{{- if or $iface.Gateway4 $iface.Gateway6 }}
+      routes:
 {{- if $iface.Gateway4 }}
-      gateway4: {{ $iface.Gateway4 | quote }}
+      - to: default
+        via: {{ $iface.Gateway4 | quote }}
 {{- end }}
 {{- if $iface.Gateway6 }}
-      gateway6: {{ $iface.Gateway6 | quote }}
+      - to: default
+        via: {{ $iface.Gateway6 | quote }}
+{{- end }}
 {{- end }}
 {{- else if $iface.SLAAC }}{{- if $iface.NodeAddress6 }}
       addresses:
       - {{ $iface.NodeAddress6 | cidrslaac $iface.MacAddr | quote }}
-      gateway6: {{ $iface.NodeAddress6 | cidrhost | quote }}
+      routes:
+      - to: default
+        via: {{ $iface.NodeAddress6 | cidrhost | quote }}
   {{- end }}
 {{- end }}
 {{- if or $.NameServers $.SearchDomains }}
