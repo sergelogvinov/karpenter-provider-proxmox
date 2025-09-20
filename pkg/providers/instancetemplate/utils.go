@@ -246,6 +246,23 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 		vm["machine"] = templateClass.Spec.Machine
 	}
 
+	if templateClass.Spec.QemuGuestAgent != nil {
+		agent := goproxmox.VMQemuGuestAgent{
+			Enabled: *goproxmox.NewIntOrBool(templateClass.Spec.QemuGuestAgent.Enabled),
+		}
+
+		if templateClass.Spec.QemuGuestAgent.FsFreezeOnBackup != nil {
+			agent.FreezeFsOnBackup = goproxmox.NewIntOrBool(*templateClass.Spec.QemuGuestAgent.FsFreezeOnBackup)
+		}
+
+		if templateClass.Spec.QemuGuestAgent.FsTrimClonedDisks != nil {
+			agent.FsTrimClonedDisks = goproxmox.NewIntOrBool(*templateClass.Spec.QemuGuestAgent.FsTrimClonedDisks)
+		}
+
+		value, _ := agent.ToString()
+		vm["agent"] = value
+	}
+
 	if templateClass.Spec.CPU != nil {
 		vm["cpu"] = fmt.Sprintf("cputype=%s", templateClass.Spec.CPU.Type)
 
@@ -269,6 +286,8 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 	}
 
 	if templateClass.Spec.Network != nil {
+		dnsservers := []string{}
+
 		for i, iface := range templateClass.Spec.Network {
 			network := goproxmox.VMNetworkDevice{
 				Model:  "virtio",
@@ -301,8 +320,48 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 			value, _ := network.ToString()
 			vm[name] = value
 
+			config := goproxmox.VMCloudInitIPConfig{
+				IPv4:        iface.IPConfig.Address4,
+				IPv6:        iface.IPConfig.Address6,
+				GatewayIPv4: iface.IPConfig.Gateway4,
+				GatewayIPv6: iface.IPConfig.Gateway6,
+			}
+
+			ipconfig, _ := config.ToString()
+			if ipconfig == "" {
+				ipconfig = "ip=dhcp,ip6=auto"
+			}
+
 			inx := strings.TrimPrefix(name, "net")
-			vm[fmt.Sprintf("ipconfig%s", inx)] = "ip=dhcp,ip6=auto"
+			vm[fmt.Sprintf("ipconfig%s", inx)] = ipconfig
+
+			if iface.DNSServers != nil {
+				dnsservers = append(dnsservers, iface.DNSServers...)
+			}
+		}
+
+		if len(dnsservers) > 0 {
+			vm["nameserver"] = strings.Join(dnsservers, " ")
+		}
+	}
+
+	if len(templateClass.Spec.PCIDevices) > 0 {
+		for i, dev := range templateClass.Spec.PCIDevices {
+			pci := goproxmox.VMHostPCI{
+				Mapping: dev.Mapping,
+				MDev:    dev.MDev,
+			}
+
+			if dev.PCIe != nil {
+				pci.PCIe = goproxmox.NewIntOrBool(*dev.PCIe)
+			}
+
+			if dev.XVga != nil {
+				pci.XVGA = goproxmox.NewIntOrBool(*dev.XVga)
+			}
+
+			value, _ := pci.ToString()
+			vm[fmt.Sprintf("hostpci%d", i)] = value
 		}
 	}
 
@@ -314,10 +373,12 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 func defaultVirtualMachineTemplate() map[string]interface{} {
 	return map[string]interface{}{
 		"template": 1,
+		"acpi":     1,
 		"cores":    1,
 		"sockets":  1,
 		"numa":     0,
 		"memory":   1024,
+		"balloon":  0,
 		"machine":  "pc",
 		"bios":     "seabios",
 		"ostype":   "l26",

@@ -76,7 +76,7 @@ config:
   - "4.3.2.1"
   - "1.2.3.4"
   search:
-  - "example.com"
+  - example.com
 `,
 		},
 		{
@@ -241,8 +241,11 @@ func TestDefaultNetworkV2(t *testing.T) {
       addresses:
       - "192.168.1.100/24"
       - "2000:db8::5/64"
-      gateway4: "192.168.1.1"
-      gateway6: "2000:db8::1"
+      routes:
+      - to: default
+        via: "192.168.1.1"
+      - to: default
+        via: "2000:db8::1"
       nameservers:
         addresses:
         - "4.3.2.1"
@@ -347,7 +350,9 @@ func TestDefaultNetworkV2(t *testing.T) {
       mtu: 1500
       addresses:
       - "2001:db8:1:0:211:22ff:fe33:4455/64"
-      gateway6: "2001:db8:1::128"
+      routes:
+      - to: default
+        via: "2001:db8:1::128"
       nameservers:
         addresses:
         - "4.3.2.1"

@@ -12,7 +12,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.51.0
-	github.com/sergelogvinov/go-proxmox v0.0.0-20250917044054-1af35c793934
+	github.com/sergelogvinov/go-proxmox v0.0.0-20250920041813-b003ecb58e03
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0

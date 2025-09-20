@@ -20,15 +20,25 @@ spec:
   storageIDs:
     - local
     - system
+  agent:
+    enabled: true
   vga:
     type: serial0
   network:
     - name: net0
       bridge: vmbr0
       firewall: true
+      dnsServers:
+        - 2001:4860:4860::8888
     - name: net1
       bridge: vmbr1
       mtu: 1400
+      address4: "172.16.0.0/24"
+      address6: "fd60:172:16::/64"
+      dnsServers:
+        - 1.1.1.1
+  # pciDevices:
+  #   - mapping: network
   tags:
     - talos-k8s-proxmox
     - karpenter

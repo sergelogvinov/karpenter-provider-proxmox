@@ -75,6 +75,10 @@ type ProxmoxTemplateSpec struct {
 	// +optional
 	Machine string `json:"machine,omitempty"`
 
+	// QemuGuestAgent enables the QEMU Guest Agent service in the VM template.
+	// +optional
+	QemuGuestAgent *QemuGuestAgent `json:"agent,omitempty" hash:"ignore"`
+
 	// CPU configuration
 	// +kubebuilder:default={"type":"x86-64-v2-AES"}
 	// +optional
@@ -88,6 +92,12 @@ type ProxmoxTemplateSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +required
 	Network []Network `json:"network"`
+
+	// PCIDevices is a list of PCI devices to attach to the VM template
+	// Supported Mapping devices only
+	// +kubebuilder:validation:MaxItems:=5
+	// +optional
+	PCIDevices []PCIDevice `json:"pciDevices,omitempty"`
 
 	// Tags to apply to the VM template
 	// +kubebuilder:validation:MaxItems:=10
@@ -117,6 +127,27 @@ type SourceImage struct {
 	// +kubebuilder:validation:Enum=md5;sha1;sha224;sha256;sha384;sha512
 	// +optional
 	ChecksumType string `json:"checksumType,omitempty"`
+}
+
+type QemuGuestAgent struct {
+	// Enable QEMU Guest Agent service in the VM template.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Type of QEMU Guest Agent channel.
+	// +kubebuilder:validation:Enum=virtio;isa
+	// +kubebuilder:default=virtio
+	// +optional
+	Type string `json:"type,omitempty"`
+
+	// FsFreezeOnBackup enables the file system freeze operation during backup.
+	// +optional
+	FsFreezeOnBackup *bool `json:"fsFreezeOnBackup,omitempty"`
+
+	// FsTrimClonedDisks enables the discard/TRIM operation on cloned disks.
+	// +optional
+	FsTrimClonedDisks *bool `json:"fsTrimClonedDisks,omitempty"`
 }
 
 // CPU defines the CPU configuration for the VM template
@@ -150,6 +181,9 @@ type VGA struct {
 
 // Network defines the network configuration for the VM template
 type Network struct {
+	// IPConfig defines the IP configuration for this network interface.
+	IPConfig `json:",inline"`
+
 	// Name of the network interface.
 	// +kubebuilder:validation:MinLength=1
 	// +optional
@@ -181,6 +215,54 @@ type Network struct {
 	// Whether this interface should be protected by the firewall.
 	// +optional
 	Firewall *bool `json:"firewall,omitempty"`
+}
+
+// IPConfig defines the IP configuration for a network interface.
+type IPConfig struct {
+	// Address4 ip address with prefix length
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Address4 string `json:"address4,omitempty"`
+
+	// Address6 ip address with prefix length
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Address6 string `json:"address6,omitempty"`
+
+	// Gateway4 Address
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Gateway4 string `json:"gateway4,omitempty"`
+
+	// Gateway6 Address
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Gateway6 string `json:"gateway6,omitempty"`
+
+	// DNS Servers
+	// +kubebuilder:validation:MinItems=1
+	// +optional
+	DNSServers []string `json:"dnsServers"`
+}
+
+// PCIDevice defines a PCI device to attach to the VM template
+type PCIDevice struct {
+	// Mapping is the PCI address of the device to attach.
+	// +kubebuilder:validation:MinLength=1
+	// +required
+	Mapping string `json:"mapping,omitempty"`
+
+	// MDev is the mediated device type to attach.
+	// +optional
+	MDev string `json:"mdev,omitempty"`
+
+	// PCIE indicates if the device is a PCI Express device.
+	// +optional
+	PCIe *bool `json:"pcie,omitempty"`
+
+	// XVGA indicates that GPU set to primary display.
+	// +optional
+	XVga *bool `json:"xvga,omitempty"`
 }
 
 func (in *ProxmoxTemplate) Hash() string {
