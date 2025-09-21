@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.6.0...v0.7.0) (2025-09-21)
+
+
+### Features
+
+* simple ipam ([22aecbd](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/22aecbd1f6db0c424dc9be134ca93e80a5ada3a1))
+* template options agent, ipconfig, hostpci ([1fe7495](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/1fe74955b1b77204bc350a6320744e947265155e))
+
 ## [0.6.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.5.0...v0.6.0) (2025-09-15)
 
 
