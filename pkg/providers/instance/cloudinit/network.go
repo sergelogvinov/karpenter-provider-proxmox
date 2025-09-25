@@ -97,11 +97,11 @@ config:
 {{- if or $iface.Gateway4 $iface.Gateway6 }}
       routes:
 {{- if $iface.Gateway4 }}
-      - to: default
+      - to: "0.0.0.0/0"
         via: {{ $iface.Gateway4 | quote }}
 {{- end }}
 {{- if $iface.Gateway6 }}
-      - to: default
+      - to: "::/0"
         via: {{ $iface.Gateway6 | quote }}
 {{- end }}
 {{- end }}
@@ -109,7 +109,7 @@ config:
       addresses:
       - {{ $iface.NodeAddress6 | cidrslaac $iface.MacAddr | quote }}
       routes:
-      - to: default
+      - to: "::/0"
         via: {{ $iface.NodeAddress6 | cidrhost | quote }}
   {{- end }}
 {{- end }}

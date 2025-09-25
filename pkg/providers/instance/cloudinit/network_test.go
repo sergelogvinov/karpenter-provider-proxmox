@@ -242,9 +242,9 @@ func TestDefaultNetworkV2(t *testing.T) {
       - "192.168.1.100/24"
       - "2000:db8::5/64"
       routes:
-      - to: default
+      - to: "0.0.0.0/0"
         via: "192.168.1.1"
-      - to: default
+      - to: "::/0"
         via: "2000:db8::1"
       nameservers:
         addresses:
@@ -351,7 +351,7 @@ func TestDefaultNetworkV2(t *testing.T) {
       addresses:
       - "2001:db8:1:0:211:22ff:fe33:4455/64"
       routes:
-      - to: default
+      - to: "::/0"
         via: "2001:db8:1::128"
       nameservers:
         addresses:
