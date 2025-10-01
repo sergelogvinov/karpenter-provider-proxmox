@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:1.18
 ########################################
 
-FROM golang:1.25-bookworm AS develop
+FROM golang:1.25.1-bookworm AS develop
 
 WORKDIR /src
 COPY ["go.mod", "go.sum", "/src"]
