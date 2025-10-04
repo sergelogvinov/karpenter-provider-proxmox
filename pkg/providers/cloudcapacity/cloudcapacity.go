@@ -187,7 +187,8 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 
 			node, err := cl.Node(ctx, item.Node)
 			if err != nil {
-				return fmt.Errorf("cannot find node with name %s in region %s: %w", item.Node, region, err)
+				log.Error(err, "Failed to find node in region", "node", item.Node, "region", region)
+				continue
 			}
 
 			key := fmt.Sprintf("%s/%s", region, item.Node)
