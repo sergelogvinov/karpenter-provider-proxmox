@@ -19,10 +19,10 @@ package v1alpha1
 import "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis"
 
 const (
-	// Version of the hash for ProxmoxNodeClass
+	// ProxmoxNodeClassHashVersion is the version of the hash for ProxmoxNodeClass
 	ProxmoxNodeClassHashVersion = "v1"
 
-	// Version of the hash for ProxmoxNodeTemplateClass
+	// ProxmoxTemplateClassHashVersion is the version of the hash for ProxmoxNodeTemplateClass
 	ProxmoxTemplateClassHashVersion = "v1"
 
 	// AnnotationProxmoxNodeClassHash is the annotation key for the hash of the ProxmoxNodeClass

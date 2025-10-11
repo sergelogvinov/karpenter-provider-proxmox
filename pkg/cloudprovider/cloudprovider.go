@@ -293,7 +293,7 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClai
 	return c.isNodeClassDrifted(ctx, nodeClaim, nodeClass)
 }
 
-// RepairPolicy is for CloudProviders to define a set Unhealthy condition for Karpenter
+// RepairPolicies is for CloudProviders to define a set Unhealthy condition for Karpenter
 // to monitor on the node.
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{

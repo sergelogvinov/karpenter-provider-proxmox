@@ -54,7 +54,9 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			cloudProvider,
+			proxmoxCloudProvider,
 			clusterState,
+			op.InstanceTypeStore,
 		)...).
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
