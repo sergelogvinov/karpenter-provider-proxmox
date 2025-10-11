@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	lop "github.com/samber/lo/parallel"
 	"go.uber.org/multierr"
@@ -29,7 +30,6 @@ import (
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
@@ -51,7 +51,7 @@ func (c *Controller) Name() string {
 	return "providers.cloudcapacity.node"
 }
 
-func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	work := []func(ctx context.Context) error{
@@ -67,10 +67,10 @@ func (c *Controller) Reconcile(ctx context.Context) (reconcile.Result, error) {
 	})
 
 	if err := multierr.Combine(errs...); err != nil {
-		return reconcile.Result{}, fmt.Errorf("updating cloudcapacity, %w", err)
+		return reconciler.Result{}, fmt.Errorf("updating cloudcapacity, %w", err)
 	}
 
-	return reconcile.Result{RequeueAfter: scanPeriod}, nil
+	return reconciler.Result{RequeueAfter: scanPeriod}, nil
 }
 
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {

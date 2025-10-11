@@ -25,14 +25,17 @@ import (
 const (
 	TerminationFinalizer = apis.Group + "/termination"
 
-	// Labels that can be selected on and are propagated to the node
-	LabelInstanceFamily  = apis.Group + "/instance-family"   // c1, s1, m1, e1
+	// LabelInstanceFamily is the instance family, e.g. c1, s1, m1, e1
+	LabelInstanceFamily = apis.Group + "/instance-family" // c1, s1, m1, e1
+	// LabelInstanceCPUType is the CPU type, e.g. host, kvm64, Broadwell, Skylake
 	LabelInstanceCPUType = apis.Group + "/instance-cpu-type" // host, kvm64, Broadwell, Skylake
+	// LabelInstanceImageID is the image ID
 	LabelInstanceImageID = apis.Group + "/instance-image-id" // image ID
 
+	// LabelBootstrapToken is the bootstrap token name used to join the node to the cluster
 	LabelBootstrapToken = apis.Group + "/bootstrap-token" // bootstrap token
 
-	// github.com/awslabs/eks-node-viewer label so that it shows up.
+	// LabelNodeViewer is the label used by github.com/awslabs/eks-node-viewer
 	LabelNodeViewer = "eks-node-viewer/instance-price"
 )
 

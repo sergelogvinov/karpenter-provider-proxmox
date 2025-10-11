@@ -110,7 +110,7 @@ func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool
 	return nil, ErrClustersNotFound
 }
 
-// GetProxmoxCluster returns supported regions.
+// GetRegions returns supported regions.
 func (c *ProxmoxPool) GetRegions() []string {
 	regions := make([]string, 0, len(c.clients))
 

@@ -121,7 +121,7 @@ type KubeletConfiguration struct {
 	EvictionHard map[string]string `yaml:"evictionHard,omitempty"`
 }
 
-// kubernetes repo pkg/kubelet/eviction/defaults_others.go
+// DefaultEvictionHard is the default eviction hard thresholds for Kubernetes
 var DefaultEvictionHard = map[string]string{
 	"memory.available":  "100Mi",
 	"nodefs.available":  "10%",

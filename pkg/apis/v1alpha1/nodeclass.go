@@ -28,11 +28,12 @@ import (
 )
 
 const (
-	// Placement strategy
+	// PlacementStrategyAvailabilityFirst strategy prioritizes zone availability over even distribution
 	PlacementStrategyAvailabilityFirst = "AvailabilityFirst"
-	PlacementStrategyBalanced          = "Balanced"
+	// PlacementStrategyBalanced strategy prioritizes even distribution across zones
+	PlacementStrategyBalanced = "Balanced"
 
-	// Resource names for ProxmoxNodeClass status
+	// ResourceZones names for ProxmoxNodeClass status
 	ResourceZones corev1.ResourceName = "zones"
 )
 
