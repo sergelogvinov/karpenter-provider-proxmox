@@ -64,6 +64,10 @@ func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.R
 
 	err := c.nodeIpamProvider.OccupyNodeIPs(n)
 	if err != nil {
+		if err == nodeipam.ErrNoSubnetFound {
+			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
+		}
+
 		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, err
 	}
 

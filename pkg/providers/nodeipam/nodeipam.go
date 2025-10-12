@@ -156,7 +156,7 @@ func (p *DefaultProvider) ReleaseCIDR(subnet string) error {
 
 func (p *DefaultProvider) OccupyNodeIPs(node *corev1.Node) error {
 	if len(p.subnets) == 0 {
-		return fmt.Errorf("no subnets available for IPAM")
+		return ErrNoSubnetFound
 	}
 
 	return p.updateNodeIPs(node, func(subnet *ipam.IPPool, ip net.IP) error {
@@ -194,7 +194,7 @@ func (s *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
 
 func (p *DefaultProvider) ReleaseNodeIPs(node *corev1.Node) error {
 	if len(p.subnets) == 0 {
-		return fmt.Errorf("no subnets available for IPAM")
+		return ErrNoSubnetFound
 	}
 
 	return p.updateNodeIPs(node, func(subnet *ipam.IPPool, ip net.IP) error {
