@@ -40,6 +40,26 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 			network:  cloudinit.NetworkConfig{},
 		},
 		{
+			name: "1-interface",
+			template: &proxmox.VirtualMachineConfig{
+				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1,tag=70,trunks=70,100,200",
+				IPConfig0:  "ip=dhcp,ip6=auto",
+				Nameserver: "1.1.1.1 2001:4860:4860::8888",
+			},
+			network: cloudinit.NetworkConfig{
+				Interfaces: []cloudinit.InterfaceConfig{
+					{
+						Name:    "eth0",
+						MacAddr: "BC:24:11:CD:B9:41",
+						DHCPv4:  true,
+						SLAAC:   true,
+						MTU:     1,
+					},
+				},
+				NameServers: []string{"1.1.1.1", "2001:4860:4860::8888"},
+			},
+		},
+		{
 			name: "2-interfaces",
 			template: &proxmox.VirtualMachineConfig{
 				Net0:         "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1500",
@@ -56,11 +76,13 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 						MacAddr: "BC:24:11:CD:B9:41",
 						DHCPv4:  true,
 						SLAAC:   true,
+						MTU:     1500,
 					},
 					{
 						Name:     "eth1",
 						MacAddr:  "BC:24:11:EE:9A:23",
 						Address4: []string{"1.2.3.4/24"},
+						MTU:      1400,
 					},
 				},
 				NameServers:   []string{"1.1.1.1", "2001:4860:4860::8888"},

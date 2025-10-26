@@ -65,6 +65,10 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 			MacAddr: params.Virtio,
 		}
 
+		if params.MTU != nil && *params.MTU != 0 {
+			iface.MTU = uint32(*params.MTU)
+		}
+
 		if i, ok := nodeIfaces[params.Bridge]; ok {
 			iface.NodeAddress4 = i.Address4
 			iface.NodeAddress6 = i.Address6
