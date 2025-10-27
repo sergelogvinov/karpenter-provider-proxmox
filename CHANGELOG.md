@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.0...v0.7.1) (2025-10-27)
+
+
+### Bug Fixes
+
+* continue node scanning even if some nodes are inaccessible ([a823d87](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a823d87f2c6fba5bdfb2efd87d89cc34cfc698dd))
+* default mtu size ([375eacf](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/375eacf56572dbd246a4f0a7ad0e5bd7973881b2))
+* find instancetype by capacity ([4f97f52](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/4f97f52a0e82fe12043975833c572e145d023ee2))
+* ipam subnets do not exists warning ([905e1bf](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/905e1bfffdccd6747482ec0fa5a503650488a6f6))
+* network trunk and mtu options ([f564db2](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f564db2df553d7430fdbe7b11c7b4c42435b2721))
+* set default gateway as cidr ([ecfb26d](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/ecfb26d01bcf4670ee361a9ca5ffe6a2e61eb74a))
+
 ## [0.7.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.6.0...v0.7.0) (2025-09-21)
 
 
