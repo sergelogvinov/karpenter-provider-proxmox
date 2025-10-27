@@ -231,6 +231,10 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 			log.V(1).Info("Failed to resolve instance type from node", "node", node.Name, "error", err)
 		}
 
+		if instanceType != nil {
+			log.V(1).Info("instanceType claim", "node", node.Name, "instanceTypeName", instanceType.Name, "instanceTypeLabel", node.Labels[corev1.LabelInstanceTypeStable])
+		}
+
 		nc, err := c.nodeToNodeClaim(ctx, instanceType, &node)
 		if err != nil {
 			log.Error(err, "Failed to convert nodeclaim from node", "node", node.Name)
