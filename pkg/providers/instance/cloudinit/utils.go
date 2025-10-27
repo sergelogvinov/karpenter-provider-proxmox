@@ -65,7 +65,7 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 			MacAddr: params.Virtio,
 		}
 
-		if params.MTU != nil && *params.MTU != 0 {
+		if params.MTU != nil {
 			iface.MTU = uint32(*params.MTU)
 		}
 
@@ -74,6 +74,14 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 			iface.NodeAddress6 = i.Address6
 			iface.NodeGateway4 = i.Gateway4
 			iface.NodeGateway6 = i.Gateway6
+
+			if iface.MTU == 0 || iface.MTU == 1 {
+				iface.MTU = i.MTU
+			}
+		}
+
+		if iface.MTU == 0 {
+			iface.MTU = 1500
 		}
 
 		ipparams := goproxmox.VMCloudInitIPConfig{}

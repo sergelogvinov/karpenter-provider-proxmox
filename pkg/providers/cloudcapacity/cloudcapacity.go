@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -124,6 +125,7 @@ type NetworkIfaceInfo struct {
 	Address6 string
 	Gateway4 string
 	Gateway6 string
+	MTU      uint32
 }
 
 type StorageOption func(*NodeStorageCapacityInfo)
@@ -226,8 +228,20 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 			ifaces := map[string]NetworkIfaceInfo{}
 
 			for _, net := range networks {
-				if net.Active == 0 || (net.CIDR6 == "" && net.CIDR == "") {
+				if net.Active == 0 {
 					continue
+				}
+
+				mtu := 1500
+				if net.MTU != "" {
+					parsed, err := strconv.Atoi(net.MTU)
+					if err != nil {
+						log.Error(err, "Failed to parse MTU, using default value", "node", item.Node, "iface", net.Iface, "mtu", net.MTU)
+
+						parsed = 1500
+					}
+
+					mtu = parsed
 				}
 
 				ifaces[net.Iface] = NetworkIfaceInfo{
@@ -235,6 +249,7 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 					Address6: net.CIDR6,
 					Gateway4: net.Gateway,
 					Gateway6: net.Gateway6,
+					MTU:      uint32(mtu),
 				}
 			}
 

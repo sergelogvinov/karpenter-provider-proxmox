@@ -23,11 +23,18 @@ import (
 	"github.com/luthermonson/go-proxmox"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 )
 
 func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 	assert := assert.New(t)
+
+	nodeIfaces := map[string]cloudcapacity.NetworkIfaceInfo{
+		"vmbr0": {
+			MTU: 9000,
+		},
+	}
 
 	tests := []struct {
 		name     string
@@ -40,7 +47,7 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 			network:  cloudinit.NetworkConfig{},
 		},
 		{
-			name: "1-interface",
+			name: "1-interface-defaults-with-mtu",
 			template: &proxmox.VirtualMachineConfig{
 				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1,tag=70,trunks=70,100,200",
 				IPConfig0:  "ip=dhcp,ip6=auto",
@@ -53,7 +60,47 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 						MacAddr: "BC:24:11:CD:B9:41",
 						DHCPv4:  true,
 						SLAAC:   true,
-						MTU:     1,
+						MTU:     9000,
+					},
+				},
+				NameServers: []string{"1.1.1.1", "2001:4860:4860::8888"},
+			},
+		},
+		{
+			name: "1-interface-defaults",
+			template: &proxmox.VirtualMachineConfig{
+				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,tag=70,trunks=70,100,200",
+				IPConfig0:  "ip=dhcp,ip6=auto",
+				Nameserver: "1.1.1.1 2001:4860:4860::8888",
+			},
+			network: cloudinit.NetworkConfig{
+				Interfaces: []cloudinit.InterfaceConfig{
+					{
+						Name:    "eth0",
+						MacAddr: "BC:24:11:CD:B9:41",
+						DHCPv4:  true,
+						SLAAC:   true,
+						MTU:     9000,
+					},
+				},
+				NameServers: []string{"1.1.1.1", "2001:4860:4860::8888"},
+			},
+		},
+		{
+			name: "1-interface-defaults-no-mtu-defined-in-node-iface",
+			template: &proxmox.VirtualMachineConfig{
+				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr1,firewall=1,tag=70,trunks=70,100,200",
+				IPConfig0:  "ip=dhcp,ip6=auto",
+				Nameserver: "1.1.1.1 2001:4860:4860::8888",
+			},
+			network: cloudinit.NetworkConfig{
+				Interfaces: []cloudinit.InterfaceConfig{
+					{
+						Name:    "eth0",
+						MacAddr: "BC:24:11:CD:B9:41",
+						DHCPv4:  true,
+						SLAAC:   true,
+						MTU:     1500,
 					},
 				},
 				NameServers: []string{"1.1.1.1", "2001:4860:4860::8888"},
@@ -93,7 +140,7 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.name), func(t *testing.T) {
-			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template, nil)
+			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template, nodeIfaces)
 			assert.Equal(tt.network, result)
 		})
 	}
