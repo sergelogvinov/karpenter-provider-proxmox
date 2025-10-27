@@ -19,6 +19,7 @@ package proxmox
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/samber/lo"
 
@@ -54,6 +55,26 @@ func (c *CloudProvider) resolveInstanceTypeFromNode(ctx context.Context, node *c
 		if err == nil {
 			return instanceType, nil
 		}
+	}
+
+	// InstanceType was not found, try to match by capacity
+	list := c.instanceTypeProvider.ListWithFilter(ctx, func(it *cloudprovider.InstanceType) bool {
+		resources := it.Capacity.Cpu().Cmp(*node.Status.Capacity.Cpu()) >= 0 &&
+			it.Capacity.Memory().Cmp(*node.Status.Capacity.Memory()) >= 0
+
+		if it.Capacity.Pods() != nil {
+			resources = resources && it.Capacity.Pods().Cmp(*node.Status.Capacity.Pods()) >= 0
+		}
+
+		return resources
+	})
+
+	if len(list) > 0 {
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Offerings.Cheapest().Price < list[j].Offerings.Cheapest().Price
+		})
+
+		return list[0], nil
 	}
 
 	return nil, fmt.Errorf("instanceType not found for node %s", node.Name)

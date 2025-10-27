@@ -267,6 +267,10 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 
 	log.V(1).Info("Syncing finished", "nodes", len(capacityInfo))
 
+	for key, info := range capacityInfo {
+		log.V(4).Info("Node capacity available", "node", key, "cpu", info.Allocatable.Cpu().String(), "memory", info.Allocatable.Memory().String())
+	}
+
 	p.capacityInfo = capacityInfo
 	p.networkInfo = networkIfaceInfo
 	p.zoneList = zoneList

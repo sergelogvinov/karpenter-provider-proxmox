@@ -37,6 +37,7 @@ import (
 
 type Provider interface {
 	List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error)
+	ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType
 	Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error)
 
 	UpdateInstanceTypes(context.Context) error
@@ -85,6 +86,34 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 	}
 
 	return instanceTypes, nil
+}
+
+func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType {
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
+
+	filtered := []*cloudprovider.InstanceType{}
+
+	for _, item := range p.instanceTypesInfo {
+		if filter(item) {
+			instanceType := &cloudprovider.InstanceType{
+				Name:         item.Name,
+				Requirements: p.computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
+				Capacity:     item.Capacity.DeepCopy(),
+				Overhead: &cloudprovider.InstanceTypeOverhead{
+					KubeReserved:      item.Overhead.KubeReserved.DeepCopy(),
+					SystemReserved:    item.Overhead.SystemReserved.DeepCopy(),
+					EvictionThreshold: item.Overhead.EvictionThreshold.DeepCopy(),
+				},
+			}
+
+			p.createOfferings(instanceType, p.cloudCapacityProvider.Regions())
+
+			filtered = append(filtered, instanceType)
+		}
+	}
+
+	return filtered
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error) {

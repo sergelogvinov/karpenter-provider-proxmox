@@ -45,6 +45,10 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, templateClass *v1alpha
 		return reconcile.Result{}, nil
 	}
 
+	if err := i.instanceTemplateProvider.UpdateInstanceTemplates(ctx); err != nil {
+		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil //nolint:nilerr
+	}
+
 	templates := i.instanceTemplateProvider.ListWithFilter(ctx, func(info *instancetemplate.InstanceTemplateInfo) bool {
 		if (templateClass.Spec.TemplateName != "" && info.Name != templateClass.Spec.TemplateName) ||
 			(templateClass.Spec.Region != "" && info.Region != templateClass.Spec.Region) {
