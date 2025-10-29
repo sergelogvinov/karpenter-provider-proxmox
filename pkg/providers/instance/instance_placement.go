@@ -21,8 +21,13 @@ import (
 	"math/rand/v2"
 	"sort"
 
+	"github.com/samber/lo"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
+	corev1 "k8s.io/api/core/v1"
+
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
@@ -76,4 +81,46 @@ func orderInstanceTypesByPrice(instanceTypes []*cloudprovider.InstanceType, requ
 	})
 
 	return instanceTypes
+}
+
+func getValuesByKey(instanceType *cloudprovider.InstanceType, key string, defaults []string) []string {
+	requestedKey := instanceType.Offerings.Available()
+	if len(defaults) != 0 {
+		requestedKey = requestedKey.Compatible(
+			scheduling.NewRequirements(
+				scheduling.NewRequirement(key, corev1.NodeSelectorOpIn, defaults...),
+			),
+		)
+	}
+
+	res := lo.Map(requestedKey.Available(), func(offering *cloudprovider.Offering, _ int) []string {
+		res := offering.Requirements.Get(key).Values()
+		if len(res) == 0 {
+			return defaults
+		}
+
+		return res
+	})
+
+	return lo.Uniq(lo.Flatten(res))
+}
+
+func getCapacityType(nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, region, zone string) string {
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+	requirements[corev1.LabelTopologyRegion] = scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region)
+	requirements[corev1.LabelTopologyZone] = scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone)
+
+	capacityTypes := requirements.Get(karpv1.CapacityTypeLabelKey).Values()
+	for _, capacityType := range []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeSpot} {
+		if !lo.Contains(capacityTypes, capacityType) {
+			continue
+		}
+
+		requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType)
+		if len(instanceType.Offerings.Available().Compatible(requirements)) != 0 {
+			return capacityType
+		}
+	}
+
+	return karpv1.CapacityTypeOnDemand
 }

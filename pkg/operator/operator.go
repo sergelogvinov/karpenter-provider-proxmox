@@ -84,6 +84,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
+	if err = instanceTypeProvider.UpdateInstanceTypeOfferings(ctx); err != nil {
+		log.FromContext(ctx).Error(err, "failed to update instance type offerings")
+
+		os.Exit(1)
+	}
+
 	instanceProvider, err := instance.NewProvider(
 		ctx,
 		operator.KubernetesInterface,

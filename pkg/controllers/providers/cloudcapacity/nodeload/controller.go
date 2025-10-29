@@ -27,6 +27,7 @@ import (
 	"go.uber.org/multierr"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -39,11 +40,13 @@ const (
 
 type Controller struct {
 	cloudCapacityProvider cloudcapacity.Provider
+	instanceTypeProvider  instancetype.Provider
 }
 
-func NewController(cloudCapacityProvider cloudcapacity.Provider) *Controller {
+func NewController(cloudCapacityProvider cloudcapacity.Provider, instanceTypeProvider instancetype.Provider) *Controller {
 	return &Controller{
 		cloudCapacityProvider: cloudCapacityProvider,
+		instanceTypeProvider:  instanceTypeProvider,
 	}
 }
 
@@ -56,6 +59,7 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 
 	work := []func(ctx context.Context) error{
 		c.cloudCapacityProvider.UpdateNodeLoad,
+		c.instanceTypeProvider.UpdateInstanceTypeOfferings,
 	}
 
 	errs := make([]error, len(work))

@@ -116,11 +116,11 @@ func (c CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim) 
 		return nil, fmt.Errorf("resolving instance types, %w", err)
 	}
 
+	log.Info("Resolved acceptable instance types", "count", len(instanceTypes))
+
 	if len(instanceTypes) == 0 {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all requested instance types were unavailable during launch"))
 	}
-
-	log.Info("Successfully resolved instance types", "count", len(instanceTypes))
 
 	node, err := c.instanceProvider.Create(ctx, nodeClaim, nodeClass, instanceTypes)
 	if err != nil {
@@ -232,7 +232,7 @@ func (c CloudProvider) List(ctx context.Context) ([]*karpv1.NodeClaim, error) {
 		}
 
 		if instanceType != nil {
-			log.V(1).Info("instanceType claim", "node", node.Name, "instanceTypeName", instanceType.Name, "instanceTypeLabel", node.Labels[corev1.LabelInstanceTypeStable])
+			log.V(4).Info("instanceType claim", "node", node.Name, "instanceTypeName", instanceType.Name, "instanceTypeLabel", node.Labels[corev1.LabelInstanceTypeStable])
 		}
 
 		nc, err := c.nodeToNodeClaim(ctx, instanceType, &node)

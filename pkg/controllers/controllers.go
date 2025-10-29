@@ -36,6 +36,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 
 	"k8s.io/utils/clock"
@@ -52,6 +53,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	kubernetesBootstrapProvider bootstrap.Provider,
 	instanceProvider instance.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
+	instanceTypeProvider instancetype.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
 	nodeIpamProvider nodeipam.Provider,
 ) []controller.Controller {
@@ -65,7 +67,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodetemplateunmanagedclasshash.NewController(kubeClient),
 		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
-		cloudcapacitynodeload.NewController(cloudCapacityProvider),
+		cloudcapacitynodeload.NewController(cloudCapacityProvider, instanceTypeProvider),
 		nodeipamctl.NewController(kubeClient, nodeIpamProvider),
 	}
 
