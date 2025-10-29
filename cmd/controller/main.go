@@ -68,6 +68,7 @@ func main() {
 			op.KubernetesBootstrapProvider,
 			op.InstanceProvider,
 			op.InstanceTemplateProvider,
+			op.InstanceTypeProvider,
 			op.CloudCapacityProvider,
 			op.NodeIpamController,
 		)...).

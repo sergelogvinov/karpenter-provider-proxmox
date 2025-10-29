@@ -22,15 +22,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 type InstanceTypeStatic struct {
 	Name         string                              `json:"name,omitempty"`
 	Capacity     corev1.ResourceList                 `json:"capacity,omitempty"`
+	CapacityType string                              `json:"capacitytype,omitempty"`
 	Overhead     *cloudprovider.InstanceTypeOverhead `json:"overhead,omitempty"`
-	Requirements scheduling.Requirements             `json:"requirements,omitempty"`
+	Offerings    cloudprovider.Offerings             `json:"offerings,omitempty"`
 }
 
 type InstanceTypeOptions struct {
@@ -69,8 +70,9 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 			}
 
 			instanceType := InstanceTypeStatic{
-				Name:     makeGenericInstanceTypeName(cpu, memFactor),
-				Capacity: capacity,
+				Name:         makeGenericInstanceTypeName(cpu, memFactor),
+				Capacity:     capacity,
+				CapacityType: karpv1.CapacityTypeOnDemand,
 			}
 
 			if o.KubeletOverhead || o.SystemOverhead || o.EvictionThreshold {

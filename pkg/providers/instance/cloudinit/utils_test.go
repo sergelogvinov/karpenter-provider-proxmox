@@ -141,7 +141,10 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprint(tt.name), func(t *testing.T) {
 			result := cloudinit.GetNetworkConfigFromVirtualMachineConfig(tt.template, nodeIfaces)
-			assert.Equal(tt.network, result)
+
+			assert.ElementsMatch(tt.network.Interfaces, result.Interfaces)
+			assert.Equal(tt.network.NameServers, result.NameServers)
+			assert.Equal(tt.network.SearchDomains, result.SearchDomains)
 		})
 	}
 }

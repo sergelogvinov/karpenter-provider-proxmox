@@ -24,12 +24,16 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-logr/logr"
+	"github.com/samber/lo"
+
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 
 	corev1 "k8s.io/api/core/v1"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -48,44 +52,25 @@ type DefaultProvider struct {
 	cloudCapacityProvider cloudcapacity.Provider
 
 	muInstanceTypes   sync.RWMutex
-	instanceTypesInfo []*cloudprovider.InstanceType
+	instanceTypesInfo []*InstanceTypeStatic
+
+	log logr.Logger
 }
 
 func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
+	log := log.FromContext(ctx).WithName("instancetype")
+
 	return &DefaultProvider{
 		cloudCapacityProvider: cloudCapacityProvider,
 		instanceTypesInfo:     loadDefaultInstanceTypes(),
+		log:                   log,
 	}
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
-	p.muInstanceTypes.RLock()
-	defer p.muInstanceTypes.RUnlock()
-
-	regions := p.cloudCapacityProvider.Regions()
-	if nodeClass.Spec.Region != "" {
-		regions = []string{nodeClass.Spec.Region}
-	}
-
-	instanceTypes := []*cloudprovider.InstanceType{}
-	for _, item := range p.instanceTypesInfo {
-		instanceType := &cloudprovider.InstanceType{
-			Name:         item.Name,
-			Requirements: p.computeRequirements(item.Name, item.Offerings, regions),
-			Capacity:     item.Capacity.DeepCopy(),
-			Overhead: &cloudprovider.InstanceTypeOverhead{
-				KubeReserved:      item.Overhead.KubeReserved.DeepCopy(),
-				SystemReserved:    item.Overhead.SystemReserved.DeepCopy(),
-				EvictionThreshold: item.Overhead.EvictionThreshold.DeepCopy(),
-			},
-		}
-
-		p.createOfferings(instanceType, regions)
-
-		instanceTypes = append(instanceTypes, instanceType)
-	}
-
-	return instanceTypes, nil
+	return p.ListWithFilter(ctx, func(_ *cloudprovider.InstanceType) bool {
+		return true
+	}), nil
 }
 
 func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType {
@@ -95,19 +80,25 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloud
 	filtered := []*cloudprovider.InstanceType{}
 
 	for _, item := range p.instanceTypesInfo {
-		if filter(item) {
-			instanceType := &cloudprovider.InstanceType{
-				Name:         item.Name,
-				Requirements: p.computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
-				Capacity:     item.Capacity.DeepCopy(),
-				Overhead: &cloudprovider.InstanceTypeOverhead{
+		instanceType := &cloudprovider.InstanceType{
+			Name:      item.Name,
+			Offerings: item.Offerings.DeepCopy(),
+			Capacity:  item.Capacity.DeepCopy(),
+			Overhead: func() *cloudprovider.InstanceTypeOverhead {
+				if item.Overhead == nil {
+					return &cloudprovider.InstanceTypeOverhead{}
+				}
+
+				return &cloudprovider.InstanceTypeOverhead{
 					KubeReserved:      item.Overhead.KubeReserved.DeepCopy(),
 					SystemReserved:    item.Overhead.SystemReserved.DeepCopy(),
 					EvictionThreshold: item.Overhead.EvictionThreshold.DeepCopy(),
-				},
-			}
+				}
+			}(),
+		}
 
-			p.createOfferings(instanceType, p.cloudCapacityProvider.Regions())
+		if filter(instanceType) {
+			instanceType.Requirements = computeRequirements(item.Name, instanceType.Offerings, p.cloudCapacityProvider.Regions())
 
 			filtered = append(filtered, instanceType)
 		}
@@ -117,31 +108,15 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloud
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error) {
-	p.muInstanceTypes.RLock()
-	defer p.muInstanceTypes.RUnlock()
+	filtered := p.ListWithFilter(ctx, func(item *cloudprovider.InstanceType) bool {
+		return item.Name == name
+	})
 
-	for _, item := range p.instanceTypesInfo {
-		if item.Name == name {
-			instanceType := &cloudprovider.InstanceType{
-				Name:         item.Name,
-				Requirements: p.computeRequirements(item.Name, item.Offerings, p.cloudCapacityProvider.Regions()),
-				Capacity:     item.Capacity.DeepCopy(),
-				Overhead:     &cloudprovider.InstanceTypeOverhead{},
-			}
-
-			if item.Overhead != nil {
-				instanceType.Overhead.KubeReserved = item.Overhead.KubeReserved.DeepCopy()
-				instanceType.Overhead.SystemReserved = item.Overhead.SystemReserved.DeepCopy()
-				instanceType.Overhead.EvictionThreshold = item.Overhead.EvictionThreshold.DeepCopy()
-			}
-
-			p.createOfferings(instanceType, p.cloudCapacityProvider.Regions())
-
-			return instanceType, nil
-		}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("instance type not found: %s", name)
 	}
 
-	return nil, fmt.Errorf("instance type not found: %s", name)
+	return filtered[0], nil
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
@@ -161,8 +136,19 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 }
 
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
+	log := p.log.WithName("UpdateInstanceTypeOfferings()")
+
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
+
+	offers := 0
+
+	for _, item := range p.instanceTypesInfo {
+		p.createOfferings(item, p.cloudCapacityProvider.Regions(), item.CapacityType)
+		offers += len(item.Offerings.Available())
+	}
+
+	log.V(1).Info("Instance type offerings updated", "instanceTypes", len(p.instanceTypesInfo), "offers", offers)
 
 	return nil
 }
@@ -183,7 +169,7 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	return price
 }
 
-func (p *DefaultProvider) createOfferings(opts *cloudprovider.InstanceType, regions []string) {
+func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []string, capacityType string) {
 	opts.Offerings = []*cloudprovider.Offering{}
 	price := priceFromResources(opts.Capacity)
 
@@ -191,32 +177,39 @@ func (p *DefaultProvider) createOfferings(opts *cloudprovider.InstanceType, regi
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
 			available := p.cloudCapacityProvider.FitInZone(region, zone, opts.Capacity)
 
-			opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
-				Price:     price,
-				Available: available,
-				Requirements: scheduling.NewRequirements(
-					scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
-					scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
-					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
-					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
-					scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(opts.Name, ".")[0]),
-				),
-			})
+			// We use capacityType array to allow multiple capacity types per instance type in the future
+			for _, ct := range lo.Uniq([]string{capacityType}) {
+				opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
+					Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
+					Available: available,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
+						scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
+						scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(opts.Name, ".")[0]),
+					),
+				})
+			}
 		}
 	}
 }
 
-func (p *DefaultProvider) computeRequirements(instanceTypeName string, _ []*cloudprovider.Offering, regions []string) scheduling.Requirements {
+func computeRequirements(instanceTypeName string, offerings cloudprovider.Offerings, regions []string) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, instanceTypeName),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, string(karpv1.ArchitectureAmd64)),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
 		scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, regions...),
-		// scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpDoesNotExist),
+		// scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		// 	return o.Requirements.Get(corev1.LabelTopologyZone).Any()
+		// })...),
 
 		// Well Known to Karpenter
-		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
+		})...),
 
 		// Well Known to Proxmox
 		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(instanceTypeName, ".")[0]),
@@ -227,41 +220,29 @@ func (p *DefaultProvider) computeRequirements(instanceTypeName string, _ []*clou
 	return requirements
 }
 
-func loadInstanceTypesFromFile(name string) ([]*cloudprovider.InstanceType, error) {
-	instanceTypes := []*cloudprovider.InstanceType{}
-
+func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {
 	data, err := os.ReadFile(name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read instance types file %s: %w", name, err)
 	}
 
-	instanceTypeStatic := []InstanceTypeStatic{}
+	instanceTypeStatic := []*InstanceTypeStatic{}
 
 	if err := json.Unmarshal(data, &instanceTypeStatic); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal instance types %s: %w", name, err)
 	}
 
 	for _, i := range instanceTypeStatic {
-		instance := cloudprovider.InstanceType{
-			Name:     i.Name,
-			Capacity: i.Capacity,
-			Overhead: &cloudprovider.InstanceTypeOverhead{},
+		if i.CapacityType == "" {
+			i.CapacityType = karpv1.CapacityTypeOnDemand
 		}
-
-		if i.Overhead != nil {
-			instance.Overhead.KubeReserved = i.Overhead.KubeReserved.DeepCopy()
-			instance.Overhead.SystemReserved = i.Overhead.SystemReserved.DeepCopy()
-			instance.Overhead.EvictionThreshold = i.Overhead.EvictionThreshold.DeepCopy()
-		}
-
-		instanceTypes = append(instanceTypes, &instance)
 	}
 
-	return instanceTypes, nil
+	return instanceTypeStatic, nil
 }
 
-func loadDefaultInstanceTypes() []*cloudprovider.InstanceType {
-	instanceTypes := []*cloudprovider.InstanceType{}
+func loadDefaultInstanceTypes() []*InstanceTypeStatic {
+	instanceTypes := []*InstanceTypeStatic{}
 
 	options := InstanceTypeOptions{
 		CPUs:              []int{1, 2, 4, 8, 16},
@@ -273,10 +254,11 @@ func loadDefaultInstanceTypes() []*cloudprovider.InstanceType {
 	}
 
 	for _, i := range options.Generate() {
-		instance := cloudprovider.InstanceType{
-			Name:     i.Name,
-			Capacity: i.Capacity,
-			Overhead: &cloudprovider.InstanceTypeOverhead{},
+		instance := InstanceTypeStatic{
+			Name:         i.Name,
+			Capacity:     i.Capacity,
+			CapacityType: i.CapacityType,
+			Overhead:     &cloudprovider.InstanceTypeOverhead{},
 		}
 
 		if i.Overhead != nil {

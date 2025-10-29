@@ -95,25 +95,23 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
 	for _, instanceType := range instanceTypes {
 		regions := []string{}
+		if nodeClass.Spec.Region != "" {
+			regions = []string{nodeClass.Spec.Region}
+		}
 
-		if nodeClass.Spec.Region == "" {
-			requestedRegion := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyRegion)
-			if len(requestedRegion.Values()) == 0 {
-				regions = p.cloudCapacityProvider.Regions()
-			} else {
-				regions = requestedRegion.Values()
-			}
+		if len(regions) == 0 {
+			regions = getValuesByKey(instanceType, corev1.LabelTopologyRegion, p.cloudCapacityProvider.Regions())
 		}
 
 		for _, region := range regions {
-			requestedZones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone)
-			zones := requestedZones.Values()
+			zones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone).Values()
 			if len(zones) == 0 {
 				zones = p.cloudCapacityProvider.GetAvailableZonesInRegion(region, instanceType.Capacity)
 			}
 
+			zones = getValuesByKey(instanceType, corev1.LabelTopologyZone, zones)
 			if len(zones) == 0 {
-				log.Error(fmt.Errorf("no zones available"), "No zones available in region", "region", region, "instanceType", instanceType.Name)
+				log.Error(ErrNoZoneFound, "No zones available in region for instanceType", "region", region, "instanceType", instanceType.Name)
 
 				continue
 			}
@@ -253,7 +251,7 @@ func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *ka
 
 	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+		return pxpool.ErrRegionNotFound
 	}
 
 	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
@@ -287,7 +285,7 @@ func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.Node
 
 	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+		return pxpool.ErrRegionNotFound
 	}
 
 	node, err := px.Node(ctx, zone)
@@ -342,7 +340,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	px, err := p.cluster.GetProxmoxCluster(region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+		return nil, pxpool.ErrRegionNotFound
 	}
 
 	newID, err := px.GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
@@ -373,11 +371,13 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		size = sizeInstType
 	}
 
+	capacityType := getCapacityType(nodeClaim, instanceType, region, zone)
+
 	vmOptions := goproxmox.VMCloneRequest{
 		NewID:       newID,
 		Node:        zone,
 		Name:        nodeClaim.Name,
-		Description: fmt.Sprintf("Karpeneter, class=%s", nodeClass.Name),
+		Description: fmt.Sprintf("Karpenter, class=%s, capacity=%s", nodeClass.Name, capacityType),
 		Full:        1,
 		Storage:     storage,
 
@@ -451,7 +451,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 				corev1.LabelTopologyRegion:     region,
 				corev1.LabelTopologyZone:       zone,
 				corev1.LabelInstanceTypeStable: instanceType.Name,
-				karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
+				karpv1.CapacityTypeLabelKey:    capacityType,
 				v1alpha1.LabelInstanceFamily:   strings.Split(instanceType.Name, ".")[0],
 				v1alpha1.LabelInstanceCPUType:  cpu.Type,
 			},
