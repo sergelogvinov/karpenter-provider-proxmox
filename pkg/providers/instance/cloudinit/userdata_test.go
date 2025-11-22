@@ -82,7 +82,7 @@ func TestUserData(t *testing.T) {
 	tests := []struct {
 		name     string
 		template string
-		values   interface{}
+		values   any
 		result   string
 	}{
 		{

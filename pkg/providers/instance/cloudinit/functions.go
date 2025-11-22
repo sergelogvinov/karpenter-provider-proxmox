@@ -21,8 +21,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -31,7 +33,7 @@ import (
 	goYaml "sigs.k8s.io/yaml/goyaml.v3"
 )
 
-var genericMap = map[string]interface{}{
+var genericMap = map[string]any{
 	"default":      defaultFunc,
 	"coalesce":     coalesce,
 	"ternary":      ternary,
@@ -79,7 +81,7 @@ var genericMap = map[string]interface{}{
 }
 
 // ExecuteTemplate executes a template with the given data.
-func ExecuteTemplate(tmpl string, data interface{}) (string, error) {
+func ExecuteTemplate(tmpl string, data any) (string, error) {
 	t, err := template.New("cloudinit").Funcs(genericFuncMap()).Parse(tmpl)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template %q: %w", tmpl, err)
@@ -94,11 +96,9 @@ func ExecuteTemplate(tmpl string, data interface{}) (string, error) {
 }
 
 // genericFuncMap returns a copy of the basic function map as a map[string]interface{}.
-func genericFuncMap() map[string]interface{} {
-	gfm := make(map[string]interface{}, len(genericMap))
-	for k, v := range genericMap {
-		gfm[k] = v
-	}
+func genericFuncMap() map[string]any {
+	gfm := make(map[string]any, len(genericMap))
+	maps.Copy(gfm, genericMap)
 
 	return gfm
 }
@@ -207,13 +207,7 @@ func hasTag(tags []string, tag string) bool {
 		return false
 	}
 
-	for _, t := range tags {
-		if t == tag {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(tags, tag)
 }
 
 // quote returns a string representation of the given values, quoted.
@@ -282,8 +276,7 @@ func get(m map[string]string, key string) string {
 
 // getValue returns the value for the given key in a semicolon-separated key=value string.
 func getValue(source string, key string) string {
-	parts := strings.Split(source, ";")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(source, ";") {
 		kv := strings.Split(part, "=")
 		if kv[0] == key {
 			return kv[1]
