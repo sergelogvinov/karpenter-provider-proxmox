@@ -112,7 +112,7 @@ func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 
 	c.options.CPUs = []int{}
 	if cpusStr, err := flags.GetString("cpus"); err == nil {
-		for _, s := range strings.Split(cpusStr, ",") {
+		for s := range strings.SplitSeq(cpusStr, ",") {
 			if i, err := strconv.Atoi(s); err == nil {
 				c.options.CPUs = append(c.options.CPUs, i)
 			}
@@ -121,7 +121,7 @@ func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 
 	c.options.MemFactors = []int{}
 	if memFactorsStr, err := flags.GetString("memfactor"); err == nil {
-		for _, s := range strings.Split(memFactorsStr, ",") {
+		for s := range strings.SplitSeq(memFactorsStr, ",") {
 			if i, err := strconv.Atoi(s); err == nil {
 				c.options.MemFactors = append(c.options.MemFactors, i)
 			}

@@ -237,7 +237,7 @@ func (p *DefaultProvider) deleteTemplate(
 	return cl.DeleteVMByID(ctx, zone, vmID)
 }
 
-func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, vm map[string]interface{}) {
+func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, vm map[string]any) {
 	if templateClass.Spec.Description != "" {
 		vm["description"] = templateClass.Spec.Description
 	}
@@ -370,8 +370,8 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 	}
 }
 
-func defaultVirtualMachineTemplate() map[string]interface{} {
-	return map[string]interface{}{
+func defaultVirtualMachineTemplate() map[string]any {
+	return map[string]any{
 		"template": 1,
 		"acpi":     1,
 		"cores":    1,
