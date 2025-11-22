@@ -38,13 +38,13 @@ import (
 // +kubebuilder:subresource:status
 type ProxmoxTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	// Spec defines the desired state of ProxmoxTemplate
-	Spec ProxmoxTemplateSpec `json:"spec,omitempty"`
+	Spec ProxmoxTemplateSpec `json:"spec,omitempty"` //nolint:modernize
 
 	// Status defines the observed state of ProxmoxTemplate
-	Status ProxmoxTemplateStatus `json:"status,omitempty"`
+	Status ProxmoxTemplateStatus `json:"status,omitempty"` //nolint:modernize
 }
 
 // ProxmoxTemplateSpec defines the desired state of ProxmoxTemplateSpec
@@ -278,7 +278,7 @@ func (in *ProxmoxTemplate) Hash() string {
 // +kubebuilder:object:generate=true
 type ProxmoxTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.ListMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	Items []ProxmoxTemplate `json:"items"`
 }

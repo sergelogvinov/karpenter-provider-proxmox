@@ -36,13 +36,13 @@ import (
 // +kubebuilder:subresource:status
 type ProxmoxUnmanagedTemplate struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	// Spec defines the desired state of ProxmoxUnmanagedTemplateSpec
-	Spec ProxmoxUnmanagedTemplateSpec `json:"spec,omitempty"`
+	Spec ProxmoxUnmanagedTemplateSpec `json:"spec,omitempty"` //nolint:modernize
 
 	// Status defines the observed state of ProxmoxUnmanagedTemplate
-	Status ProxmoxTemplateStatus `json:"status,omitempty"`
+	Status ProxmoxTemplateStatus `json:"status,omitempty"` //nolint:modernize
 }
 
 // ProxmoxUnmanagedTemplateSpec defines the desired state of ProxmoxUnmanagedTemplate
@@ -87,7 +87,7 @@ func (in *ProxmoxUnmanagedTemplate) Validate() (err error) {
 // +kubebuilder:object:generate=true
 type ProxmoxUnmanagedTemplateList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.ListMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	Items []ProxmoxUnmanagedTemplate `json:"items"`
 }

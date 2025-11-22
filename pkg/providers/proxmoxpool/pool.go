@@ -94,7 +94,7 @@ func NewProxmoxPool(ctx context.Context, config []*ProxmoxCluster) (*ProxmoxPool
 				options = append(options, proxmox.WithAPIToken(cfg.TokenID, cfg.TokenSecret))
 			}
 
-			pxClient, err := goproxmox.NewAPIClient(ctx, cfg.URL, options...)
+			pxClient, err := goproxmox.NewAPIClient(cfg.URL, options...)
 			if err != nil {
 				return nil, err
 			}

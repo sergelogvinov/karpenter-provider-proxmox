@@ -51,13 +51,13 @@ const (
 // +kubebuilder:subresource:status
 type ProxmoxNodeClass struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
+	metav1.ObjectMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	// Spec defines the desired state of ProxmoxNodeClass
-	Spec ProxmoxNodeClassSpec `json:"spec,omitempty"`
+	Spec ProxmoxNodeClassSpec `json:"spec,omitempty"` //nolint:modernize
 
 	// Status defines the observed state of ProxmoxNodeClass
-	Status ProxmoxNodeClassStatus `json:"status,omitempty"`
+	Status ProxmoxNodeClassStatus `json:"status,omitempty"` //nolint:modernize
 }
 
 // ProxmoxNodeClassSpec defines the desired state of ProxmoxNodeClass
@@ -301,7 +301,7 @@ func (in *ProxmoxNodeClass) InPlaceHash() string {
 // +kubebuilder:object:generate=true
 type ProxmoxNodeClassList struct {
 	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
+	metav1.ListMeta `json:"metadata,omitempty"` //nolint:modernize
 
 	Items []ProxmoxNodeClass `json:"items"`
 }

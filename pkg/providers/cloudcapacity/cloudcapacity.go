@@ -596,15 +596,8 @@ func nodeAllocatable(ctx context.Context, node *proxmox.Node, maxCPU, maxMem uin
 		memUsage += int64(vm.MaxMem)
 	}
 
-	cpu := int64(maxCPU) - cpuUsage
-	if cpu < 0 {
-		cpu = 0
-	}
-
-	mem := int64(maxMem) - memUsage
-	if mem < 0 {
-		mem = 0
-	}
+	cpu := max(int64(maxCPU)-cpuUsage, 0)
+	mem := max(int64(maxMem)-memUsage, 0)
 
 	return corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
