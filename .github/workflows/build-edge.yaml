@@ -23,14 +23,14 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           ref: main
       - name: Unshallow
         run: git fetch --prune --unshallow
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.10.0
+        uses: sigstore/cosign-installer@v4.0.0
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
