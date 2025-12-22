@@ -15,11 +15,14 @@ metadata:
   name: default
 spec:
   sourceImage:
+    # url: https://factory.talos.dev/image/14e9b0100f05654bedf19b92313cdc224cbff52879193d24f3741f1da4a3cbb1/v1.11.5/nocloud-amd64.raw.xz
+    # imageName: nocloud-amd64.raw
     url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
     imageName: ubuntu-amd64.qcow2
   storageIDs:
     - local
     - system
+  machine: "pc"
   agent:
     enabled: true
   vga:

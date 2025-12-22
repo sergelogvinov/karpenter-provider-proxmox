@@ -67,7 +67,7 @@ type ProxmoxTemplateSpec struct {
 	// Storage should supports images and import content types.
 	// +kubebuilder:validation:MinItems=1
 	// +required
-	StorageIDs []string `json:"storageIDs"`
+	StorageIDs []string `json:"storageIDs" hash:"ignore"`
 
 	// Machine for the VM machine type.
 	// +kubebuilder:validation:Enum=pc;q35
@@ -266,6 +266,14 @@ type PCIDevice struct {
 }
 
 func (in *ProxmoxTemplate) Hash() string {
+	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})))
+}
+
+func (in *ProxmoxTemplate) InPlaceHash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,

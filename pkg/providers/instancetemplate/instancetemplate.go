@@ -31,6 +31,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/locks"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -50,6 +51,8 @@ type DefaultProvider struct {
 
 	muInstanceTemplates sync.RWMutex
 	instanceTemplate    map[string][]InstanceTemplateInfo
+
+	zoneLocks *locks.Locks
 
 	log logr.Logger
 }
@@ -87,6 +90,7 @@ func NewDefaultProvider(ctx context.Context, pool *pxpool.ProxmoxPool, cloudCapa
 
 	return &DefaultProvider{
 		pool:                  pool,
+		zoneLocks:             locks.NewLocks(),
 		log:                   log,
 		cloudCapacityProvider: cloudCapacityProvider,
 	}
@@ -145,19 +149,26 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		}
 
 		for _, zone := range zones {
-			err := p.downloadImage(ctx, templateClass, region, zone, storageImage)
-			if err != nil {
-				continue
-			}
+			func(zone string) {
+				p.zoneLocks.Lock(zone)
+				defer p.zoneLocks.Unlock(zone)
 
-			vmid, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
-			if err != nil || vmid == 0 {
-				continue
-			}
+				err := p.downloadImage(ctx, templateClass, region, zone, storageImage)
+				if err != nil {
+					log.Error(err, "Failed to download image", "region", region, "zone", zone)
 
-			p.UpdateInstanceTemplates(ctx)
+					return
+				}
 
-			installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
+				vmid, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
+				if err != nil || vmid == 0 {
+					return
+				}
+
+				p.UpdateInstanceTemplates(ctx)
+
+				installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
+			}(zone)
 		}
 	}
 
@@ -205,6 +216,9 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 			if storage == nil {
 				continue
 			}
+
+			p.zoneLocks.Lock(zone)
+			defer p.zoneLocks.Unlock(zone)
 
 			err := p.deleteImage(ctx, templateClass, region, zone, storage)
 			if err != nil {
