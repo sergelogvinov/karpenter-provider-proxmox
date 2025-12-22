@@ -69,27 +69,31 @@ func (p *DefaultProvider) downloadImage(
 	if _, found := lo.Find(content, func(c *proxmox.StorageContent) bool {
 		return c.Volid == fmt.Sprintf("%s:%s/%s", storage.Name, importContent, filepath.Base(imageID))
 	}); !found {
-		log.V(1).Info("Download image")
-
 		options := &proxmox.StorageDownloadURLOptions{
-			Node:              node.Name,
-			Content:           importContent,
-			Storage:           storage.Name,
-			URL:               templateClass.Spec.SourceImage.URL,
-			Filename:          imageID,
+			Node:     node.Name,
+			Content:  importContent,
+			Storage:  storage.Name,
+			URL:      templateClass.Spec.SourceImage.URL,
+			Filename: imageID,
+			// Compression:       "zst",
 			Checksum:          templateClass.Spec.SourceImage.Checksum,
 			ChecksumAlgorithm: templateClass.Spec.SourceImage.ChecksumType,
 		}
 
 		upid, err := node.StorageDownloadURL(ctx, options)
 		if err != nil {
-			log.Error(err, "Failed to download URL")
+			log.Error(err, "Failed to download image")
 
-			return fmt.Errorf("unable to download URL: %w", err)
+			return fmt.Errorf("unable to download image: %w", err)
 		}
 
-		if err := proxmox.NewTask(proxmox.UPID(upid), cl.Client).WaitFor(ctx, 5*60); err != nil {
-			return fmt.Errorf("unable to download URL: %w", err)
+		task := proxmox.NewTask(proxmox.UPID(upid), cl.Client)
+		if err := task.WaitFor(ctx, 5*60); err != nil {
+			return fmt.Errorf("unable to download image: %w", err)
+		}
+
+		if task.IsFailed {
+			return fmt.Errorf("unable to download image: %s", task.ExitStatus)
 		}
 	}
 
