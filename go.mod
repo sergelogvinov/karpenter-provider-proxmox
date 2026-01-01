@@ -8,7 +8,7 @@ require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20251024191238-14554b75b88a
 	github.com/go-logr/logr v1.4.3
-	github.com/luthermonson/go-proxmox v0.2.4
+	github.com/luthermonson/go-proxmox v0.3.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
