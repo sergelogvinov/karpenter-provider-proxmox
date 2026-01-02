@@ -18,8 +18,10 @@ package instancetemplate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
@@ -223,6 +225,93 @@ func (p *DefaultProvider) deleteTemplate(
 	return cl.DeleteVMByID(ctx, zone, vmID)
 }
 
+func (p *DefaultProvider) updateTemplate(
+	ctx context.Context,
+	templateClass *v1alpha1.ProxmoxTemplate,
+	region string,
+	zone string,
+	vmid int,
+) error {
+	log := log.FromContext(ctx).WithName("instancetemplate.updateTemplate").WithValues("region", region, "zone", zone)
+
+	templates := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
+		return info.Region == region && info.Zone == zone && info.TemplateID == uint64(vmid)
+	})
+	if len(templates) == 0 {
+		log.Info("Failed to get template", "region", region)
+
+		return fmt.Errorf("template not found for update")
+	}
+
+	cl, err := p.pool.GetProxmoxCluster(region)
+	if err != nil {
+		log.Error(err, "Failed to get proxmox cluster", "region", region)
+
+		return err
+	}
+
+	if _, err := cl.GetVMTemplateByID(ctx, uint64(vmid)); err != nil {
+		if errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+			log.V(1).Info("Virtual machine not found, skipping update", "vmid", vmid)
+
+			return nil
+		}
+
+		return fmt.Errorf("unable to get virtual machine: %w", err)
+	}
+
+	vm := defaultVirtualMachineTemplate()
+	vm["node"] = zone
+	vm["vmid"] = vmid
+	vm["name"] = templateClass.Name
+	vm["description"] = "The virtual machine managed by Karpenter, do not delete it"
+
+	applyVirtualMachineTemplateConfig(templateClass, vm)
+
+	removeOptions := []string{}
+
+	for key := range strings.SplitSeq("agent,cpu,vga,tags", ",") {
+		if _, ok := vm[key]; !ok {
+			removeOptions = append(removeOptions, key)
+		}
+	}
+
+	for i := range 6 {
+		key := fmt.Sprintf("hostpci%d", i)
+
+		if _, ok := vm[key]; !ok {
+			removeOptions = append(removeOptions, key)
+		}
+	}
+
+	for i := range 6 {
+		key := fmt.Sprintf("net%d", i)
+		if _, ok := vm[key]; !ok {
+			removeOptions = append(removeOptions, key)
+		}
+
+		key = fmt.Sprintf("ipconfig%d", i)
+		if _, ok := vm[key]; !ok {
+			removeOptions = append(removeOptions, key)
+		}
+	}
+
+	if len(removeOptions) > 0 {
+		vm["delete"] = strings.Join(removeOptions, ",")
+	}
+
+	log.V(4).Info("Update virtual machine", "options", vm)
+
+	err = cl.UpdateVMByID(ctx, zone, vmid, vm)
+	if err != nil {
+		log.Error(err, "Failed to update virtual machine")
+
+		return fmt.Errorf("unable to update virtual machine: %w", err)
+	}
+
+	return nil
+}
+
 func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, vm map[string]any) {
 	if templateClass.Spec.Description != "" {
 		vm["description"] = templateClass.Spec.Description
@@ -352,7 +441,10 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 	}
 
 	if len(templateClass.Spec.Tags) > 0 {
-		vm["tags"] = strings.Join(templateClass.Spec.Tags, ";")
+		tags := lo.Uniq(templateClass.Spec.Tags)
+		slices.Sort(tags)
+
+		vm["tags"] = strings.Join(tags, ";")
 	}
 }
 
@@ -363,7 +455,7 @@ func defaultVirtualMachineTemplate() map[string]any {
 		"cores":    1,
 		"sockets":  1,
 		"numa":     0,
-		"memory":   1024,
+		"memory":   proxmox.StringOrInt(1024),
 		"balloon":  0,
 		"machine":  "pc",
 		"bios":     "seabios",

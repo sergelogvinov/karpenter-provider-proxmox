@@ -14,45 +14,43 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package ipam
+package inplaceupdate
 
 import (
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-type ipChangedPredicate struct {
+type inPlaceChangedPredicate struct {
 	predicate.Funcs
 }
 
-var _ predicate.Predicate = ipChangedPredicate{}
+var _ predicate.Predicate = inPlaceChangedPredicate{}
 
-func (p ipChangedPredicate) Create(e event.CreateEvent) bool {
+func (p inPlaceChangedPredicate) Create(e event.CreateEvent) bool {
 	return false
 }
 
-func (p ipChangedPredicate) Delete(e event.DeleteEvent) bool {
+func (p inPlaceChangedPredicate) Delete(e event.DeleteEvent) bool {
 	return false
 }
 
-func (p ipChangedPredicate) Update(e event.UpdateEvent) bool {
+func (p inPlaceChangedPredicate) Update(e event.UpdateEvent) bool {
 	if e.ObjectOld == nil || e.ObjectNew == nil {
 		return false
 	}
 
-	typedOld, ok := e.ObjectOld.(*corev1.Node)
+	typedOld, ok := e.ObjectOld.(*v1alpha1.ProxmoxTemplate)
 	if !ok {
 		return false
 	}
 
-	typedNew, ok := e.ObjectNew.(*corev1.Node)
+	typedNew, ok := e.ObjectNew.(*v1alpha1.ProxmoxTemplate)
 	if !ok {
 		return false
 	}
 
-	return !equality.Semantic.DeepEqual(typedOld.Status.Addresses, typedNew.Status.Addresses) ||
-		typedOld.ObjectMeta.DeletionTimestamp != typedNew.ObjectMeta.DeletionTimestamp
+	return typedOld.InPlaceHash() != typedNew.InPlaceHash()
 }

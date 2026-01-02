@@ -45,7 +45,7 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, templateClass *v1alpha
 		return reconcile.Result{}, nil
 	}
 
-	if err := i.instanceTemplateProvider.UpdateInstanceTemplates(ctx); err != nil {
+	if err := i.instanceTemplateProvider.SyncInstanceTemplates(ctx); err != nil {
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil //nolint:nilerr
 	}
 

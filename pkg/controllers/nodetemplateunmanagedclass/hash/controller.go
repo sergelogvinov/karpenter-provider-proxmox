@@ -56,8 +56,8 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 
 	templateClassCopy := templateClass.DeepCopy()
 	templateClassCopy.Annotations = lo.Assign(templateClass.Annotations, map[string]string{
-		v1alpha1.AnnotationProxmoxTemplateClassHash:        templateClass.Hash(),
-		v1alpha1.AnnotationProxmoxTemplateClassHashVersion: v1alpha1.ProxmoxTemplateClassHashVersion,
+		v1alpha1.AnnotationProxmoxTemplateHash:        templateClass.Hash(),
+		v1alpha1.AnnotationProxmoxTemplateHashVersion: v1alpha1.ProxmoxTemplateClassHashVersion,
 	})
 
 	if !equality.Semantic.DeepEqual(templateClass, templateClassCopy) {

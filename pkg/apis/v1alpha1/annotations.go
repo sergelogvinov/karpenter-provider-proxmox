@@ -34,11 +34,14 @@ const (
 	// AnnotationProxmoxNodeClassPool is the annotation key for the ProxmoxNodeClass pool
 	AnnotationProxmoxNodeClassPool = apis.Group + "/proxmoxnodeclass-pool"
 
-	// AnnotationProxmoxTemplateClassHash is the annotation key for the hash of the ProxmoxTemplateClasses
-	AnnotationProxmoxTemplateClassHash = apis.Group + "/proxmoxtemplateclass-hash"
+	// AnnotationProxmoxTemplateHash is the annotation key for the hash of the ProxmoxTemplateClasses
+	AnnotationProxmoxTemplateHash = apis.Group + "/proxmoxtemplate-hash"
 
-	// AnnotationProxmoxTemplateClassHashVersion is the annotation key for the version of the hash function
-	AnnotationProxmoxTemplateClassHashVersion = apis.Group + "/proxmoxtemplateclass-hash-version"
+	// AnnotationProxmoxTemplateHashVersion is the annotation key for the version of the hash function
+	AnnotationProxmoxTemplateHashVersion = apis.Group + "/proxmoxtemplate-hash-version"
+
+	// AnnotationProxmoxTemplateInPlaceUpdateHash is the annotation key for the hash of the in-place update
+	AnnotationProxmoxTemplateInPlaceUpdateHash = apis.Group + "/proxmoxtemplateinplaceupdate-hash"
 
 	// AnnotationProxmoxCloudInitStatus is the annotation key for the status of the ProxmoxCloudInit
 	AnnotationProxmoxCloudInitStatus = apis.Group + "/proxmoxcloudinit-status"

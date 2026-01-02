@@ -57,11 +57,11 @@ type ProxmoxTemplateSpec struct {
 	// Description for the VM template.
 	// +kubebuilder:validation:MinLength=1
 	// +optional
-	Description string `json:"description,omitempty" hash:"ignore"`
+	Description string `json:"description,omitempty"`
 
 	// SourceImage defines the source image for the VM boot disk.
 	// +required
-	SourceImage *SourceImage `json:"sourceImage"`
+	SourceImage *SourceImage `json:"sourceImage" hash:"ignore"`
 
 	// StorageIDs is a list of storage IDs where the VM template and base image will be stored.
 	// Storage should supports images and import content types.
@@ -77,7 +77,7 @@ type ProxmoxTemplateSpec struct {
 
 	// QemuGuestAgent enables the QEMU Guest Agent service in the VM template.
 	// +optional
-	QemuGuestAgent *QemuGuestAgent `json:"agent,omitempty" hash:"ignore"`
+	QemuGuestAgent *QemuGuestAgent `json:"agent,omitempty"`
 
 	// CPU configuration
 	// +kubebuilder:default={"type":"x86-64-v2-AES"}
@@ -90,19 +90,20 @@ type ProxmoxTemplateSpec struct {
 
 	// Network defines the network configuration for the VM template
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=6
 	// +required
 	Network []Network `json:"network"`
 
 	// PCIDevices is a list of PCI devices to attach to the VM template
 	// Supported Mapping devices only
-	// +kubebuilder:validation:MaxItems:=5
+	// +kubebuilder:validation:MaxItems=6
 	// +optional
 	PCIDevices []PCIDevice `json:"pciDevices,omitempty"`
 
 	// Tags to apply to the VM template
-	// +kubebuilder:validation:MaxItems:=10
+	// +kubebuilder:validation:MaxItems=10
 	// +optional
-	Tags []string `json:"tags,omitempty" hash:"ignore"`
+	Tags []string `json:"tags,omitempty"`
 }
 
 type SourceImage struct {
