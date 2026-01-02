@@ -75,7 +75,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	nodeIpamController.UpdateNodeCIDR(ctx)
 
 	instanceTemplateProvider := instancetemplate.NewDefaultProvider(ctx, pxPool, cloudCapacityProvider)
-	instanceTemplateProvider.UpdateInstanceTemplates(ctx)
+	instanceTemplateProvider.SyncInstanceTemplates(ctx)
 
 	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
 	if err = instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {

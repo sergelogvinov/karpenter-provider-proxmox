@@ -106,7 +106,7 @@ manifests: ## generate the controller-gen kubernetes manifests
 
 .PHONY: install
 install: ## Install
-	kubectl replace --force -f pkg/apis/crds/
+	kubectl apply -f pkg/apis/crds/ || kubectl replace --force -f pkg/apis/crds/
 
 .PHONY: build
 build: ## Build

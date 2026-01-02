@@ -28,6 +28,7 @@ import (
 	"github.com/luthermonson/go-proxmox"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -38,10 +39,11 @@ import (
 )
 
 type Provider interface {
-	UpdateInstanceTemplates(context.Context) error
+	SyncInstanceTemplates(context.Context) error
 
 	Create(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
 	Delete(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
+	Update(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
 
 	ListWithFilter(ctx context.Context, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo
 }
@@ -166,7 +168,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 					return
 				}
 
-				p.UpdateInstanceTemplates(ctx)
+				p.SyncInstanceTemplates(ctx)
 
 				installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
 			}(zone)
@@ -237,9 +239,42 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 		return fmt.Errorf("unable to delete image %s, still installed in zones: %v", imageID, templateClass.Status.Zones)
 	}
 
-	p.UpdateInstanceTemplates(ctx)
+	p.SyncInstanceTemplates(ctx)
 
 	return nil
+}
+
+func (p *DefaultProvider) Update(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+	log := log.FromContext(ctx).WithName("instancetemplate.Update()").WithValues("InPlaceHash", templateClass.InPlaceHash())
+	log.V(4).Info("Updating template")
+
+	var errs error
+
+	for _, key := range templateClass.Status.Zones {
+		parts := strings.SplitN(key, "/", 3)
+		if len(parts) != 3 {
+			continue
+		}
+
+		region := parts[0]
+		zone := parts[1]
+		vmid, err := strconv.Atoi(parts[2])
+		if err != nil {
+			log.Error(err, "Failed to parse vmid", "vmid", parts[2])
+
+			continue
+		}
+
+		log.V(4).Info("Update template for update", "region", region, "zone", zone, "vmid", vmid)
+
+		if err := p.updateTemplate(ctx, templateClass, region, zone, vmid); err != nil {
+			errs = multierr.Append(errs, err)
+
+			continue
+		}
+	}
+
+	return errs
 }
 
 func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo {
@@ -263,8 +298,8 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*In
 	return instanceTemplates
 }
 
-func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
-	log := p.log.WithName("UpdateInstanceTemplates()")
+func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context) error {
+	log := p.log.WithName("SyncInstanceTemplates()")
 
 	p.muInstanceTemplates.Lock()
 	defer p.muInstanceTemplates.Unlock()

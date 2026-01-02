@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.20.0
   name: proxmoxnodeclasses.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -278,6 +278,17 @@ spec:
                   created
                 minLength: 1
                 type: string
+              resourcePool:
+                description: |-
+                  ResourcePool is the Proxmox resource pool name where VMs will be placed.
+                  If specified, cloned VMs will be added to this pool during creation.
+                  The pool must already exist in Proxmox.
+                  Supports nested pools up to 3 levels (e.g., "parent/child/grandchild").
+                  Note: PVE 9+ requires pool names to start with a letter; PVE 8 allows
+                  names starting with digits but this is deprecated.
+                maxLength: 64
+                pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$
+                type: string
               securityGroups:
                 description: SecurityGroups to apply to the VMs
                 items:
@@ -304,17 +315,6 @@ spec:
                   type: string
                 maxItems: 10
                 type: array
-              resourcePool:
-                description: |-
-                  ResourcePool is the Proxmox resource pool name where VMs will be placed.
-                  If specified, cloned VMs will be added to this pool during creation.
-                  The pool must already exist in Proxmox.
-                  Supports nested pools up to 3 levels (e.g., "parent/child/grandchild").
-                  Note: PVE 9+ requires pool names to start with a letter; PVE 8 allows
-                  names starting with digits but this is deprecated.
-                maxLength: 64
-                pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$
-                type: string
             required:
             - instanceTemplateRef
             type: object

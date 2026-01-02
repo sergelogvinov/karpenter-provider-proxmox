@@ -440,7 +440,7 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 
 	p.storageInfo = capacityInfo
 
-	log.V(4).Info("Syncing finished", "storages", len(capacityInfo))
+	log.V(4).Info("Syncing finished", "storages", len(capacityInfo), "capacityInfo", p.storageInfo)
 
 	return nil
 }
