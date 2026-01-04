@@ -206,14 +206,11 @@ func (p *DefaultProvider) generateCloudInitVars(
 		return "", "", "", "", fmt.Errorf("failed to create bootstrap token: %v", err)
 	}
 
-	smbios1 := goproxmox.VMSMBIOS{}
-	smbios1.UnmarshalString(vm.VirtualMachineConfig.SMBios1)
-
 	metadataValues := cloudinit.MetaData{
 		Hostname:     nodeClaim.Name,
 		InstanceID:   fmt.Sprintf("%d", vm.VMID),
 		InstanceType: instanceType.Name,
-		InstanceUUID: smbios1.UUID,
+		InstanceUUID: goproxmox.GetVMUUID(vm),
 		ProviderID:   provider.GetProviderID(region, int(vm.VMID)),
 		Region:       region,
 		Zone:         zone,

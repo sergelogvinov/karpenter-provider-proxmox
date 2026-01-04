@@ -51,17 +51,7 @@ func (p *DefaultProvider) downloadImage(
 		return err
 	}
 
-	node, err := cl.Node(ctx, zone)
-	if err != nil {
-		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
-	}
-
-	st, err := node.Storage(ctx, storage.Name)
-	if err != nil {
-		return fmt.Errorf("unable to find storage with name %s: %w", storage.Name, err)
-	}
-
-	content, err := st.GetContent(ctx)
+	content, err := cl.GetStorageContent(ctx, zone, storage.Name)
 	if err != nil {
 		return fmt.Errorf("unable to get storage content for storage %s: %w", storage.Name, err)
 	}
@@ -70,7 +60,7 @@ func (p *DefaultProvider) downloadImage(
 		return c.Volid == fmt.Sprintf("%s:%s/%s", storage.Name, importContent, filepath.Base(imageID))
 	}); !found {
 		options := &proxmox.StorageDownloadURLOptions{
-			Node:     node.Name,
+			Node:     zone,
 			Content:  importContent,
 			Storage:  storage.Name,
 			URL:      templateClass.Spec.SourceImage.URL,
@@ -79,6 +69,8 @@ func (p *DefaultProvider) downloadImage(
 			Checksum:          templateClass.Spec.SourceImage.Checksum,
 			ChecksumAlgorithm: templateClass.Spec.SourceImage.ChecksumType,
 		}
+
+		node := (&proxmox.Node{}).New(cl.Client, zone)
 
 		upid, err := node.StorageDownloadURL(ctx, options)
 		if err != nil {
@@ -119,17 +111,7 @@ func (p *DefaultProvider) deleteImage(
 		return err
 	}
 
-	node, err := cl.Node(ctx, zone)
-	if err != nil {
-		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
-	}
-
-	st, err := node.Storage(ctx, storage.Name)
-	if err != nil {
-		return fmt.Errorf("unable to find storage with name %s: %w", storage.Name, err)
-	}
-
-	content, err := st.GetContent(ctx)
+	content, err := cl.GetStorageContent(ctx, zone, storage.Name)
 	if err != nil {
 		return fmt.Errorf("unable to get storage content for storage %s: %w", storage.Name, err)
 	}
