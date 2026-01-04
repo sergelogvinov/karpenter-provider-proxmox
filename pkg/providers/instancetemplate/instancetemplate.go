@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/luthermonson/go-proxmox"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 
@@ -269,9 +270,10 @@ func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
 	defer p.muInstanceTemplates.Unlock()
 
 	instanceTemplateInfo := make(map[string][]InstanceTemplateInfo)
+	instanceTemplates := 0
 
 	for _, region := range p.pool.GetRegions() {
-		log.V(1).Info("Syncing instance template for region", "region", region)
+		log.V(4).Info("Syncing instance template for region", "region", region)
 
 		cl, err := p.pool.GetProxmoxCluster(region)
 		if err != nil {
@@ -280,14 +282,9 @@ func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
 			continue
 		}
 
-		cluster, err := cl.Cluster(ctx)
-		if err != nil {
-			log.Error(err, "Failed to get cluster status", "region", region)
-
-			continue
-		}
-
-		vms, err := cluster.Resources(ctx, "vm")
+		vms, err := cl.GetVMTemplatesByFilter(ctx, func(r *proxmox.ClusterResource) (bool, error) {
+			return r.Type == "qemu", nil
+		})
 		if err != nil {
 			log.Error(err, "Failed to list VM resources", "region", region)
 
@@ -297,65 +294,53 @@ func (p *DefaultProvider) UpdateInstanceTemplates(ctx context.Context) error {
 		templateInfo := make([]InstanceTemplateInfo, 0)
 
 		for _, vm := range vms {
-			if vm.Type != "qemu" {
+			info := InstanceTemplateInfo{
+				Name:       vm.Name,
+				Region:     region,
+				Zone:       vm.Node,
+				TemplateID: vm.VMID,
+				Status:     InstanceTemplateStatusUnknown,
+			}
+
+			vmRes, err := cl.GetVMTemplateConfig(ctx, int(vm.VMID))
+			if err != nil {
+				log.Error(err, "Failed to get VM resource", "region", region, "node", vm.Node, "vmid", vm.VMID)
+
 				continue
 			}
 
-			if vm.Template == 1 && vm.Type == "qemu" {
-				info := InstanceTemplateInfo{
-					Name:       vm.Name,
-					Region:     region,
-					Zone:       vm.Node,
-					TemplateID: vm.VMID,
-					Status:     InstanceTemplateStatusUnknown,
-				}
-
-				node, err := cl.Node(ctx, vm.Node)
-				if err != nil {
-					log.Error(err, "cannot find node with name", "region", region, "node", vm.Node)
-					continue
-				}
-
-				vmRes, err := node.VirtualMachine(ctx, int(vm.VMID))
-				if err != nil {
-					log.Error(err, "Failed to get VM resource", "region", region, "node", vm.Node, "vmid", vm.VMID)
-
-					continue
-				}
-
-				info.TemplateTags = strings.Split(vmRes.Tags, ";")
+			if vmRes.VirtualMachineConfig != nil {
+				info.TemplateTags = strings.Split(vmRes.VirtualMachineConfig.Tags, ";")
 				info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(vmRes.VirtualMachineConfig.Meta, hashstructure.FormatV2, nil)))
+				info.Status = InstanceTemplateStatusAvailable
 
-				if vmRes.VirtualMachineConfig != nil {
-					info.Status = InstanceTemplateStatusAvailable
+				disks := vmRes.VirtualMachineConfig.MergeDisks()
+				for _, disk := range disks {
+					storageID := strings.Split(disk, ":")[0]
 
-					disks := vmRes.VirtualMachineConfig.MergeDisks()
-					for _, disk := range disks {
-						storageID := strings.Split(disk, ":")[0]
+					if info.TemplateStorageID == "" {
+						info.TemplateStorageID = storageID
+					}
 
-						if info.TemplateStorageID == "" {
-							info.TemplateStorageID = storageID
-						}
+					if info.TemplateStorageID != storageID {
+						log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "storageID", storageID)
 
-						if info.TemplateStorageID != storageID {
-							log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "storageID", storageID)
+						info.TemplateStorageID = ""
+						info.Status = InstanceTemplateStatusMultipleStorageIDs
 
-							info.TemplateStorageID = ""
-							info.Status = InstanceTemplateStatusMultipleStorageIDs
-
-							break
-						}
+						break
 					}
 				}
-
-				templateInfo = append(templateInfo, info)
 			}
+
+			templateInfo = append(templateInfo, info)
+			instanceTemplates++
 		}
 
 		instanceTemplateInfo[region] = templateInfo
 	}
 
-	log.V(4).Info("Instance templates updated", "instanceTemplates", len(instanceTemplateInfo))
+	log.V(4).Info("Instance templates updated", "instanceTemplates", instanceTemplates)
 
 	p.instanceTemplate = instanceTemplateInfo
 

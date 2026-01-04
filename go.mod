@@ -8,11 +8,11 @@ require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20251024191238-14554b75b88a
 	github.com/go-logr/logr v1.4.3
-	github.com/luthermonson/go-proxmox v0.2.4
+	github.com/luthermonson/go-proxmox v0.3.1
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
-	github.com/sergelogvinov/go-proxmox v0.0.0-20251219072020-49df3ed01611
+	github.com/sergelogvinov/go-proxmox v0.1.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
@@ -21,8 +21,7 @@ require (
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
 	k8s.io/cluster-bootstrap v0.34.3
-	k8s.io/klog/v2 v2.130.1
-	k8s.io/utils v0.0.0-20251220205832-9d40a56c1308
+	k8s.io/utils v0.0.0-20251222233032-718f0e51e6d2
 	sigs.k8s.io/controller-runtime v0.22.4
 	sigs.k8s.io/karpenter v1.8.0
 	sigs.k8s.io/yaml v1.6.0
@@ -95,6 +94,7 @@ require (
 	k8s.io/component-base v0.34.3 // indirect
 	k8s.io/component-helpers v0.34.3 // indirect
 	k8s.io/csi-translation-lib v0.34.3 // indirect
+	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20251125145642-4e65d59e963e // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect

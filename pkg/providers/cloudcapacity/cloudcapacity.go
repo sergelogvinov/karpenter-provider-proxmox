@@ -18,6 +18,7 @@ package cloudcapacity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -28,6 +29,7 @@ import (
 	"github.com/go-logr/logr"
 	proxmox "github.com/luthermonson/go-proxmox"
 
+	goproxmox "github.com/sergelogvinov/go-proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
@@ -82,8 +84,6 @@ type NodeCapacityInfo struct {
 	Name string
 	// Region is the region of the node.
 	Region string
-	// CPUInfo is the CPU information of the node.
-	CPUInfo proxmox.CPUInfo
 	// CPULoad is the CPU load of the node in percentage.
 	CPULoad int
 	// CapacityMaxCPU is the maximum number of CPUs available on the node.
@@ -173,7 +173,9 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 			continue
 		}
 
-		ns, err := cl.Nodes(ctx)
+		ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
+			return n.Status == "online", nil // nolint:goconst
+		})
 		if err != nil {
 			log.Error(err, "Failed to get nodes for region", "region", region)
 
@@ -182,20 +184,13 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 
 		nodes := make([]string, 0, len(ns))
 
+		// Permission: Sys.Audit
 		for _, item := range ns {
-			if item.Status != "online" {
-				continue
-			}
-
-			node, err := cl.Node(ctx, item.Node)
-			if err != nil {
-				log.Error(err, "Failed to find node in region", "node", item.Node, "region", region)
-				continue
-			}
+			log.V(4).Info("Processing node", "node", item.Node, "region", region, "maxCPU", item.MaxCPU, "maxMem", item.MaxMem)
 
 			key := fmt.Sprintf("%s/%s", region, item.Node)
 
-			allocatable, err := nodeAllocatable(ctx, node, uint64(item.MaxCPU), item.MaxMem)
+			allocatable, err := nodeAllocatable(ctx, cl, item.Node, item.MaxCPU, item.MaxMem)
 			if err != nil {
 				log.Error(err, "Failed to get allocatable resources for node", "node", item.Node, "region", region)
 
@@ -206,12 +201,12 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 			}
 
 			nodes = append(nodes, item.Node)
+
 			capacityInfo[key] = NodeCapacityInfo{
 				Name:           item.Node,
 				Region:         region,
-				CPUInfo:        node.CPUInfo,
-				CPULoad:        int(node.CPU * 100),
-				CapacityMaxCPU: uint64(item.MaxCPU),
+				CPULoad:        int(item.CPU * 100),
+				CapacityMaxCPU: item.MaxCPU,
 				CapacityMaxMem: item.MaxMem,
 				Capacity: corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", item.MaxCPU)),
@@ -220,7 +215,7 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 				Allocatable: allocatable,
 			}
 
-			networks, err := node.Networks(ctx, "any_bridge")
+			networks, err := (&proxmox.Node{}).New(cl.Client, item.Node).Networks(ctx, "any_bridge")
 			if err != nil {
 				log.Error(err, "Failed to get network interfaces for node", "node", item.Node, "region", region)
 			}
@@ -266,9 +261,10 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 	}
 
 	log.V(1).Info("Syncing finished", "nodes", len(capacityInfo))
+	log.V(4).Info("Node network info", "networkIfaceInfo", networkIfaceInfo)
 
 	for key, info := range capacityInfo {
-		log.V(4).Info("Node capacity available", "node", key, "cpu", info.Allocatable.Cpu().String(), "memory", info.Allocatable.Memory().String())
+		log.V(1).Info("Node capacity available", "node", key, "cpu", info.Allocatable.Cpu().String(), "memory", info.Allocatable.Memory().String())
 	}
 
 	p.capacityInfo = capacityInfo
@@ -293,15 +289,23 @@ func (p *DefaultProvider) UpdateNodeCapacityInZone(ctx context.Context, region, 
 		return err
 	}
 
-	node, err := cl.Node(ctx, zone)
+	ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
+		return n.Status == "online" && n.Name == zone, nil
+	})
 	if err != nil {
 		return fmt.Errorf("cannot find node with name %s in region %s: %w", zone, region, err)
 	}
 
+	if len(ns) == 0 {
+		return fmt.Errorf("node with name %s not found in region %s", zone, region)
+	}
+
+	node := ns[0]
+
 	key := fmt.Sprintf("%s/%s", region, zone)
 	nodeCapacity := p.capacityInfo[key]
 
-	allocatable, err := nodeAllocatable(ctx, node, nodeCapacity.CapacityMaxCPU, nodeCapacity.CapacityMaxMem)
+	allocatable, err := nodeAllocatable(ctx, cl, zone, nodeCapacity.CapacityMaxCPU, nodeCapacity.CapacityMaxMem)
 	if err != nil {
 		log.Error(err, "Failed to get allocatable resources for node", "node", zone, "region", region)
 
@@ -325,7 +329,7 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 	defer p.muCapacityInfo.Unlock()
 
 	for region := range p.zoneList {
-		log.V(1).Info("Syncing capacity for region", "region", region)
+		log.V(4).Info("Syncing capacity for region", "region", region)
 
 		cl, err := p.pool.GetProxmoxCluster(region)
 		if err != nil {
@@ -334,25 +338,16 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 			continue
 		}
 
-		cluster, err := cl.Cluster(ctx)
+		ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
+			return n.Status == "online", nil // nolint:goconst
+		})
 		if err != nil {
-			log.Error(err, "Failed to get cluster status", "region", region)
+			log.Error(err, "Failed to get nodes for region", "region", region)
 
 			continue
 		}
 
-		nodeResources, err := cluster.Resources(ctx, "node")
-		if err != nil {
-			log.Error(err, "Failed to list node resources", "region", region)
-
-			continue
-		}
-
-		for _, item := range nodeResources {
-			if item.Status != "online" {
-				continue
-			}
-
+		for _, item := range ns {
 			key := fmt.Sprintf("%s/%s", region, item.Node)
 
 			if info, ok := p.capacityInfo[key]; ok {
@@ -385,59 +380,50 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 			continue
 		}
 
-		cluster, err := cl.Cluster(ctx)
-		if err != nil {
-			log.Error(err, "Failed to get cluster status", "region", region)
+		storageResources, err := cl.GetClusterStoragesByFilter(ctx, func(r *proxmox.ClusterResource) (bool, error) {
+			capabilitys := strings.Split(r.Content, ",")
 
-			continue
-		}
-
-		storageResources, err := cluster.Resources(ctx, "storage")
+			return r.Status == "available" && slices.ContainsFunc(capabilitys, func(c string) bool {
+				return c == "images" || c == "iso" || c == "import"
+			}), nil
+		})
 		if err != nil {
-			log.Error(err, "Failed to list storage resources", "region", region)
+			log.Error(err, "Failed to get storages for region", "region", region)
 
 			continue
 		}
 
 		storages := []string{}
-		capacityZone := make(map[string]NodeStorageCapacityInfo)
 
 		for _, item := range storageResources {
-			if item.Status != "available" {
-				continue
+			key := fmt.Sprintf("%s/%s/%s", region, item.Storage, item.Node)
+
+			info := NodeStorageCapacityInfo{
+				Name:         item.Storage,
+				Region:       region,
+				Zones:        []string{item.Node},
+				Shared:       item.Shared == 1,
+				Type:         item.PluginType,
+				Capabilities: strings.Split(item.Content, ","),
 			}
 
-			capabilitys := strings.Split(item.Content, ",")
-			if slices.Contains(capabilitys, "images") || slices.Contains(capabilitys, "iso") || slices.Contains(capabilitys, "import") {
-				key := fmt.Sprintf("%s/%s/%s", region, item.Storage, item.Node)
+			capacityInfo[key] = info
 
-				info := NodeStorageCapacityInfo{
-					Name:         item.Storage,
-					Region:       region,
-					Zones:        []string{item.Node},
-					Shared:       item.Shared == 1,
-					Type:         item.PluginType,
-					Capabilities: capabilitys,
-				}
-
-				capacityZone[key] = info
-
-				if !slices.Contains(storages, item.Storage) {
-					storages = append(storages, item.Storage)
-				}
+			if !slices.Contains(storages, item.Storage) {
+				storages = append(storages, item.Storage)
 			}
 		}
 
 		for _, storage := range storages {
 			zones := []string{}
 
-			for _, info := range capacityZone {
+			for _, info := range capacityInfo {
 				if info.Name == storage && info.Region == region {
 					zones = append(zones, info.Zones...)
 				}
 			}
 
-			for _, info := range capacityZone {
+			for _, info := range capacityInfo {
 				if info.Name == storage && info.Region == region {
 					capacityInfo[fmt.Sprintf("%s/%s", region, storage)] = NodeStorageCapacityInfo{
 						Name:         info.Name,
@@ -576,10 +562,12 @@ func (p *DefaultProvider) SortZonesByCPULoad(region string, zones []string) []st
 	return sortedZones
 }
 
-func nodeAllocatable(ctx context.Context, node *proxmox.Node, maxCPU, maxMem uint64) (corev1.ResourceList, error) {
-	vms, err := node.VirtualMachines(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list vms for node %s: %w", node.Name, err)
+func nodeAllocatable(ctx context.Context, c *goproxmox.APIClient, node string, maxCPU, maxMem uint64) (corev1.ResourceList, error) {
+	vms, err := c.GetVMsByFilter(ctx, func(vm *proxmox.ClusterResource) (bool, error) {
+		return vm.Node == node && vm.Status == "running", nil
+	})
+	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+		return nil, fmt.Errorf("cannot list vms for node %s: %w", node, err)
 	}
 
 	var (
@@ -588,11 +576,7 @@ func nodeAllocatable(ctx context.Context, node *proxmox.Node, maxCPU, maxMem uin
 	)
 
 	for _, vm := range vms {
-		if vm.Status != "running" {
-			continue
-		}
-
-		cpuUsage += int64(vm.CPUs)
+		cpuUsage += int64(vm.MaxCPU)
 		memUsage += int64(vm.MaxMem)
 	}
 

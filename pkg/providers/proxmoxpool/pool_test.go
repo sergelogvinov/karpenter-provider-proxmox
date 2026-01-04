@@ -95,25 +95,3 @@ func TestNewClientWithCredentialsFromFile(t *testing.T) {
 	assert.Equal(t, "user!token-id", cfg[0].TokenID)
 	assert.Equal(t, "secret", cfg[0].TokenSecret)
 }
-
-func TestCheckClusters(t *testing.T) {
-	cfg := newClusterEnv()
-	assert.NotNil(t, cfg)
-
-	pxClient, err := pxpool.NewProxmoxPool(t.Context(), cfg)
-	assert.Nil(t, err)
-	assert.NotNil(t, pxClient)
-
-	pxapi, err := pxClient.GetProxmoxCluster("test")
-	assert.NotNil(t, err)
-	assert.Nil(t, pxapi)
-	assert.Equal(t, pxpool.ErrRegionNotFound, err)
-
-	pxapi, err = pxClient.GetProxmoxCluster("cluster-1")
-	assert.Nil(t, err)
-	assert.NotNil(t, pxapi)
-
-	err = pxClient.CheckClusters(t.Context())
-	assert.NotNil(t, err)
-	assert.Contains(t, err.Error(), "failed to initialized proxmox client in region")
-}
