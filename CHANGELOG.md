@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.1...v0.7.2) (2026-01-04)
+
+
+### Bug Fixes
+
+* download images ([6753c5d](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/6753c5d921e458473516a4afb7ecf4d954cb9681))
+
 ## [0.7.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.0...v0.7.1) (2025-10-27)
 
 
