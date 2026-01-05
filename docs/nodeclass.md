@@ -74,6 +74,10 @@ spec:
     - name: kubernetes
       # Interface to apply the security group
       interface: net0
+
+  # ResourcePool is the Proxmox resource pool name where VMs will be placed.
+  # Optional
+  resourcePool: k8s-pool
 ```
 
 ### Parameters:
@@ -112,6 +116,13 @@ spec:
   - `name` - The name of the security group.
   - `interface` - The interface to apply the security group.
 
+* `resourcePool` - The Proxmox resource pool name where VMs will be placed. Optional.
+  If specified, cloned VMs will be added to this pool during creation.
+  The pool must already exist in Proxmox.
+  Supports nested pools up to 3 levels (e.g., `parent/child/grandchild`).
+  Note: PVE 9+ requires pool names to start with a letter; PVE 8 allows names starting with digits but this is deprecated.
+  This option does __not__ trigger drift - changes to resourcePool are ignored during drift evaluation.
+
 Karpenter supports instance drift detection when an `ProxmoxNodeClass` is updated.
 If a change affects a node, Karpenter may replace (drift) the instance to align with the new configuration.
 However, some parameters __do not trigger__ drift.
@@ -119,6 +130,7 @@ Changes to these fields are ignored during drift evaluation:
 * `tags`
 * `metadataOptions`
 * `securityGroups`
+* `resourcePool`
 
 The `ProxmoxTemplate` and `ProxmoxUnmanagedTemplate` resource definitions see [here](nodetemplateclass.md).
 

@@ -304,6 +304,17 @@ spec:
                   type: string
                 maxItems: 10
                 type: array
+              resourcePool:
+                description: |-
+                  ResourcePool is the Proxmox resource pool name where VMs will be placed.
+                  If specified, cloned VMs will be added to this pool during creation.
+                  The pool must already exist in Proxmox.
+                  Supports nested pools up to 3 levels (e.g., "parent/child/grandchild").
+                  Note: PVE 9+ requires pool names to start with a letter; PVE 8 allows
+                  names starting with digits but this is deprecated.
+                maxLength: 64
+                pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$
+                type: string
             required:
             - instanceTemplateRef
             type: object
