@@ -100,6 +100,17 @@ type ProxmoxNodeClassSpec struct {
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
 	SecurityGroups []SecurityGroups `json:"securityGroups,omitempty" hash:"ignore"`
+
+	// ResourcePool is the Proxmox resource pool name where VMs will be placed.
+	// If specified, cloned VMs will be added to this pool during creation.
+	// The pool must already exist in Proxmox.
+	// Supports nested pools up to 3 levels (e.g., "parent/child/grandchild").
+	// Note: PVE 9+ requires pool names to start with a letter; PVE 8 allows
+	// names starting with digits but this is deprecated.
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$`
+	// +optional
+	ResourcePool string `json:"resourcePool,omitempty" hash:"ignore"`
 }
 
 // PlacementStrategy defines how nodes should be placed across zones

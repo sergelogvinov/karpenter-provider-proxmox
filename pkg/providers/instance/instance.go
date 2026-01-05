@@ -379,6 +379,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		Name:        nodeClaim.Name,
 		Description: fmt.Sprintf("Karpenter, class=%s, capacity=%s", nodeClass.Name, capacityType),
 		Full:        1,
+		Pool:        nodeClass.Spec.ResourcePool,
 		Storage:     storage,
 
 		CPU:          int(instanceType.Capacity.Cpu().Value()),
