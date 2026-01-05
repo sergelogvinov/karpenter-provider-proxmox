@@ -157,6 +157,15 @@ For more details, see:
 Contributions are welcomed and appreciated!
 See [Contributing](CONTRIBUTING.md) for our guidelines.
 
+If this project is useful to you, please consider starring the [repository](https://github.com/sergelogvinov/karpenter-provider-proxmox).
+
+## Privacy Policy
+
+This project does not collect or send any metrics or telemetry data.
+You can build the images yourself and store them in your private registry, see the [Makefile](Makefile) for details.
+
+To provide feedback or report an issue, please use the [GitHub Issues](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues).
+
 ## Community, discussion and support
 
 If you have any questions or want to get the latest project news, you can connect with us in the following ways:
