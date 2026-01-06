@@ -19,10 +19,13 @@ spec:
         fsGroup: 65534
         runAsGroup: 65534
         runAsUser: 65534
-      # tolerations:
-      #   - effect: NoSchedule
-      #     key: node-role.kubernetes.io/control-plane
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
       nodeSelector:
+        kubernetes.io/os: linux
+        # topology.kubernetes.io/region: fr-par-2
+        # node-role.kubernetes.io/logs: ""
         # node-role.kubernetes.io/control-plane: ""
         # kubernetes.io/hostname: kube-21
         # topology.kubernetes.io/zone: hvm-1

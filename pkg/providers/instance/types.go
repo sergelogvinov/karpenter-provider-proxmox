@@ -19,6 +19,7 @@ package instance
 import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -34,6 +35,12 @@ type Kubernetes struct {
 	RootCA               string
 	BootstrapToken       string
 	KubeletConfiguration *KubeletConfiguration
+}
+
+type KubernetesTaint struct {
+	Key    string             `yaml:"key,omitempty"`
+	Value  string             `yaml:"value,omitempty"`
+	Effect corev1.TaintEffect `yaml:"effect,omitempty"`
 }
 
 type KubeletConfiguration struct {
@@ -119,6 +126,11 @@ type KubeletConfiguration struct {
 	// Currently only cpu, memory and local ephemeral storage for root file system are supported.
 	// See https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources for more detail.
 	EvictionHard map[string]string `yaml:"evictionHard,omitempty"`
+
+	// RegisterWithTaints is a list of taints to add to a node object when the kubelet registers itself.
+	// This only takes effect when registerNode is true and upon the initial registration of the node
+	// See https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration
+	RegisterWithTaints []KubernetesTaint `yaml:"registerWithTaints,omitempty"`
 }
 
 // DefaultEvictionHard is the default eviction hard thresholds for Kubernetes

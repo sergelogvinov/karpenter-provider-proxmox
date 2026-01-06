@@ -67,8 +67,6 @@ machine:
   kubelet:
     image: ghcr.io/siderolabs/kubelet:{{ .Values.kubeletVersion }}
     defaultRuntimeSeccompProfileEnabled: true
-    extraArgs:
-      register-with-taints: "karpenter.sh/unregistered=:NoExecute"
     extraConfig:
       {{- .Kubernetes.KubeletConfiguration | toYamlPretty | nindent 6 }}
   install:
