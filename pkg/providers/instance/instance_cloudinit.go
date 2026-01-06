@@ -239,6 +239,15 @@ func (p *DefaultProvider) generateCloudInitVars(
 	}
 	userdataValues.Kubernetes.KubeletConfiguration.ProviderID = metadataValues.ProviderID
 
+	if len(userdataValues.Kubernetes.KubeletConfiguration.RegisterWithTaints) == 0 {
+		userdataValues.Kubernetes.KubeletConfiguration.RegisterWithTaints = []KubernetesTaint{
+			{
+				Key:    karpv1.UnregisteredTaintKey,
+				Effect: corev1.TaintEffectNoExecute,
+			},
+		}
+	}
+
 	userdata := string(secret.Data["user-data"])
 	if userdata == "" {
 		userdata = cloudinit.DefaultUserdata

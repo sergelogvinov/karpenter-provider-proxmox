@@ -73,6 +73,12 @@ func TestUserData(t *testing.T) {
 			AllowedUnsafeSysctls:  []string{"kernel.msgmax", "kernel.shmmax"},
 			TopologyManagerPolicy: "best-effort",
 			ProviderID:            provider.GetProviderID(region, 100),
+			RegisterWithTaints: []instance.KubernetesTaint{
+				{
+					Key:    "example-key",
+					Effect: "NoSchedule",
+				},
+			},
 		},
 		Values: map[string]string{
 			"SSHAuthorizedKeys": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...,ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...",
@@ -129,6 +135,9 @@ write_files:
           - kernel.msgmax
           - kernel.shmmax
         providerID: proxmox://test-region/100
+        registerWithTaints:
+          - key: example-key
+            effect: NoSchedule
       values:
         SSHAuthorizedKeys: ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCu...,ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...
     owner: root:root
@@ -154,6 +163,9 @@ write_files:
         - kernel.msgmax
         - kernel.shmmax
       providerID: proxmox://test-region/100
+      registerWithTaints:
+        - key: example-key
+          effect: NoSchedule
   - path: /etc/kubernetes/kubelet-labels.conf
     permissions: 0o600
     defer: true
