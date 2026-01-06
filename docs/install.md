@@ -10,6 +10,12 @@ Create `Karpenter` role in Proxmox:
 pveum role add Karpenter -privs "Datastore.Allocate Datastore.AllocateSpace Datastore.AllocateTemplate Datastore.Audit Mapping.Audit Mapping.Use Sys.Audit Sys.AccessNetwork SDN.Audit SDN.Use VM.Audit VM.Allocate VM.Clone VM.Config.CDROM VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.HWType VM.Config.Cloudinit VM.Config.Options VM.PowerMgmt"
 ```
 
+If you want to update VM pool membership in ProxmoxNodeClass resource, add also the following privileges to the role:
+
+```shell
+pveum role modify Karpenter --append --privs "Pool.Audit Pool.Allocate"
+```
+
 Next create a user `kubernetes@pve` for the Karpenter plugin and grant it the above role
 
 ```shell

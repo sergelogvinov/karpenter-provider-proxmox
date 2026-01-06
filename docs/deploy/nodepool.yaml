@@ -60,6 +60,7 @@ spec:
       interface: net0
     # - name: kubernetes
     #   interface: net1
+  resourcePool: talos-k8s-proxmox
   tags:
     - talos-k8s-proxmox
     - karpenter

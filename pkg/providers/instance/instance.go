@@ -54,6 +54,7 @@ type Provider interface {
 
 	UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error
 	UpdateTags(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error
+	UpdatePoolMembership(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error
 
 	DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error
 }
@@ -312,6 +313,68 @@ func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.Node
 	return nil
 }
 
+func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
+	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	if err != nil {
+		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+	}
+
+	if region == "" {
+		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
+	}
+
+	px, err := p.cluster.GetProxmoxCluster(region)
+	if err != nil {
+		return pxpool.ErrRegionNotFound
+	}
+
+	poolName := nodeClass.Spec.ResourcePool
+	poolNameOld := nodeClaim.Annotations[v1alpha1.AnnotationProxmoxNodeClassPool]
+
+	if poolName != poolNameOld && poolNameOld != "" {
+		pool, err := px.Client.Pool(ctx, poolNameOld, "qemu")
+		if err != nil {
+			return fmt.Errorf("failed to get pool %s: %w", poolNameOld, err)
+		}
+
+		if _, ok := lo.Find(pool.Members, func(m proxmox.ClusterResource) bool {
+			return m.VMID == uint64(vmid)
+		}); ok {
+			err = pool.Update(ctx, &proxmox.PoolUpdateOption{
+				Delete:          true,
+				VirtualMachines: fmt.Sprintf("%d", vmid),
+			})
+			if err != nil {
+				return fmt.Errorf("failed to remove vm %d from pool %s: %w", vmid, poolNameOld, err)
+			}
+		}
+	}
+
+	if poolName == "" {
+		return nil
+	}
+
+	pool, err := px.Client.Pool(ctx, poolName, "qemu")
+	if err != nil {
+		return fmt.Errorf("failed to get pool %s: %w", poolName, err)
+	}
+
+	if _, ok := lo.Find(pool.Members, func(m proxmox.ClusterResource) bool {
+		return m.VMID == uint64(vmid)
+	}); ok {
+		return nil
+	}
+
+	err = pool.Update(ctx, &proxmox.PoolUpdateOption{
+		VirtualMachines: fmt.Sprintf("%d", vmid),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to add vm %d to pool %s: %w", vmid, poolName, err)
+	}
+
+	return nil
+}
+
 func (p *DefaultProvider) DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
 	if err != nil {
@@ -350,7 +413,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	vmTemplateID := instanceTemplate.TemplateID
 	if vmTemplateID == 0 {
-		return nil, fmt.Errorf("could not find vm template: %w", err)
+		return nil, fmt.Errorf("could not find vm template")
 	}
 
 	storage := nodeClass.Spec.BootDevice.Storage

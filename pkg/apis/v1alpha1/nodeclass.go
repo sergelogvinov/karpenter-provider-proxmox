@@ -284,6 +284,7 @@ type SecurityGroups struct {
 type inPlaceUpdateFields struct {
 	SecurityGroups []SecurityGroups `json:"securityGroups,omitempty"`
 	Tags           []string         `json:"tags,omitempty"`
+	ResourcePool   string           `json:"resourcePool,omitempty"`
 }
 
 func (in *ProxmoxNodeClass) Hash() string {
@@ -298,6 +299,7 @@ func (in *ProxmoxNodeClass) InPlaceHash() string {
 	hashStruct := &inPlaceUpdateFields{
 		SecurityGroups: in.Spec.SecurityGroups,
 		Tags:           in.Spec.Tags,
+		ResourcePool:   in.Spec.ResourcePool,
 	}
 
 	return fmt.Sprint(lo.Must(hashstructure.Hash(hashStruct, hashstructure.FormatV2, &hashstructure.HashOptions{

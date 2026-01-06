@@ -22,13 +22,11 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 type InstanceSecurityGroups struct {
-	kubeClient       client.Client
 	instanceProvider instance.Provider
 }
 
