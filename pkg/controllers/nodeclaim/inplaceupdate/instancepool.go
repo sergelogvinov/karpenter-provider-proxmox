@@ -26,12 +26,12 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-type InstanceTag struct {
+type InstancePool struct {
 	instanceProvider instance.Provider
 }
 
-func (i *InstanceTag) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
-	if err := i.instanceProvider.UpdateTags(ctx, nodeClaim, nodeClass); err != nil {
+func (i *InstancePool) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
+	if err := i.instanceProvider.UpdatePoolMembership(ctx, nodeClaim, nodeClass); err != nil {
 		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, err
 	}
 

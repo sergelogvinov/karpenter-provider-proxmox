@@ -56,20 +56,22 @@ type nodeTemplateStatusReconciler interface {
 // Controller reconciles an ProxmoxNodeTemplateClass object to update its status
 type Controller struct {
 	kubeClient                     client.Client
-	instanceTagProvider            *InstanceTag
+	instancePoolProvider           *InstancePool
 	instanceSecurityGroupsProvider *InstanceSecurityGroups
+	instanceTagProvider            *InstanceTag
 }
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, instanceProvider instance.Provider) *Controller {
 	return &Controller{
 		kubeClient: kubeClient,
-		instanceTagProvider: &InstanceTag{
-			kubeClient:       kubeClient,
+		instancePoolProvider: &InstancePool{
 			instanceProvider: instanceProvider,
 		},
 		instanceSecurityGroupsProvider: &InstanceSecurityGroups{
-			kubeClient:       kubeClient,
+			instanceProvider: instanceProvider,
+		},
+		instanceTagProvider: &InstanceTag{
 			instanceProvider: instanceProvider,
 		},
 	}
@@ -116,6 +118,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 	for _, reconciler := range []nodeTemplateStatusReconciler{
 		c.instanceTagProvider,
 		c.instanceSecurityGroupsProvider,
+		c.instancePoolProvider,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClaim, nodeClass)
 		errs = multierr.Append(errs, err)
@@ -126,6 +129,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 	if errs == nil {
 		nodeClaim.Annotations = lo.Assign(nodeClaim.Annotations, map[string]string{
 			v1alpha1.AnnotationProxmoxNodeInPlaceUpdateHash: nodeClassHash,
+			v1alpha1.AnnotationProxmoxNodeClassPool:         nodeClass.Spec.ResourcePool,
 		})
 	}
 

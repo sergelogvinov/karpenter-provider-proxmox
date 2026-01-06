@@ -31,6 +31,9 @@ const (
 	// AnnotationProxmoxNodeClassHashVersion is the annotation key for the version of the hash function
 	AnnotationProxmoxNodeClassHashVersion = apis.Group + "/proxmoxnodeclass-hash-version"
 
+	// AnnotationProxmoxNodeClassPool is the annotation key for the ProxmoxNodeClass pool
+	AnnotationProxmoxNodeClassPool = apis.Group + "/proxmoxnodeclass-pool"
+
 	// AnnotationProxmoxTemplateClassHash is the annotation key for the hash of the ProxmoxTemplateClasses
 	AnnotationProxmoxTemplateClassHash = apis.Group + "/proxmoxtemplateclass-hash"
 
