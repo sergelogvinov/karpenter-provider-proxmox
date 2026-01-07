@@ -14,35 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inplaceupdate
+package termination
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
-const (
-	templateUpdatePeriod = time.Minute
-)
+const templateRepeatPeriod = 10 * time.Second
 
-// Controller reconciles an ProxmoxNodeTemplateClass object to update its status
+// Controller reconciles an ProxmoxTemplate object to update its status
 type Controller struct {
 	kubeClient               client.Client
 	instanceTemplateProvider instancetemplate.Provider
@@ -57,56 +56,16 @@ func NewController(kubeClient client.Client, instanceTemplateProvider instancete
 }
 
 func (c *Controller) Name() string {
-	return "nodetemplateclass.inplaceupdate"
+	return "nodetemplateclass.termination"
 }
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	if templateClass.Status.ImageID == "" || len(templateClass.Status.Zones) == 0 {
-		return reconcile.Result{}, nil
+	if !templateClass.GetDeletionTimestamp().IsZero() {
+		return c.finalize(ctx, templateClass)
 	}
-
-	if status := templateClass.StatusConditions().Get(v1alpha1.ConditionTemplateReady); status == nil || !status.IsTrue() {
-		return reconcile.Result{RequeueAfter: templateUpdatePeriod}, nil
-	}
-
-	if templateClass.Annotations[v1alpha1.AnnotationProxmoxTemplateHash] != templateClass.Hash() {
-		return reconcile.Result{RequeueAfter: templateUpdatePeriod}, nil
-	}
-
-	inPlaceHash := templateClass.InPlaceHash()
-
-	if templateClass.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] == inPlaceHash {
-		return reconcile.Result{}, nil
-	}
-
-	log.FromContext(ctx).V(4).Info("comparing in-place update hashes",
-		"templateClass", templateClass.Name,
-		"inPlaceHash", inPlaceHash,
-	)
-
-	err := c.instanceTemplateProvider.Update(ctx, templateClass)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	templateClassCopy := templateClass.DeepCopy()
-	templateClassCopy.Annotations = lo.Assign(templateClass.Annotations, map[string]string{
-		v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash: inPlaceHash,
-	})
-
-	if !equality.Semantic.DeepEqual(templateClass, templateClassCopy) {
-		if err := c.kubeClient.Patch(ctx, templateClassCopy, client.MergeFrom(templateClass)); err != nil {
-			return reconcile.Result{}, err
-		}
-	}
-
-	log.FromContext(ctx).V(1).Info("Finished in-place update",
-		"templateClass", templateClass.Name,
-		"inPlaceHash", inPlaceHash,
-	)
 
 	return reconcile.Result{}, nil
 }
@@ -115,10 +74,49 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1alpha1.ProxmoxTemplate{}, builder.WithPredicates(inPlaceChangedPredicate{})).
+		For(&v1alpha1.ProxmoxTemplate{}).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 10,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+func (c *Controller) finalize(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
+	if !controllerutil.ContainsFinalizer(templateClass, v1alpha1.TerminationFinalizer) {
+		return reconcile.Result{}, nil
+	}
+
+	templateClassCopy := templateClass.DeepCopy()
+
+	if len(templateClass.Status.Zones) > 0 {
+		err := c.instanceTemplateProvider.Delete(ctx, templateClass)
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to delete Proxmox Template", "templateClass", templateClass.Name)
+
+			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil //nolint: nilerr
+		}
+	}
+
+	if len(templateClass.Status.Zones) == 0 {
+		controllerutil.RemoveFinalizer(templateClass, v1alpha1.TerminationFinalizer)
+
+		log.FromContext(ctx).Info("Finished cleaning up Proxmox Templates")
+	}
+
+	if !equality.Semantic.DeepEqual(templateClassCopy, templateClass) {
+		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
+		// can cause races due to the fact that it fully replaces the list on a change
+		// Here, we are updating the finalizer list
+		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
+		if err := c.kubeClient.Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+
+			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
+		}
+	}
+
+	return reconcile.Result{}, nil
 }

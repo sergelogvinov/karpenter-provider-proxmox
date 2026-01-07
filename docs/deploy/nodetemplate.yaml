@@ -22,9 +22,13 @@ spec:
   storageIDs:
     - local
     - system
-  machine: "pc"
-  agent:
-    enabled: true
+
+  # description: "ubuntu image"
+  # machine: "pc"
+  bios: "ovmf"
+  # tpm: {}
+  # agent:
+  #   enabled: true
   vga:
     type: serial0
   network:
@@ -45,3 +49,4 @@ spec:
   tags:
     - talos-k8s-proxmox
     - karpenter
+  resourcePool: talos-k8s-proxmox

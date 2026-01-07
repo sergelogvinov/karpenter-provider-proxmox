@@ -26,8 +26,11 @@ import (
 	nodeclaimlifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/lifecycle"
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
+	nodetemplateclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/hash"
 	nodetemplateclassinplaceupdate "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/inplaceupdate"
 	nodetemplateclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/status"
+	nodetemplateclasstermination "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/termination"
+	nodetemplateunmanagedclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/hash"
 	nodetemplateunmanagedclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/status"
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
@@ -62,7 +65,10 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, cloudCapacityProvider),
 		nodetemplateclassinplaceupdate.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateclasshash.NewController(kubeClient),
 		nodetemplateclassstatus.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateclasstermination.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateunmanagedclasshash.NewController(kubeClient),
 		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
 		cloudcapacitynodeload.NewController(cloudCapacityProvider, instanceTypeProvider),
