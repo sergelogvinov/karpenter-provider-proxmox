@@ -18,7 +18,6 @@ package status
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"github.com/awslabs/operatorpkg/reasonable"
@@ -33,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -68,10 +68,9 @@ func (c *Controller) Name() string {
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-	log.FromContext(ctx).V(1).Info("Syncing Proxmox Templates")
 
 	if !templateClass.GetDeletionTimestamp().IsZero() {
-		return c.finalize(ctx, templateClass)
+		return reconcile.Result{}, nil
 	}
 
 	templateClassCopy := templateClass.DeepCopy()
@@ -82,8 +81,10 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 			return reconcile.Result{}, err
 		}
 
-		return reconcile.Result{}, nil
+		return reconcile.Result{Requeue: true}, nil
 	}
+
+	log.FromContext(ctx).V(1).Info("Syncing Proxmox Templates")
 
 	var errs error
 
@@ -120,6 +121,8 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 		return reconcile.Result{}, errs
 	}
 
+	log.FromContext(ctx).V(1).Info("Finished syncing Proxmox Templates", "zones", len(templateClass.Status.Zones))
+
 	return result.Min(results...), nil
 }
 
@@ -127,46 +130,10 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1alpha1.ProxmoxTemplate{}).
+		For(&v1alpha1.ProxmoxTemplate{}, builder.WithPredicates(templateChangedPredicate{})).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 10,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
-}
-
-func (c *Controller) finalize(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
-	if !controllerutil.ContainsFinalizer(templateClass, v1alpha1.TerminationFinalizer) {
-		return reconcile.Result{}, nil
-	}
-
-	templateClassCopy := templateClass.DeepCopy()
-	result := reconcile.Result{}
-
-	if len(templateClass.Status.Zones) > 0 {
-		err := c.instanceTemplateProvider.instanceTemplateProvider.Delete(ctx, templateClass)
-		if err != nil {
-			result = reconcile.Result{RequeueAfter: templateRepeatPeriod}
-		}
-	}
-
-	if len(templateClass.Status.Zones) == 0 {
-		controllerutil.RemoveFinalizer(templateClass, v1alpha1.TerminationFinalizer)
-	}
-
-	if !equality.Semantic.DeepEqual(templateClassCopy, templateClass) {
-		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-		// can cause races due to the fact that it fully replaces the list on a change
-		// Here, we are updating the finalizer list
-		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-		if err := c.kubeClient.Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
-			}
-
-			return result, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))
-		}
-	}
-
-	return result, nil
 }

@@ -66,7 +66,7 @@ func (c *Controller) Name() string {
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
-	log.FromContext(ctx).V(1).Info("Syncing Proxmox Unmanaged Templates")
+	log.FromContext(ctx).V(4).Info("Syncing Proxmox Unmanaged Templates")
 
 	templateClassCopy := templateClass.DeepCopy()
 
@@ -103,6 +103,8 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 	if errs != nil {
 		return reconcile.Result{}, errs
 	}
+
+	log.FromContext(ctx).V(1).Info("Finished syncing Proxmox Unmanaged Templates", "zones", len(templateClass.Status.Zones))
 
 	return result.Min(results...), nil
 }

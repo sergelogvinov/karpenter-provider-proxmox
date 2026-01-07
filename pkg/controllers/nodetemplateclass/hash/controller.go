@@ -54,6 +54,10 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	if !templateClass.GetDeletionTimestamp().IsZero() {
+		return reconcile.Result{}, nil
+	}
+
 	if templateClass.Status.ImageID == "" || len(templateClass.Status.Zones) == 0 {
 		return reconcile.Result{}, nil
 	}

@@ -19,6 +19,7 @@ package instancetemplate
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,7 +40,7 @@ import (
 )
 
 type Provider interface {
-	SyncInstanceTemplates(context.Context) error
+	SyncInstanceTemplates(ctx context.Context, regions ...string) error
 
 	Create(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
 	Delete(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
@@ -163,16 +164,21 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 					return
 				}
 
+				// Refresh instance templates cache before creating new one
+				p.SyncInstanceTemplates(ctx, region)
+
 				vmid, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
 				if err != nil || vmid == 0 {
+					log.Error(err, "Failed to create template", "region", region, "zone", zone)
+
 					return
 				}
-
-				p.SyncInstanceTemplates(ctx)
 
 				installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
 			}(zone)
 		}
+
+		p.SyncInstanceTemplates(ctx, region)
 	}
 
 	if len(installedZones) > 0 {
@@ -185,7 +191,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 
 func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
 	log := log.FromContext(ctx).WithName("instancetemplate.Delete()").WithValues("imageID", templateClass.Status.ImageID)
-	log.V(1).Info("Deleting template")
+	log.V(1).Info("Deleting templates and images")
 
 	imageID := templateClass.Status.ImageID
 
@@ -203,7 +209,12 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 		zone := parts[1]
 
 		if len(parts) == 3 {
-			vmid, _ := strconv.Atoi(parts[2])
+			vmid, err := strconv.Atoi(parts[2])
+			if err != nil {
+				log.Error(err, "Failed to parse vmid", "vmid", parts[2])
+
+				continue
+			}
 
 			if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
 				log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
@@ -298,16 +309,23 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*In
 	return instanceTemplates
 }
 
-func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context) error {
+func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...string) error {
 	log := p.log.WithName("SyncInstanceTemplates()")
 
 	p.muInstanceTemplates.Lock()
 	defer p.muInstanceTemplates.Unlock()
 
-	instanceTemplateInfo := make(map[string][]InstanceTemplateInfo)
+	if p.instanceTemplate == nil {
+		p.instanceTemplate = make(map[string][]InstanceTemplateInfo)
+	}
+
 	instanceTemplates := 0
 
-	for _, region := range p.pool.GetRegions() {
+	if len(regions) == 0 {
+		regions = p.pool.GetRegions()
+	}
+
+	for _, region := range regions {
 		log.V(4).Info("Syncing instance template for region", "region", region)
 
 		cl, err := p.pool.GetProxmoxCluster(region)
@@ -347,6 +365,14 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context) error {
 			if vmRes.VirtualMachineConfig != nil {
 				info.TemplateTags = strings.Split(vmRes.VirtualMachineConfig.Tags, ";")
 				info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(vmRes.VirtualMachineConfig.Meta, hashstructure.FormatV2, nil)))
+
+				if strings.Contains(vmRes.VirtualMachineConfig.Description, "Hash: ") {
+					re := regexp.MustCompile(`Hash:\s*(\d+)`)
+					if matches := re.FindStringSubmatch(vmRes.VirtualMachineConfig.Description); len(matches) > 1 {
+						info.TemplateHash = strings.TrimSpace(matches[1])
+					}
+				}
+
 				info.Status = InstanceTemplateStatusAvailable
 
 				disks := vmRes.VirtualMachineConfig.MergeDisks()
@@ -372,12 +398,10 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context) error {
 			instanceTemplates++
 		}
 
-		instanceTemplateInfo[region] = templateInfo
+		p.instanceTemplate[region] = templateInfo
 	}
 
-	log.V(4).Info("Instance templates updated", "instanceTemplates", instanceTemplates)
-
-	p.instanceTemplate = instanceTemplateInfo
+	log.V(1).Info("Instance templates updated", "instanceTemplates", instanceTemplates)
 
 	return nil
 }

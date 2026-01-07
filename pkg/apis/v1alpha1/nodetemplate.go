@@ -75,6 +75,16 @@ type ProxmoxTemplateSpec struct {
 	// +optional
 	Machine string `json:"machine,omitempty"`
 
+	// BIOS type for the VM template.
+	// +kubebuilder:validation:Enum=seabios;ovmf
+	// +kubebuilder:default=seabios
+	// +optional
+	Bios string `json:"bios,omitempty" hash:"ignore"`
+
+	// TPM configuration for the trusted platform module.
+	// +optional
+	TPM *TPM `json:"tpm,omitempty" hash:"ignore"`
+
 	// QemuGuestAgent enables the QEMU Guest Agent service in the VM template.
 	// +optional
 	QemuGuestAgent *QemuGuestAgent `json:"agent,omitempty"`
@@ -104,6 +114,14 @@ type ProxmoxTemplateSpec struct {
 	// +kubebuilder:validation:MaxItems=10
 	// +optional
 	Tags []string `json:"tags,omitempty"`
+
+	// ResourcePool is the Proxmox resource pool name where template VMs will be placed.
+	// If specified, template will be added to this pool during creation.
+	// The pool must already exist in Proxmox.
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$`
+	// +optional
+	ResourcePool string `json:"resourcePool,omitempty" hash:"ignore"`
 }
 
 type SourceImage struct {
@@ -178,6 +196,15 @@ type VGA struct {
 	// +kubebuilder:validation:Maximum=512
 	// +optional
 	Memory *int `json:"memory,omitempty"`
+}
+
+// TPM configuration of the trusted platform module.
+type TPM struct {
+	// Version of TPM device.
+	// +kubebuilder:validation:Enum=v1.2;v2.0
+	// +kubebuilder:default=v2.0
+	// +optional
+	Version string `json:"version,omitempty"`
 }
 
 // Network defines the network configuration for the VM template
@@ -266,14 +293,30 @@ type PCIDevice struct {
 	XVga *bool `json:"xvga,omitempty"`
 }
 
+type hashFields struct {
+	SourceImage *SourceImage `json:"sourceImage"`
+	StorageIDs  []string     `json:"storageIDs"`
+	Bios        string       `json:"bios,omitempty"`
+	TPM         *TPM         `json:"tpm,omitempty"`
+}
+
+// Hash computes a hash of the fields that require recreation of the template
 func (in *ProxmoxTemplate) Hash() string {
-	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
+	hashStruct := &hashFields{
+		SourceImage: in.Spec.SourceImage,
+		StorageIDs:  in.Spec.StorageIDs,
+		Bios:        in.Spec.Bios,
+		TPM:         in.Spec.TPM,
+	}
+
+	return fmt.Sprint(lo.Must(hashstructure.Hash(hashStruct, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
 		ZeroNil:         true,
 	})))
 }
 
+// InPlaceHash computes a hash of the fields that can be updated in place
 func (in *ProxmoxTemplate) InPlaceHash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,

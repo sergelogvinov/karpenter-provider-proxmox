@@ -153,14 +153,28 @@ func (p *DefaultProvider) createTemplate(
 	log := log.FromContext(ctx).WithName("instancetemplate.createTemplate").WithValues("region", region, "zone", zone, "storage", storageTemplate.Name)
 
 	imageID := templateClass.GetImageID()
-	log = log.WithValues("image", imageID)
+	log = log.WithValues("image", imageID, "hash", templateClass.Hash())
+
+	vmid := 0
 
 	templates := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
 		return info.Region == region && info.Zone == zone && info.Name == templateClass.Name
 	})
-	if len(templates) > 0 {
-		return int(templates[0].TemplateID), nil
+	for _, t := range templates {
+		if t.TemplateHash == templateClass.Hash() {
+			return int(t.TemplateID), nil
+		}
+
+		log.V(1).Info("Deleting outdated template", "templateID", t.TemplateID, "templateHash", t.TemplateHash)
+
+		if err := p.deleteTemplate(ctx, region, zone, int(t.TemplateID)); err != nil {
+			return 0, fmt.Errorf("failed to delete outdated template: %w", err)
+		}
+
+		vmid = int(t.TemplateID)
 	}
+
+	log.V(1).Info("Creating template")
 
 	cl, err := p.pool.GetProxmoxCluster(region)
 	if err != nil {
@@ -169,21 +183,40 @@ func (p *DefaultProvider) createTemplate(
 		return 0, err
 	}
 
-	vmid, err := cl.GetNextID(ctx, 1000)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get next id: %v", err)
+	if vmid == 0 {
+		vmid, err = cl.GetNextID(ctx, 1000)
+		if err != nil {
+			return 0, fmt.Errorf("failed to get next id: %v", err)
+		}
 	}
 
 	vm := defaultVirtualMachineTemplate()
 	vm["node"] = zone
 	vm["vmid"] = vmid
 	vm["name"] = templateClass.Name
-	vm["description"] = "The virtual machine managed by Karpenter, do not delete it"
 
 	applyVirtualMachineTemplateConfig(templateClass, vm)
 
 	disk := fmt.Sprintf("%s:0", storageTemplate.Name)
 	vm["scsi0"] = fmt.Sprintf("file=%s,format=raw,import-from=%s:%s/%s,iothread=on", disk, storageImage.Name, importContent, imageID)
+
+	if templateClass.Spec.TPM != nil {
+		vm["tpmstate0"] = fmt.Sprintf("file=%s:4,version=%s", storageTemplate.Name, templateClass.Spec.TPM.Version)
+	}
+
+	if templateClass.Spec.Bios == "ovmf" {
+		vm["efidisk0"] = fmt.Sprintf("%s:0,efitype=4m", storageTemplate.Name)
+	}
+
+	defer func() {
+		if err != nil {
+			if vmid != 0 {
+				if delErr := cl.DeleteVMByID(ctx, zone, vmid); delErr != nil {
+					log.Error(delErr, "failed to delete vm", "vmid", vmid, "region", region, "zone", zone)
+				}
+			}
+		}
+	}()
 
 	err = cl.CreateVM(ctx, zone, vm)
 	if err != nil {
@@ -264,7 +297,6 @@ func (p *DefaultProvider) updateTemplate(
 	vm["node"] = zone
 	vm["vmid"] = vmid
 	vm["name"] = templateClass.Name
-	vm["description"] = "The virtual machine managed by Karpenter, do not delete it"
 
 	applyVirtualMachineTemplateConfig(templateClass, vm)
 
@@ -313,12 +345,17 @@ func (p *DefaultProvider) updateTemplate(
 }
 
 func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, vm map[string]any) {
+	vm["description"] = "The virtual machine managed by Karpenter, do not delete it. Hash: " + templateClass.Hash()
 	if templateClass.Spec.Description != "" {
-		vm["description"] = templateClass.Spec.Description
+		vm["description"] = templateClass.Spec.Description + " Hash: " + templateClass.Hash()
 	}
 
 	if templateClass.Spec.Machine != "" {
 		vm["machine"] = templateClass.Spec.Machine
+	}
+
+	if templateClass.Spec.Bios != "" {
+		vm["bios"] = templateClass.Spec.Bios
 	}
 
 	if templateClass.Spec.QemuGuestAgent != nil {
@@ -445,6 +482,10 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 		slices.Sort(tags)
 
 		vm["tags"] = strings.Join(tags, ";")
+	}
+
+	if templateClass.Spec.ResourcePool != "" {
+		vm["pool"] = templateClass.Spec.ResourcePool
 	}
 }
 

@@ -54,6 +54,10 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
+	if len(templateClass.Status.Zones) == 0 {
+		return reconcile.Result{}, nil
+	}
+
 	templateClassCopy := templateClass.DeepCopy()
 	templateClassCopy.Annotations = lo.Assign(templateClass.Annotations, map[string]string{
 		v1alpha1.AnnotationProxmoxTemplateHash:        templateClass.Hash(),

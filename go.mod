@@ -13,7 +13,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
-	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260107053025-6c814d1396e0
+	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260108062913-58a517f3ee94
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
@@ -22,13 +22,14 @@ require (
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
 	k8s.io/cluster-bootstrap v0.34.3
-	k8s.io/utils v0.0.0-20251222233032-718f0e51e6d2
+	k8s.io/utils v0.0.0-20260106112306-0fe9cd71b2f8
 	sigs.k8s.io/controller-runtime v0.22.4
 	sigs.k8s.io/karpenter v1.8.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
+	github.com/avast/retry-go/v4 v4.7.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/goterm v1.0.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
