@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.2...v0.8.0) (2026-01-11)
+
+
+### Features
+
+* add bios and tpm configuration ([62d2a15](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/62d2a15d3bfc265aca5d8bbff3ce0d5283e18ecb))
+* add resource pool support for ProxmoxNodeClass ([abb423e](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/abb423ef53da7c02d7e1c3e077fa8453f495bac6))
+* inplace VM pool membership update ([cd4740a](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/cd4740a376517aa8b5c38a766b58122ec7b676f6))
+* vm templates in-place update ([835f276](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/835f276711928487670629e71b12a67456216226))
+
+
+### Bug Fixes
+
+* add required taint to the kubelet configuration ([a6b2ce6](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a6b2ce60639a907bc135e29014d2a3017739264b))
+
 ## [0.7.2](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.1...v0.7.2) (2026-01-04)
 
 
