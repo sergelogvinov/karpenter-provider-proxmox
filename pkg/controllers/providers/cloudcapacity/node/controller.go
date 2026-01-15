@@ -55,8 +55,8 @@ func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	work := []func(ctx context.Context) error{
-		c.cloudCapacityProvider.UpdateNodeCapacity,
-		c.cloudCapacityProvider.UpdateNodeStorageCapacity,
+		c.cloudCapacityProvider.SyncNodeCapacity,
+		c.cloudCapacityProvider.SyncNodeStorageCapacity,
 	}
 
 	errs := make([]error, len(work))

@@ -145,9 +145,6 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 				node.Labels[v1alpha1.LabelInstanceImageID] = template.TemplateHash
 
-				// FIXME: reserve capacity in creation stage
-				p.cloudCapacityProvider.UpdateNodeCapacityInZone(ctx, region, zone)
-
 				return node, nil
 			}
 		}
@@ -233,6 +230,10 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 	if err = p.cluster.DeleteVMByIDInRegion(ctx, region, vm); err != nil {
 		return fmt.Errorf("cannot delete vm with id %d: %w", vmid, err)
+	}
+
+	if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, vmid, nodeClaim.Status.Capacity); err != nil {
+		log.Error(err, "failed to release capacity after VM deletion", "vmID", vmid)
 	}
 
 	return nil
@@ -436,6 +437,10 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	capacityType := getCapacityType(nodeClaim, instanceType, region, zone)
 
+	if err := p.cloudCapacityProvider.AllocateCapacityInZone(ctx, region, zone, newID, instanceType.Capacity); err != nil {
+		return nil, fmt.Errorf("failed to reserve capacity: %v", err)
+	}
+
 	vmOptions := goproxmox.VMCloneRequest{
 		NewID:       newID,
 		Node:        zone,
@@ -454,24 +459,28 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	defer func() {
 		if err != nil {
+			if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, newID, instanceType.Capacity); err != nil {
+				log.Error(err, "failed to release capacity", "vmID", newID)
+			}
+
 			if newID == 0 {
 				return
 			}
 
 			if defErr := px.DeleteVMByID(ctx, zone, newID); defErr != nil {
-				fmt.Printf("failed to delete vm %d in region %s: %v", newID, region, defErr)
+				log.Error(defErr, "failed to delete vm", "vmID", newID)
 			}
 		}
 	}()
 
 	newID, err = px.CloneVM(ctx, int(vmTemplateID), vmOptions)
 	if err != nil {
-		return nil, fmt.Errorf("failed to clone vm template %d in region %s: %v", vmTemplateID, region, err)
+		return nil, fmt.Errorf("failed to clone vm template %d: %v", vmTemplateID, err)
 	}
 
 	err = p.instanceNetworkSetup(ctx, region, zone, newID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to configure networking for vm %d in region %s: %v", newID, region, err)
+		return nil, fmt.Errorf("failed to configure networking for vm %d: %v", newID, err)
 	}
 
 	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
@@ -487,14 +496,14 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	if len(rules) > 0 {
 		err = px.CreateVMFirewallRules(ctx, newID, zone, rules)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create firewall rules for vm %d in region %s: %v", newID, region, err)
+			return nil, fmt.Errorf("failed to create firewall rules for vm %d: %v", newID, err)
 		}
 	}
 
 	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
 		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, newID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", newID, region, err)
+			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d: %v", newID, err)
 		}
 	}
 
@@ -502,7 +511,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	vm, err := px.StartVMByID(ctx, zone, newID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to start vm %d in region %s: %v", newID, region, err)
+		return nil, fmt.Errorf("failed to start vm %d: %v", newID, err)
 	}
 
 	cpu := goproxmox.VMCPU{}

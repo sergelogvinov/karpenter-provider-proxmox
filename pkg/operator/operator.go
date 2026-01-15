@@ -69,7 +69,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	kubernetesBootstrapProvider := bootstrap.NewProvider(ctx, operator.KubernetesInterface)
 
 	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
-	cloudCapacityProvider.UpdateNodeCapacity(ctx)
+	cloudCapacityProvider.SyncNodeCapacity(ctx)
+	cloudCapacityProvider.SyncNodeStorageCapacity(ctx)
 
 	nodeIpamController := nodeipam.NewDefaultProvider(ctx, operator.KubernetesInterface, cloudCapacityProvider)
 	nodeIpamController.UpdateNodeCIDR(ctx)
