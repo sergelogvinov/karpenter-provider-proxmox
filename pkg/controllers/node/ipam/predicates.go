@@ -31,7 +31,7 @@ type ipChangedPredicate struct {
 var _ predicate.Predicate = ipChangedPredicate{}
 
 func (p ipChangedPredicate) Create(e event.CreateEvent) bool {
-	return false
+	return true
 }
 
 func (p ipChangedPredicate) Delete(e event.DeleteEvent) bool {

@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/karpenter/pkg/operator/injection"
 )
 
 const templateRepeatPeriod = 10 * time.Second
@@ -56,6 +58,8 @@ func (c *Controller) Name() string {
 
 // Reconcile executes a control loop for the resource
 func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
+	ctx = injection.WithControllerName(ctx, c.Name())
+
 	if !n.GetDeletionTimestamp().IsZero() {
 		c.nodeIpamProvider.ReleaseNodeIPs(n)
 
@@ -68,8 +72,12 @@ func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.R
 			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 		}
 
+		log.FromContext(ctx).Error(err, "Failed to occupy node IPs, requeuing", "node", n.Name)
+
 		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, err
 	}
+
+	log.FromContext(ctx).V(4).Info("Node ipam update", "node", n.Name, "status", c.nodeIpamProvider.String())
 
 	return reconcile.Result{}, nil
 }
