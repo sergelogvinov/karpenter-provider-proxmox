@@ -18,38 +18,37 @@ package cloudcapacity
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/go-logr/logr"
 	proxmox "github.com/luthermonson/go-proxmox"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type Provider interface {
-	// UpdateNodeCapacity updates the node CPU and RAM capacity information for all regions.
-	UpdateNodeCapacity(ctx context.Context) error
-	// UpdateNodeCapacityInZone updates the node CPU and RAM capacity information for a specific region and zone.
-	UpdateNodeCapacityInZone(ctx context.Context, region, zone string) error
+	// AllocateCapacityInZone allocates the specified capacity in the given region and zone.
+	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error
+	// ReleaseCapacityInZone releases the specified capacity in the given region and zone.
+	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error
+
+	// SyncNodeCapacity updates the node CPU and RAM capacity information for all regions.
+	SyncNodeCapacity(ctx context.Context) error
+	// SyncNodeStorageCapacity updates the node storage capacity information for all regions.
+	SyncNodeStorageCapacity(ctx context.Context) error
+
 	// UpdateNodeLoad updates the node CPU load information for all regions.
 	UpdateNodeLoad(ctx context.Context) error
 
-	// UpdateNodeStorageCapacity updates the node storage capacity information for all regions.
-	UpdateNodeStorageCapacity(ctx context.Context) error
-
-	// Regions returns a list of regions available in the pool.
+	// Regions returns a list of regions available.
 	Regions() []string
 	// Zones returns a list of zones available in the specified region.
 	Zones(region string) []string
@@ -79,68 +78,6 @@ type DefaultProvider struct {
 	log logr.Logger
 }
 
-type NodeCapacityInfo struct {
-	// Name is the name of the node.
-	Name string
-	// Region is the region of the node.
-	Region string
-	// CPULoad is the CPU load of the node in percentage.
-	CPULoad int
-	// CapacityMaxCPU is the maximum number of CPUs available on the node.
-	CapacityMaxCPU uint64
-	// CapacityMaxMem is the maximum amount of memory available on the node in bytes.
-	CapacityMaxMem uint64
-	// Capacity is the total amount of resources available on the node.
-	Capacity corev1.ResourceList
-	// Allocatable is the total amount of resources available to the VMs.
-	Allocatable corev1.ResourceList
-}
-
-type NodeStorageCapacityInfo struct {
-	// Name is the name of the node.
-	Name string
-	// Region is the region of the node.
-	Region string
-	// Shared indicates if the storage is shared across nodes.
-	Shared bool
-	// Type is the type of the storage. (dir/lvm/zfspool)
-	Type string
-	// Capabilities are the capabilities of the storage.
-	Capabilities []string
-	// Zone is the zone of the node.
-	Zones []string
-}
-
-type NodeNetworkIfaceInfo struct {
-	// Name is the name of the node.
-	Name string
-	// Region is the region of the node.
-	Region string
-	// Ifaces is the network interfaces of the node.
-	Ifaces map[string]NetworkIfaceInfo
-}
-
-type NetworkIfaceInfo struct {
-	Address4 string
-	Address6 string
-	Gateway4 string
-	Gateway6 string
-	MTU      uint32
-}
-
-type StorageOption func(*NodeStorageCapacityInfo)
-
-type NodeCapacity struct {
-	// Name is the name of the node.
-	Name string
-	// Capacity is the total amount of resources available on the node.
-	Capacity corev1.ResourceList
-	// Overhead is the amount of resource overhead expected to be used by Proxmox host.
-	Overhead corev1.ResourceList
-	// Allocatable is the total amount of resources available to the VMs.
-	Allocatable corev1.ResourceList
-}
-
 func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("cloudcapacity")
 
@@ -150,8 +87,66 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 	}
 }
 
-func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
-	log := p.log.WithName("UpdateNodeCapacity()")
+//nolint:dupl
+func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error {
+	log := log.FromContext(ctx).WithName("AllocateCapacityInZone()").WithValues("region", region, "zone", zone)
+	log.V(1).Info("Allocating capacity", "cpu", capacity.Cpu().String(), "memory", capacity.Memory().String(), "storage", capacity.StorageEphemeral().String())
+
+	p.muCapacityInfo.Lock()
+	defer p.muCapacityInfo.Unlock()
+
+	key := fmt.Sprintf("%s/%s", region, zone)
+	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
+		vm := &proxmox.VirtualMachine{
+			VMID:   proxmox.StringOrUint64(id),
+			CPUs:   int(capacity.Cpu().Value()),
+			MaxMem: uint64(capacity.Memory().Value()),
+		}
+
+		err := info.ResourceManager.Allocate(vm)
+		if err != nil {
+			return fmt.Errorf("Failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
+		}
+
+		log.V(1).Info("Capacity allocated successfully", "resourceStatus", info.ResourceManager.Status())
+
+		return nil
+	}
+
+	return fmt.Errorf("No resource manager found for zone %s/%s", region, zone)
+}
+
+//nolint:dupl
+func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, capacity corev1.ResourceList) error {
+	log := log.FromContext(ctx).WithName("ReleaseCapacityInZone()").WithValues("region", region, "zone", zone)
+	log.V(1).Info("Releasing capacity", "cpu", capacity.Cpu().String(), "memory", capacity.Memory().String(), "storage", capacity.StorageEphemeral().String())
+
+	p.muCapacityInfo.Lock()
+	defer p.muCapacityInfo.Unlock()
+
+	key := fmt.Sprintf("%s/%s", region, zone)
+	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
+		vm := &proxmox.VirtualMachine{
+			VMID:   proxmox.StringOrUint64(id),
+			CPUs:   int(capacity.Cpu().Value()),
+			MaxMem: uint64(capacity.Memory().Value()),
+		}
+
+		err := info.ResourceManager.Release(vm)
+		if err != nil {
+			return fmt.Errorf("Failed to release CPU capacity in zone %s/%s: %w", region, zone, err)
+		}
+
+		log.V(1).Info("Capacity released successfully", "resourceStatus", info.ResourceManager.Status())
+
+		return nil
+	}
+
+	return fmt.Errorf("No resource manager found for zone %s/%s", region, zone)
+}
+
+func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
+	log := p.log.WithName("SyncNodeCapacity()")
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
@@ -190,70 +185,24 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 
 			key := fmt.Sprintf("%s/%s", region, item.Node)
 
-			allocatable, err := nodeAllocatable(ctx, cl, item.Node, item.MaxCPU, item.MaxMem)
-			if err != nil {
-				log.Error(err, "Failed to get allocatable resources for node", "node", item.Node, "region", region)
-
-				allocatable = corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse("0"),
-					corev1.ResourceMemory: resource.MustParse("0"),
-				}
-			}
-
 			nodes = append(nodes, item.Node)
 
-			capacityInfo[key] = NodeCapacityInfo{
-				Name:           item.Node,
-				Region:         region,
-				CPULoad:        int(item.CPU * 100),
-				CapacityMaxCPU: item.MaxCPU,
-				CapacityMaxMem: item.MaxMem,
-				Capacity: corev1.ResourceList{
-					corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", item.MaxCPU)),
-					corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", item.MaxMem)),
-				},
-				Allocatable: allocatable,
+			nodeCapacity, err := getNodeCapacity(ctx, cl, region, item)
+			if err != nil {
+				log.Error(err, "Failed to get capacity for node", "node", item.Node, "region", region)
+
+				continue
 			}
 
-			networks, err := (&proxmox.Node{}).New(cl.Client, item.Node).Networks(ctx, "any_bridge")
+			capacityInfo[key] = nodeCapacity
+
+			nodeIfaces, err := getNodeNetwork(ctx, cl, region, item)
 			if err != nil {
 				log.Error(err, "Failed to get network interfaces for node", "node", item.Node, "region", region)
 			}
 
-			ifaces := map[string]NetworkIfaceInfo{}
-
-			for _, net := range networks {
-				if net.Active == 0 {
-					continue
-				}
-
-				mtu := 1500
-				if net.MTU != "" {
-					parsed, err := strconv.Atoi(net.MTU)
-					if err != nil {
-						log.Error(err, "Failed to parse MTU, using default value", "node", item.Node, "iface", net.Iface, "mtu", net.MTU)
-
-						parsed = 1500
-					}
-
-					mtu = parsed
-				}
-
-				ifaces[net.Iface] = NetworkIfaceInfo{
-					Address4: net.CIDR,
-					Address6: net.CIDR6,
-					Gateway4: net.Gateway,
-					Gateway6: net.Gateway6,
-					MTU:      uint32(mtu),
-				}
-			}
-
-			if len(ifaces) > 0 {
-				networkIfaceInfo[key] = NodeNetworkIfaceInfo{
-					Name:   item.Node,
-					Region: region,
-					Ifaces: ifaces,
-				}
+			if len(nodeIfaces.Ifaces) > 0 {
+				networkIfaceInfo[key] = nodeIfaces
 			}
 		}
 
@@ -261,63 +210,20 @@ func (p *DefaultProvider) UpdateNodeCapacity(ctx context.Context) error {
 	}
 
 	log.V(1).Info("Syncing finished", "nodes", len(capacityInfo))
-	log.V(4).Info("Node network info", "networkIfaceInfo", networkIfaceInfo)
+
+	for key, info := range networkIfaceInfo {
+		log.V(1).Info("Node network interfaces available", "node", key, "ifaces", len(info.Ifaces))
+	}
 
 	for key, info := range capacityInfo {
-		log.V(1).Info("Node capacity available", "node", key, "cpu", info.Allocatable.Cpu().String(), "memory", info.Allocatable.Memory().String())
+		if info.ResourceManager != nil {
+			log.V(1).Info("Node capacity available", "node", key, "resourceStatus", info.ResourceManager.Status())
+		}
 	}
 
 	p.capacityInfo = capacityInfo
 	p.networkInfo = networkIfaceInfo
 	p.zoneList = zoneList
-
-	return nil
-}
-
-func (p *DefaultProvider) UpdateNodeCapacityInZone(ctx context.Context, region, zone string) error {
-	log := p.log.WithName("UpdateNodeCapacityInZone()")
-
-	p.muCapacityInfo.Lock()
-	defer p.muCapacityInfo.Unlock()
-
-	log.V(1).Info("Syncing capacity for region", "region", region, "zone", zone)
-
-	cl, err := p.pool.GetProxmoxCluster(region)
-	if err != nil {
-		log.Error(err, "Failed to get proxmox cluster", "region", region)
-
-		return err
-	}
-
-	ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
-		return n.Status == "online" && n.Name == zone, nil
-	})
-	if err != nil {
-		return fmt.Errorf("cannot find node with name %s in region %s: %w", zone, region, err)
-	}
-
-	if len(ns) == 0 {
-		return fmt.Errorf("node with name %s not found in region %s", zone, region)
-	}
-
-	node := ns[0]
-
-	key := fmt.Sprintf("%s/%s", region, zone)
-	nodeCapacity := p.capacityInfo[key]
-
-	allocatable, err := nodeAllocatable(ctx, cl, zone, nodeCapacity.CapacityMaxCPU, nodeCapacity.CapacityMaxMem)
-	if err != nil {
-		log.Error(err, "Failed to get allocatable resources for node", "node", zone, "region", region)
-
-		allocatable = corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse("0"),
-			corev1.ResourceMemory: resource.MustParse("0"),
-		}
-	}
-
-	nodeCapacity.CPULoad = int(node.CPU * 100)
-	nodeCapacity.Allocatable = allocatable
-	p.capacityInfo[key] = nodeCapacity
 
 	return nil
 }
@@ -362,8 +268,8 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 	return nil
 }
 
-func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
-	log := p.log.WithName("UpdateNodeStorageCapacity()")
+func (p *DefaultProvider) SyncNodeStorageCapacity(ctx context.Context) error {
+	log := p.log.WithName("SyncNodeStorageCapacity()")
 
 	p.muStorageInfo.Lock()
 	defer p.muStorageInfo.Unlock()
@@ -446,8 +352,8 @@ func (p *DefaultProvider) UpdateNodeStorageCapacity(ctx context.Context) error {
 }
 
 func (p *DefaultProvider) GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo {
-	p.muCapacityInfo.RLock()
-	defer p.muCapacityInfo.RUnlock()
+	p.muStorageInfo.RLock()
+	defer p.muStorageInfo.RUnlock()
 
 	key := fmt.Sprintf("%s/%s", region, storage)
 	if info, ok := p.storageInfo[key]; ok {
@@ -508,6 +414,8 @@ func (p *DefaultProvider) Zones(region string) []string {
 	return p.zoneList[region]
 }
 
+// FIXME: optimize this functions
+
 func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.ResourceList) []string {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
@@ -531,10 +439,9 @@ func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
-	for _, info := range p.capacityInfo {
-		if info.Region == region && info.Name == zone {
-			return info.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && info.Allocatable.Memory().Cmp(*req.Memory()) >= 0
-		}
+	key := fmt.Sprintf("%s/%s", region, zone)
+	if info, ok := p.capacityInfo[key]; ok {
+		return info.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && info.Allocatable.Memory().Cmp(*req.Memory()) >= 0
 	}
 
 	return false
@@ -560,31 +467,4 @@ func (p *DefaultProvider) SortZonesByCPULoad(region string, zones []string) []st
 	})
 
 	return sortedZones
-}
-
-func nodeAllocatable(ctx context.Context, c *goproxmox.APIClient, node string, maxCPU, maxMem uint64) (corev1.ResourceList, error) {
-	vms, err := c.GetVMsByFilter(ctx, func(vm *proxmox.ClusterResource) (bool, error) {
-		return vm.Node == node && vm.Status == "running", nil
-	})
-	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
-		return nil, fmt.Errorf("cannot list vms for node %s: %w", node, err)
-	}
-
-	var (
-		cpuUsage int64
-		memUsage int64
-	)
-
-	for _, vm := range vms {
-		cpuUsage += int64(vm.MaxCPU)
-		memUsage += int64(vm.MaxMem)
-	}
-
-	cpu := max(int64(maxCPU)-cpuUsage, 0)
-	mem := max(int64(maxMem)-memUsage, 0)
-
-	return corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-		corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
-	}, nil
 }

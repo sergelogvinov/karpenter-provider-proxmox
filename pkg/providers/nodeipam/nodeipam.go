@@ -46,7 +46,6 @@ type DefaultProvider struct {
 	kubeClient            kubernetes.Interface
 	cloudCapacityProvider cloudcapacity.Provider
 
-	// proxmoxZoneCIDRMask []int
 	subnets []*ipam.IPPool
 }
 
@@ -166,7 +165,7 @@ func (p *DefaultProvider) OccupyNodeIPs(node *corev1.Node) error {
 	})
 }
 
-func (s *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
+func (p *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
 	ip, cidr, err := net.ParseCIDR(subnet)
 	if err != nil {
 		return nil, err
@@ -174,13 +173,13 @@ func (s *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
 
 	cidr.IP = ip
 
-	for i := range s.subnets {
-		if s.subnets[i] == nil {
+	for i := range p.subnets {
+		if p.subnets[i] == nil {
 			continue
 		}
 
-		if s.subnets[i].ContainsCIDR(cidr) {
-			ip := s.subnets[i].Next(cidr)
+		if p.subnets[i].ContainsCIDR(cidr) {
+			ip := p.subnets[i].Next(cidr)
 			if ip == nil {
 				return nil, fmt.Errorf("no available IPs in subnet %s", cidr.String())
 			}
