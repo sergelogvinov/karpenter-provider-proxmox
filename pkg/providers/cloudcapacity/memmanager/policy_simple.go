@@ -34,9 +34,13 @@ var _ Policy = &simplePolicy{}
 const PolicySimple policyName = "simple"
 
 // NewSimplePolicy returns a simple memory manager policy
-func NewSimplePolicy(maxMemory uint64) (Policy, error) {
+func NewSimplePolicy(maxMemory, reservedMemory uint64) (Policy, error) {
+	if reservedMemory >= maxMemory {
+		return nil, fmt.Errorf("reserved memory %d must be less than max memory %d", reservedMemory, maxMemory)
+	}
+
 	return &simplePolicy{
-		maxMemory: maxMemory,
+		maxMemory: maxMemory - reservedMemory,
 	}, nil
 }
 

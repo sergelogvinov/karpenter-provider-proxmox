@@ -1,0 +1,26 @@
+{
+  "region-1": {
+    "rnd-3": {
+      "reservedcpus": [
+        0,
+        4
+      ],
+      "reservedmemory": 4294967296
+    },
+    "*": {
+      "reservedcpus": [
+        0
+      ],
+      "reservedmemory": 1073741824
+    }
+  },
+  "region-2": {
+    "node3": {
+      "reservedcpus": [
+        0,
+        1
+      ],
+      "reservedmemory": 1073741824
+    }
+  }
+}

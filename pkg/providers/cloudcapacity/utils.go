@@ -32,7 +32,7 @@ import (
 )
 
 func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string, r *proxmox.ClusterResource) (NodeCapacityInfo, error) {
-	resourceManager, err := resourcemanager.NewResourceManager(ctx, cl, r.Node)
+	resourceManager, err := resourcemanager.NewResourceManager(ctx, cl, region, r.Node)
 	if err != nil {
 		return NodeCapacityInfo{}, fmt.Errorf("Failed to create resource manager for node %s in region %s: %w", r.Node, region, err)
 	}
