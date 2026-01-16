@@ -34,6 +34,12 @@ const (
 	instanceTypesFileEnvVarName = "INSTANCE_TYPES_FILE"
 	instanceTypesFileFlagName   = "instance-types-file"
 
+	nodeSettingFileEnvVarName = "NODE_SETTING_FILE"
+	nodeSettingFileFlagName   = "node-setting-file"
+
+	nodePolicyEnvVarName = "NODE_POLICY"
+	nodePolicyFlagName   = "node-policy"
+
 	proxmoxVMIDEnvVarName = "PROXMOX_VMID"
 	proxmoxVMIDFlagName   = "proxmox-vmid"
 )
@@ -47,12 +53,16 @@ type optionsKey struct{}
 type Options struct {
 	CloudConfigPath       string
 	InstanceTypesFilePath string
+	NodeSettingFilePath   string
+	NodePolicy            string
 	ProxmoxVMID           int
 }
 
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.CloudConfigPath, cloudConfigFlagName, env.WithDefaultString(cloudConfigEnvVarName, ""), "Path to the cloud config file.")
 	fs.StringVar(&o.InstanceTypesFilePath, instanceTypesFileFlagName, env.WithDefaultString(instanceTypesFileEnvVarName, ""), "Path to a custom instance-types file.")
+	fs.StringVar(&o.NodeSettingFilePath, nodeSettingFileFlagName, env.WithDefaultString(nodeSettingFileEnvVarName, ""), "Path to the node setting file.")
+	fs.StringVar(&o.NodePolicy, nodePolicyFlagName, env.WithDefaultString(nodePolicyEnvVarName, "simple"), "Node CPU policy to use.")
 	fs.IntVar(&o.ProxmoxVMID, proxmoxVMIDFlagName, env.WithDefaultInt(proxmoxVMIDEnvVarName, 20000), "This value is used as the minimum ID when creating a VM.")
 }
 

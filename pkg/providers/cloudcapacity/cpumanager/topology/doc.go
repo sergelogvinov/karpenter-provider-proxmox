@@ -14,28 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package options
+// kubernetes pkg/kubelet/cm/cpumanager/topology/
 
-import (
-	"fmt"
-
-	"go.uber.org/multierr"
-)
-
-func (o *Options) Validate() error {
-	return multierr.Combine(
-		o.validateRequiredFields(),
-	)
-}
-
-func (o *Options) validateRequiredFields() error {
-	if o.CloudConfigPath == "" {
-		return fmt.Errorf("missing required flag %s or env var %s", cloudConfigFlagName, cloudConfigEnvVarName)
-	}
-
-	if o.NodePolicy == "" {
-		return fmt.Errorf("node policy must be one of: static, simple")
-	}
-
-	return nil
-}
+// Package topology contains helpers for the CPU manager.
+package topology
