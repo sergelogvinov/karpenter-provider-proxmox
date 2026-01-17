@@ -18,8 +18,6 @@ package cloudcapacity
 
 import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
-
-	corev1 "k8s.io/api/core/v1"
 )
 
 type NodeCapacityInfo struct {
@@ -29,9 +27,6 @@ type NodeCapacityInfo struct {
 	Region string `json:"region"`
 	// CPULoad is the CPU load of the node in percentage.
 	CPULoad int `json:"cpu_load"`
-
-	// Allocatable is the total amount of resources available to the VMs.
-	Allocatable corev1.ResourceList `json:"allocatable"`
 
 	// ResourceManager manages the CPU and memory and other resources of the node.
 	ResourceManager resourcemanager.ResourceManager `json:"-"`

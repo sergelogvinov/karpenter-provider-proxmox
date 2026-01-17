@@ -61,7 +61,7 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 
 			capacity := corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
+				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", mem*1024)),
 				corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", pods)),
 			}
 

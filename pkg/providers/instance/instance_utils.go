@@ -78,14 +78,13 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	// We will use the size from the instance type if it is larger than the one specified in the node class
 	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
-	capacity := instanceType.Capacity.DeepCopy()
-	capacity.StorageEphemeral().Set(max(nodeClass.Spec.BootDevice.Size.Value(), capacity.StorageEphemeral().Value()))
+	size := max(nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga), instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
 	opt := &resourcemanager.VMResourceOptions{
 		ID:           newID,
-		CPUs:         int(capacity.Cpu().Value()),
-		MemoryMBytes: uint64(capacity.Memory().ScaledValue(resource.Mega)),
-		DiskGBytes:   uint64(capacity.StorageEphemeral().ScaledValue(resource.Giga)),
+		CPUs:         int(instanceType.Capacity.Cpu().Value()),
+		MemoryMBytes: uint64(instanceType.Capacity.Memory().ScaledValue(resource.Mega)),
+		DiskGBytes:   uint64(size),
 		StorageID:    storage,
 	}
 

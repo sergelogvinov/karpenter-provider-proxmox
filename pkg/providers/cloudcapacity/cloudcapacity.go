@@ -31,6 +31,7 @@ import (
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -104,7 +105,7 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
 		err := info.ResourceManager.Allocate(op)
 		if err != nil {
-			return fmt.Errorf("Failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
+			return fmt.Errorf("failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
 		}
 
 		log.V(1).Info("Capacity allocated successfully", "resourceStatus", info.ResourceManager.Status())
@@ -112,7 +113,7 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 		return nil
 	}
 
-	return fmt.Errorf("No resource manager found for zone %s/%s", region, zone)
+	return fmt.Errorf("no resource manager found for zone %s/%s", region, zone)
 }
 
 //nolint:dupl
@@ -131,7 +132,7 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
 		err := info.ResourceManager.Release(op)
 		if err != nil {
-			return fmt.Errorf("Failed to release CPU capacity in zone %s/%s: %w", region, zone, err)
+			return fmt.Errorf("failed to release CPU capacity in zone %s/%s: %w", region, zone, err)
 		}
 
 		log.V(1).Info("Capacity released successfully", "resourceStatus", info.ResourceManager.Status())
@@ -139,7 +140,7 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 		return nil
 	}
 
-	return fmt.Errorf("No resource manager found for zone %s/%s", region, zone)
+	return fmt.Errorf("no resource manager found for zone %s/%s", region, zone)
 }
 
 func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
@@ -420,11 +421,19 @@ func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.Re
 	zones := []string{}
 
 	for _, info := range p.capacityInfo {
-		if info.Region != region {
+		if info.Region != region || info.ResourceManager == nil {
 			continue
 		}
 
-		if info.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && info.Allocatable.Memory().Cmp(*req.Memory()) >= 0 {
+		cpu := info.ResourceManager.AvailableCPUs()
+		mem := info.ResourceManager.AvailableMemory()
+
+		allocatable := corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
+		}
+
+		if allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0 {
 			zones = append(zones, info.Name)
 		}
 	}
@@ -438,7 +447,19 @@ func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok {
-		return info.Allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && info.Allocatable.Memory().Cmp(*req.Memory()) >= 0
+		if info.ResourceManager == nil {
+			return false
+		}
+
+		cpu := info.ResourceManager.AvailableCPUs()
+		mem := info.ResourceManager.AvailableMemory()
+
+		allocatable := corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
+		}
+
+		return allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0
 	}
 
 	return false
