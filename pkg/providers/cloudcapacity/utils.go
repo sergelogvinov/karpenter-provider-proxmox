@@ -27,15 +27,15 @@ import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/utils/cpuset"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string, r *proxmox.ClusterResource) (NodeCapacityInfo, error) {
 	resourceManager, err := resourcemanager.NewResourceManager(ctx, cl, region, r.Node)
 	if err != nil {
-		return NodeCapacityInfo{}, fmt.Errorf("Failed to create resource manager for node %s in region %s: %w", r.Node, region, err)
+		return NodeCapacityInfo{}, fmt.Errorf("failed to create resource manager for node %s in region %s: %w", r.Node, region, err)
 	}
 
 	info := NodeCapacityInfo{
@@ -47,13 +47,15 @@ func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string
 
 	err = info.updateNodeCapacity(ctx, cl)
 	if err != nil {
-		return NodeCapacityInfo{}, fmt.Errorf("Failed to get allocatable resources for node %s in region %s: %w", r.Node, region, err)
+		return NodeCapacityInfo{}, fmt.Errorf("failed to get allocatable resources for node %s in region %s: %w", r.Node, region, err)
 	}
 
 	return info, nil
 }
 
 func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox.APIClient) error {
+	log := log.FromContext(ctx).WithName("updateNodeCapacity()")
+
 	vms, err := cl.GetVMsByFilter(ctx, func(vm *proxmox.ClusterResource) (bool, error) {
 		return vm.Node == i.Name && vm.Status == "running", nil
 	})
@@ -64,7 +66,7 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 	for _, vmr := range vms {
 		vm, err := cl.GetVMConfig(ctx, int(vmr.VMID))
 		if err != nil {
-			return fmt.Errorf("Failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
+			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
 		opt := &resourcemanager.VMResourceOptions{
@@ -76,22 +78,14 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 		if vm.VirtualMachineConfig != nil && vm.VirtualMachineConfig.Affinity != "" {
 			opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
 			if err != nil {
-				return fmt.Errorf("Failed to parse CPU affinity for VM %d: %w", vmr.VMID, err)
+				return fmt.Errorf("failed to parse CPU affinity for VM %d: %w", vmr.VMID, err)
 			}
 		}
 
 		err = i.ResourceManager.AllocateOrUpdate(opt)
 		if err != nil {
-			return fmt.Errorf("Failed to allocate resources for VM %d: %w", vmr.VMID, err)
+			log.Error(err, "Failed to allocate resources for VM", "vmID", vmr.VMID)
 		}
-	}
-
-	cpu := i.ResourceManager.AvailableCPUs()
-	mem := i.ResourceManager.AvailableMemory()
-
-	i.Allocatable = corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-		corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
 	}
 
 	return nil
@@ -101,7 +95,7 @@ func getNodeNetwork(ctx context.Context, cl *goproxmox.APIClient, region string,
 	node := (&proxmox.Node{}).New(cl.Client, r.Node)
 	networks, err := node.Networks(ctx, "any_bridge")
 	if err != nil {
-		return NodeNetworkIfaceInfo{}, fmt.Errorf("Failed to get network interfaces for node %s in region %s: %w", r.Node, region, err)
+		return NodeNetworkIfaceInfo{}, fmt.Errorf("failed to get network interfaces for node %s in region %s: %w", r.Node, region, err)
 	}
 
 	ifaces := map[string]NetworkIfaceInfo{}
@@ -114,7 +108,7 @@ func getNodeNetwork(ctx context.Context, cl *goproxmox.APIClient, region string,
 		mtu := 1500
 		if net.MTU != "" {
 			if mtu, err = strconv.Atoi(net.MTU); err != nil {
-				return NodeNetworkIfaceInfo{}, fmt.Errorf("Failed to parse MTU for node %s in region %s: %w", r.Node, region, err)
+				return NodeNetworkIfaceInfo{}, fmt.Errorf("failed to parse MTU for node %s in region %s: %w", r.Node, region, err)
 			}
 		}
 

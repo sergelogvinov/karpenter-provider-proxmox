@@ -117,7 +117,7 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		return nil, fmt.Errorf("failed to create memory policy for node %s: %w", manager.zone, err)
 	}
 
-	log.V(1).Info("Created resource manager",
+	log.V(4).Info("Created resource manager",
 		"capacityCPU", manager.nodeCPUPolicy.Status(),
 		"capacityMem", manager.nodeMemoryPolicy.Status(),
 		"settings", manager.nodeSettings,
@@ -144,7 +144,7 @@ func (r *resourceManager) Allocate(op *VMResourceOptions) (err error) {
 		return err
 	}
 
-	r.log.V(1).Info("Allocated resources", "id", op.ID,
+	r.log.V(4).Info("Allocated resources", "id", op.ID,
 		"availableCapacity", r.Status(),
 		"CPUs", op.CPUs,
 		"CPUSet", op.CPUSet.String(),
@@ -171,7 +171,7 @@ func (r *resourceManager) AllocateOrUpdate(op *VMResourceOptions) error {
 		return err
 	}
 
-	r.log.V(1).Info("Allocated/Updated resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", cpus)
+	r.log.V(4).Info("Allocated/Updated resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", cpus)
 
 	return nil
 }
@@ -190,7 +190,7 @@ func (r *resourceManager) Release(op *VMResourceOptions) (err error) {
 		return err
 	}
 
-	r.log.V(1).Info("Released resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", op.CPUSet.String())
+	r.log.V(4).Info("Released resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", op.CPUSet.String())
 
 	return nil
 }
