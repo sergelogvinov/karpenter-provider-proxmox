@@ -56,6 +56,7 @@ func TestUserData(t *testing.T) {
 	zone := "test-zone"
 	data := struct {
 		Metadata             cloudinit.MetaData
+		Resources            instance.Resources
 		KubeletConfiguration *instance.KubeletConfiguration
 		Values               map[string]string
 	}{
@@ -68,6 +69,12 @@ func TestUserData(t *testing.T) {
 			Zone:         zone,
 			Tags:         []string{"tag1", "tag2"},
 			NodeClass:    "node-class-1",
+		},
+		Resources: instance.Resources{
+			CPU:          2,
+			Memory:       6144,
+			Hugepages1Gi: 1,
+			Hugepages2Mi: 1024,
 		},
 		KubeletConfiguration: &instance.KubeletConfiguration{
 			AllowedUnsafeSysctls:  []string{"kernel.msgmax", "kernel.shmmax"},
@@ -115,6 +122,9 @@ users:
       - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk...
 
 write_files:
+  - path: /etc/sysctl.d/99-hugepages.conf
+    content: |
+      vm.nr_hugepages = 1024
   - path: /etc/karpenter.yaml
     content: |
       metadata:
@@ -129,6 +139,11 @@ write_files:
           - tag1
           - tag2
         nodeclass: node-class-1
+      resources:
+        cpu: 2
+        memory: 6144
+        hugepages1Gi: 1
+        hugepages2Mi: 1024
       kubeletconfiguration:
         topologyManagerPolicy: best-effort
         allowedUnsafeSysctls:
@@ -179,7 +194,7 @@ write_files:
 		t.Run(tt.name, func(t *testing.T) {
 			data, err := cloudinit.ExecuteTemplate(tt.template, tt.values)
 			assert.NoError(err)
-			assert.Equal(data, tt.result)
+			assert.Equal(tt.result, data)
 		})
 	}
 }

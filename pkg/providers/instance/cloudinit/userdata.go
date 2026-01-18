@@ -38,6 +38,11 @@ users:
     {{- end }}
 
 write_files:
+  {{- with .Resources.Hugepages2Mi }}
+  - path: /etc/sysctl.d/99-hugepages.conf
+    content: |
+      vm.nr_hugepages = {{ . }}
+  {{- end }}
   - path: /etc/karpenter.yaml
     content: |
       {{- . | toYamlPretty | nindent 6  }}

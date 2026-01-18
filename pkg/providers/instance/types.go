@@ -27,11 +27,20 @@ import (
 type UserDataValues struct {
 	Metadata   cloudinit.MetaData
 	Network    cloudinit.NetworkConfig
+	Resources  Resources
 	Kubernetes Kubernetes
 	Values     map[string]string
 }
 
+type Resources struct {
+	CPU          int64 `yaml:"cpu,omitempty"`
+	Memory       int64 `yaml:"memory,omitempty"`
+	Hugepages1Gi int   `yaml:"hugepages1Gi,omitempty"`
+	Hugepages2Mi int   `yaml:"hugepages2Mi,omitempty"`
+}
+
 type Kubernetes struct {
+	Version              string
 	RootCA               string
 	BootstrapToken       string
 	KubeletConfiguration *KubeletConfiguration

@@ -7,10 +7,17 @@ machine:
   ca:
     crt: {{ .Values.machineCA }}
   kubelet:
-    image: ghcr.io/siderolabs/kubelet:{{ .Values.kubeVersion }}
+    image: ghcr.io/siderolabs/kubelet:{{ .Kubernetes.Version }}
     defaultRuntimeSeccompProfileEnabled: true
     extraConfig:
       {{- .Kubernetes.KubeletConfiguration | toYamlPretty | nindent 6 }}
+  sysfs:
+    {{- with .Resources.Hugepages1Gi }}
+    devices/system/node/node0/hugepages/hugepages-1048576kB/nr_hugepages: {{ . }}
+    {{- end }}
+    {{- with .Resources.Hugepages2Mi }}
+    devices/system/node/node0/hugepages/hugepages-2048kB/nr_hugepages: {{ . }}
+    {{- end }}
   install:
     wipe: true
   features:
