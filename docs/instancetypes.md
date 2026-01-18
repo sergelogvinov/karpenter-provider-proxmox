@@ -62,6 +62,8 @@ The file structure looks like this:
   * `ephemeral-storage`: The boot disk size.
   * `memory`: The amount of memory.
   * `pods`: The maximum number of pods.
+  * `hugepages-1Gi` (optional): The amount of hugepages with 1Gi size.
+  * `hugepages-2Mi` (optional): The amount of hugepages with 2Mi size.
 * `overhead`: The resource overhead for the instance type, applied in the kubelet configuration file.
   * `KubeReserved`: The resources reserved for Kubernetes system components.
     * `cpu`: The amount of CPU reserved for Kubernetes.

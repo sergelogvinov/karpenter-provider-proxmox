@@ -10,4 +10,3 @@ stringData:
   clusterSecret: ...
   clusterEndpoint: "https://api.example.com:6443"
   clusterName: proxmox
-  kubeVersion: v1.33.4

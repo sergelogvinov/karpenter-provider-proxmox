@@ -63,6 +63,7 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
 				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dM", mem*1024)),
 				corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", pods)),
+				// corev1.ResourceHugePagesPrefix + "1Gi": resource.MustParse(fmt.Sprintf("%dGi", 1)),
 			}
 
 			if o.Storage > 0 {

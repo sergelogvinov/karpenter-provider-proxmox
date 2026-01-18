@@ -175,6 +175,11 @@ func (p *DefaultProvider) generateCloudInitVars(
 		systemNamespace = "kube-system"
 	}
 
+	version, err := p.kubernetesInterface.Discovery().ServerVersion()
+	if err != nil {
+		return "", "", "", "", fmt.Errorf("failed to get kubernetes server version: %v", err)
+	}
+
 	cm, err := p.kubernetesInterface.CoreV1().ConfigMaps(systemNamespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
 	if err != nil {
 		return "", "", "", "", fmt.Errorf("failed to get configmap %s/kube-root-ca.crt: %v", systemNamespace, err)
@@ -230,7 +235,12 @@ func (p *DefaultProvider) generateCloudInitVars(
 	userdataValues := UserDataValues{
 		Metadata: metadataValues,
 		Network:  networkValues,
+		Resources: Resources{
+			CPU:    instanceType.Capacity.Cpu().Value(),
+			Memory: instanceType.Capacity.Memory().Value(),
+		},
 		Kubernetes: Kubernetes{
+			Version:              version.String(),
 			RootCA:               rootCA,
 			BootstrapToken:       bootstrapToken,
 			KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
@@ -245,6 +255,17 @@ func (p *DefaultProvider) generateCloudInitVars(
 				Key:    karpv1.UnregisteredTaintKey,
 				Effect: corev1.TaintEffectNoExecute,
 			},
+		}
+	}
+
+	for name, quantity := range instanceType.Capacity {
+		if size, ok := strings.CutPrefix(string(name), corev1.ResourceHugePagesPrefix); ok {
+			switch size {
+			case "1Gi":
+				userdataValues.Resources.Hugepages1Gi = int(quantity.Value() / (1024 * 1024 * 1024))
+			case "2Mi":
+				userdataValues.Resources.Hugepages2Mi = int(quantity.Value() / (2 * 1024 * 1024))
+			}
 		}
 	}
 
