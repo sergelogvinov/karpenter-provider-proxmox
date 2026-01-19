@@ -50,7 +50,12 @@ const PolicySimple policyName = "simple"
 var _ Policy = &simplePolicy{}
 
 // NewSimplePolicy returns a cpuset manager policy that does nothing
-func NewSimplePolicy(topology *topology.CPUTopology, reservedCPUs cpuset.CPUSet) (Policy, error) {
+func NewSimplePolicy(topology *topology.CPUTopology, reserved []int) (Policy, error) {
+	if topology == nil {
+		return nil, fmt.Errorf("topology must be provided for simple cpu policy")
+	}
+
+	reservedCPUs := cpuset.New(reserved...)
 	if topology.NumCPUs < reservedCPUs.Size() {
 		return nil, fmt.Errorf("not enough CPUs available: maxCPUs=%d, reservedCPUs=%d", topology.NumCPUs, reservedCPUs.Size())
 	}

@@ -14,20 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package resourcemanager
+package topology
 
-import (
-	goproxmox "github.com/sergelogvinov/go-proxmox"
-
-	"k8s.io/utils/cpuset"
-)
-
-type VMResourceOptions struct {
-	ID           int
-	CPUs         int
-	CPUSet       cpuset.CPUSet
-	NUMANodes    map[int]goproxmox.NUMANodeState
-	MemoryMBytes uint64
-	DiskGBytes   uint64
-	StorageID    string
+// MemTopology contains details of node memory topology
+type MemTopology struct {
+	// TotalMemory is the total memory of the node in bytes
+	TotalMemory uint64
+	// NUMANodes is a map from NUMA Node ID to the amount of memory in bytes associated with that NUMA Node
+	NUMANodes map[int]uint64
 }

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package resourcemanager
+package settings
 
 import (
 	"encoding/json"
@@ -22,7 +22,8 @@ import (
 	"os"
 )
 
-func loadNodeSettingsFromFile(name, region, zone string) (*NodeSettings, error) {
+// LoadNodeSettingsFromFile loads node settings from a file.
+func LoadNodeSettingsFromFile(name, region, zone string) (*NodeSettings, error) {
 	if name == "" {
 		return nil, nil
 	}
