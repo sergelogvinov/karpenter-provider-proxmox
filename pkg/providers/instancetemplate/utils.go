@@ -495,7 +495,7 @@ func defaultVirtualMachineTemplate() map[string]any {
 		"acpi":     1,
 		"cores":    1,
 		"sockets":  1,
-		"numa":     0,
+		"numa":     1,
 		"memory":   proxmox.StringOrInt(1024),
 		"balloon":  0,
 		"machine":  "pc",

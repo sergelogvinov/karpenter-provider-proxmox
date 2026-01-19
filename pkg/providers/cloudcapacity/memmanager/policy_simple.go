@@ -18,11 +18,17 @@ package memmanager
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
 )
 
 type simplePolicy struct {
 	mu sync.Mutex
+
+	topology *topology.MemTopology
 
 	maxMemory      uint64
 	assignedMemory uint64
@@ -34,13 +40,18 @@ var _ Policy = &simplePolicy{}
 const PolicySimple policyName = "simple"
 
 // NewSimplePolicy returns a simple memory manager policy
-func NewSimplePolicy(maxMemory, reservedMemory uint64) (Policy, error) {
-	if reservedMemory >= maxMemory {
-		return nil, fmt.Errorf("reserved memory %d must be less than max memory %d", reservedMemory, maxMemory)
+func NewSimplePolicy(topology *topology.MemTopology, reservedMemory uint64) (Policy, error) {
+	if topology == nil {
+		return nil, fmt.Errorf("topology must be provided for simple memory policy")
+	}
+
+	if reservedMemory >= topology.TotalMemory {
+		return nil, fmt.Errorf("reserved memory %d must be less than max memory %d", reservedMemory, topology.TotalMemory)
 	}
 
 	return &simplePolicy{
-		maxMemory: maxMemory - reservedMemory,
+		topology:  topology,
+		maxMemory: topology.TotalMemory - reservedMemory,
 	}, nil
 }
 
@@ -101,5 +112,18 @@ func (p *simplePolicy) Release(mem uint64) error {
 }
 
 func (p *simplePolicy) Status() string {
-	return fmt.Sprintf("%dM", p.AvailableMemory()/1024/1024)
+	r := []string{fmt.Sprintf("%dM", p.AvailableMemory()/1024/1024)}
+
+	nodeIDs := make([]int, 0, len(p.topology.NUMANodes))
+	for i := range p.topology.NUMANodes {
+		nodeIDs = append(nodeIDs, i)
+	}
+
+	sort.Ints(nodeIDs)
+
+	for _, i := range nodeIDs {
+		r = append(r, fmt.Sprintf("N%d:%dM", i, p.topology.NUMANodes[i]/1024/1024))
+	}
+
+	return strings.Join(r, ", ")
 }

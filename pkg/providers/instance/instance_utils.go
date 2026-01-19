@@ -114,6 +114,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 		CPU:          opt.CPUs,
 		CPUAffinity:  opt.CPUSet.String(),
+		NUMANodes:    opt.NUMANodes,
 		Memory:       uint32(opt.MemoryMBytes),
 		DiskSize:     fmt.Sprintf("%dG", opt.DiskGBytes),
 		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),

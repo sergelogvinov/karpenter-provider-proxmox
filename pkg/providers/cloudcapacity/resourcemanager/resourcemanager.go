@@ -25,10 +25,10 @@ import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager"
-
-	"k8s.io/utils/cpuset"
+	memtopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -49,7 +49,7 @@ type resourceManager struct {
 	zone string
 	log  logr.Logger
 
-	nodeSettings     NodeSettings
+	nodeSettings     settings.NodeSettings
 	nodeCPUPolicy    cpumanager.Policy
 	nodeMemoryPolicy memmanager.Policy
 }
@@ -63,7 +63,7 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		cl:   cl,
 		zone: zone,
 		log:  log,
-		nodeSettings: NodeSettings{
+		nodeSettings: settings.NodeSettings{
 			// By default reserve 1 GiB memory for system use
 			ReservedMemory: 1024 * 1024 * 1024, // 1GiB
 		},
@@ -74,8 +74,14 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		return nil, fmt.Errorf("missing options in context")
 	}
 
+	var (
+		nodeCPUTopology *cputopology.CPUTopology
+		nodeMemTopology *memtopology.MemTopology
+		err             error
+	)
+
 	if name := options.FromContext(ctx).NodeSettingFilePath; name != "" {
-		setting, err := loadNodeSettingsFromFile(name, region, zone)
+		setting, err := settings.LoadNodeSettingsFromFile(name, region, zone)
 		if err != nil {
 			return nil, err
 		}
@@ -85,34 +91,53 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 
 			log.V(4).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
 		}
+
+		nodeCPUTopology, err = cputopology.DiscoverFromSettings(manager.nodeSettings)
+		if err != nil {
+			log.Info("failed to discover CPU topology from settings for node", "node", manager.zone, "error", err)
+		}
+
+		nodeMemTopology, err = memtopology.DiscoverFromSettings(manager.nodeSettings)
+		if err != nil {
+			log.Info("failed to discover memory topology from settings for node", "node", manager.zone, "error", err)
+		}
 	}
 
-	n, err := cl.Client.Node(ctx, manager.zone)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get node %s: %w", manager.zone, err)
-	}
+	if nodeCPUTopology == nil || nodeMemTopology == nil {
+		n, err := cl.Client.Node(ctx, manager.zone)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get node %s: %w", manager.zone, err)
+		}
 
-	nodeCPUTopology, err := topology.Discover(&n.CPUInfo)
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover CPU topology for node %s: %w", manager.zone, err)
-	}
+		if nodeCPUTopology == nil {
+			nodeCPUTopology, err = cputopology.Discover(n)
+			if err != nil {
+				return nil, fmt.Errorf("failed to discover CPU topology for node %s: %w", manager.zone, err)
+			}
+		}
 
-	cpus := cpuset.New(manager.nodeSettings.ReservedCPUs...)
+		if nodeMemTopology == nil {
+			nodeMemTopology, err = memtopology.Discover(n)
+			if err != nil {
+				return nil, fmt.Errorf("failed to discover memory topology for node %s: %w", manager.zone, err)
+			}
+		}
+	}
 
 	switch opts.NodePolicy { //nolint:gocritic
 	case string(cpumanager.PolicyStatic):
-		manager.nodeCPUPolicy, err = cpumanager.NewStaticPolicy(log, nodeCPUTopology, cpus)
+		manager.nodeCPUPolicy, err = cpumanager.NewStaticPolicy(log, nodeCPUTopology, manager.nodeSettings.ReservedCPUs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create static policy for node %s: %w", manager.zone, err)
 		}
 	default:
-		manager.nodeCPUPolicy, err = cpumanager.NewSimplePolicy(nodeCPUTopology, cpus)
+		manager.nodeCPUPolicy, err = cpumanager.NewSimplePolicy(nodeCPUTopology, manager.nodeSettings.ReservedCPUs)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create simple policy for node %s: %w", manager.zone, err)
 		}
 	}
 
-	manager.nodeMemoryPolicy, err = memmanager.NewSimplePolicy(n.Memory.Total, manager.nodeSettings.ReservedMemory)
+	manager.nodeMemoryPolicy, err = memmanager.NewSimplePolicy(nodeMemTopology, manager.nodeSettings.ReservedMemory)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memory policy for node %s: %w", manager.zone, err)
 	}
@@ -141,6 +166,7 @@ func (r *resourceManager) Allocate(op *VMResourceOptions) (err error) {
 	err = r.nodeMemoryPolicy.Allocate(op.MemoryMBytes * 1024 * 1024)
 	if err != nil {
 		r.nodeCPUPolicy.Release(op.CPUs, op.CPUSet)
+
 		return err
 	}
 

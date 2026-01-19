@@ -14,20 +14,5 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package resourcemanager
-
-import (
-	goproxmox "github.com/sergelogvinov/go-proxmox"
-
-	"k8s.io/utils/cpuset"
-)
-
-type VMResourceOptions struct {
-	ID           int
-	CPUs         int
-	CPUSet       cpuset.CPUSet
-	NUMANodes    map[int]goproxmox.NUMANodeState
-	MemoryMBytes uint64
-	DiskGBytes   uint64
-	StorageID    string
-}
+// Package topology contains helpers for the Resource manager.
+package topology

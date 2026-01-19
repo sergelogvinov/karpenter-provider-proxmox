@@ -21,12 +21,20 @@ import (
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
+	"k8s.io/utils/cpuset"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
 )
 
 // Discover returns CPUTopology based on proxmox node info
 // We do not have access to real information,
 // so, we will predict architecture based on the provided CPUInfo.
-func Discover(machineInfo *proxmox.CPUInfo) (*CPUTopology, error) {
+func Discover(n *proxmox.Node) (*CPUTopology, error) {
+	if n == nil {
+		return nil, fmt.Errorf("cannot discover cpu topology from nil node info")
+	}
+
+	machineInfo := n.CPUInfo
 	if machineInfo.CPUs == 0 || machineInfo.Cores == 0 || machineInfo.Sockets == 0 {
 		return nil, fmt.Errorf("could not detect CPU topology from incomplete machine info: %+v", machineInfo)
 	}
@@ -73,6 +81,62 @@ func Discover(machineInfo *proxmox.CPUInfo) (*CPUTopology, error) {
 		NumCPUs:        machineInfo.CPUs,
 		NumSockets:     machineInfo.Sockets,
 		NumCores:       machineInfo.Cores,
+		NumNUMANodes:   CPUDetails.NUMANodes().Size(),
+		NumUncoreCache: CPUDetails.UncoreCaches().Size(),
+		CPUDetails:     CPUDetails,
+	}, nil
+}
+
+func DiscoverFromSettings(settings settings.NodeSettings) (*CPUTopology, error) {
+	if len(settings.NUMANodes) == 0 {
+		return nil, fmt.Errorf("could not detect cpu topology from incomplete node settings")
+	}
+
+	nCPUs := 0
+	nCores := 0
+	nSockets := max(1, settings.NumSockets)
+	nCache := max(1, settings.NumUncoreCaches)
+	nThreads := max(1, settings.NumThreads)
+
+	parsedCPUs := make(map[int]cpuset.CPUSet, len(settings.NUMANodes))
+	for i, numa := range settings.NUMANodes {
+		cpus, err := cpuset.Parse(numa.CPUs)
+		if err != nil {
+			return nil, fmt.Errorf("parsing cpus for numa node %d: %w", i, err)
+		}
+
+		parsedCPUs[i] = cpus
+		nCPUs += cpus.Size()
+		nCores += cpus.Size() / max(1, nThreads)
+	}
+
+	CPUDetails := CPUDetails{}
+
+	for i, cpus := range parsedCPUs {
+		for _, cpu := range cpus.List() {
+			coresPerSocket := max(1, nCores/nSockets)
+			socketID := int(cpu/coresPerSocket) % nSockets
+
+			coreID := cpu
+			if coreID >= nCores {
+				coreID = cpu - nCores
+			}
+
+			cacheID := (coreID / nCache)
+
+			CPUDetails[cpu] = CPUInfo{
+				NUMANodeID:    i,
+				SocketID:      socketID,
+				CoreID:        coreID,
+				UncoreCacheID: cacheID,
+			}
+		}
+	}
+
+	return &CPUTopology{
+		NumCPUs:        nCPUs,
+		NumSockets:     nSockets,
+		NumCores:       nCores,
 		NumNUMANodes:   CPUDetails.NUMANodes().Size(),
 		NumUncoreCache: CPUDetails.UncoreCaches().Size(),
 		CPUDetails:     CPUDetails,

@@ -32,58 +32,58 @@ func TestSimpleAllocate(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name         string
-		topo         *topology.CPUTopology
-		reservedCPUs cpuset.CPUSet
+		name     string
+		topo     *topology.CPUTopology
+		reserved []int
 
 		allocateNumCPUs int
 		status          string
 		error           error
 	}{
 		{
-			name:         "allocate zero CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate zero CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 0,
 			status:          "Free: 12, Static: [], Common: [0-11], Reserved: []",
 		},
 		{
-			name:         "allocate some CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate some CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 4,
 			status:          "Free: 8, Static: [], Common: [0-11], Reserved: []",
 		},
 		{
-			name:         "allocate some CPUs with specific reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate some CPUs with specific reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 8,
 			status:          "Free: 2, Static: [], Common: [2-11], Reserved: [0-1]",
 		},
 		{
-			name:         "allocate all available CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate all available CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 12,
 			status:          "Free: 0, Static: [], Common: [0-11], Reserved: []",
 		},
 		{
-			name:         "allocate more than available CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate more than available CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 16,
 			error:           fmt.Errorf("not enough CPUs available to satisfy request: requested=16, available=12"),
 		},
 		{
-			name:         "allocate more than available CPUs with reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate more than available CPUs with reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 16,
 			error:           fmt.Errorf("not enough CPUs available to satisfy request: requested=16, available=10"),
@@ -94,7 +94,7 @@ func TestSimpleAllocate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			policy, err := NewSimplePolicy(tc.topo, tc.reservedCPUs)
+			policy, err := NewSimplePolicy(tc.topo, tc.reserved)
 			assert.NoError(t, err)
 
 			if tc.error != nil {
@@ -121,9 +121,9 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct { //nolint:dupl
-		name         string
-		topo         *topology.CPUTopology
-		reservedCPUs cpuset.CPUSet
+		name     string
+		topo     *topology.CPUTopology
+		reserved []int
 
 		allocateNumCPUs int
 		allocateCPUs    cpuset.CPUSet
@@ -131,81 +131,81 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 		error           error
 	}{
 		{
-			name:         "allocate zero CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate zero CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 0,
 			allocateCPUs:    cpuset.New(),
 			status:          "Free: 12, Static: [], Common: [0-11], Reserved: []",
 		},
 		{
-			name:         "allocate some CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate some CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 4,
 			allocateCPUs:    cpuset.New(),
 			status:          "Free: 8, Static: [], Common: [0-11], Reserved: []",
 		},
 		{
-			name:         "allocate specific CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate specific CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 4,
 			allocateCPUs:    cpuset.New(2, 3, 10, 11),
 			status:          "Free: 8, Static: [2-3,10-11], Common: [0-1,4-9], Reserved: []",
 		},
 		{
-			name:         "allocate some CPUs with some specific reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate some CPUs with some specific reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 8,
 			allocateCPUs:    cpuset.New(),
 			status:          "Free: 2, Static: [], Common: [2-11], Reserved: [0-1]",
 		},
 		{
-			name:         "allocate specific CPUs with specific reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate specific CPUs with specific reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 2,
 			allocateCPUs:    cpuset.New(3, 4),
 			status:          "Free: 8, Static: [3-4], Common: [2,5-11], Reserved: [0-1]",
 		},
 		{
-			name:         "allocate specific CPUs overlapped with specific reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate specific CPUs overlapped with specific reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 2,
 			allocateCPUs:    cpuset.New(1, 2),
 			status:          "Free: 9, Static: [2], Common: [3-11], Reserved: [0-1]",
 		},
 		{
-			name:         "allocate more CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate more CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 16,
 			allocateCPUs:    cpuset.New(),
 			error:           fmt.Errorf("not enough CPUs available to satisfy request: requested=16, available=12"),
 		},
 		{
-			name:         "allocate more specific CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(),
+			name:     "allocate more specific CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{},
 
 			allocateNumCPUs: 16,
 			allocateCPUs:    lo.Must(cpuset.Parse("0-15")),
 			error:           fmt.Errorf("not enough CPUs available to satisfy request: requested=16, available=12"),
 		},
 		{
-			name:         "allocate more specific CPUs with reserved CPUs",
-			topo:         topoDualSocketHT,
-			reservedCPUs: cpuset.New(0, 1),
+			name:     "allocate more specific CPUs with reserved CPUs",
+			topo:     topoDualSocketHT,
+			reserved: []int{0, 1},
 
 			allocateNumCPUs: 16,
 			allocateCPUs:    lo.Must(cpuset.Parse("0-15")),
@@ -217,7 +217,7 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			policy, err := NewSimplePolicy(tc.topo, tc.reservedCPUs)
+			policy, err := NewSimplePolicy(tc.topo, tc.reserved)
 			assert.NoError(t, err)
 
 			if tc.error != nil {

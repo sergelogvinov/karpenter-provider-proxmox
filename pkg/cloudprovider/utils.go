@@ -59,6 +59,10 @@ func (c *CloudProvider) resolveInstanceTypeFromNode(ctx context.Context, node *c
 
 	// InstanceType was not found, try to match by capacity
 	list := c.instanceTypeProvider.ListWithFilter(ctx, func(it *cloudprovider.InstanceType) bool {
+		if it.Offerings == nil || len(it.Offerings.Available()) == 0 || it.Capacity == nil {
+			return false
+		}
+
 		resources := it.Capacity.Cpu().Cmp(*node.Status.Capacity.Cpu()) >= 0 &&
 			it.Capacity.Memory().Cmp(*node.Status.Capacity.Memory()) >= 0
 
