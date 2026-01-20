@@ -255,6 +255,7 @@ func TestHostIndex(t *testing.T) {
 			i, err := ipPool.HostIndex(net.ParseIP(tt.host))
 			if tt.expectErr {
 				assert.Error(t, err)
+
 				return
 			}
 

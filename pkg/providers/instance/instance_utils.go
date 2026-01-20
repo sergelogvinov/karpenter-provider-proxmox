@@ -27,7 +27,7 @@ import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
@@ -35,7 +35,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/cpuset"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -80,12 +79,12 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
 	size := max(nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga), instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
-	opt := &resourcemanager.VMResourceOptions{
-		ID:           newID,
-		CPUs:         int(instanceType.Capacity.Cpu().Value()),
-		MemoryMBytes: uint64(instanceType.Capacity.Memory().ScaledValue(resource.Mega)),
-		DiskGBytes:   uint64(size),
-		StorageID:    storage,
+	opt := &cloudresources.VMResources{
+		ID:         newID,
+		CPUs:       int(instanceType.Capacity.Cpu().Value()),
+		Memory:     uint64(instanceType.Capacity.Memory().Value()),
+		DiskGBytes: uint64(size),
+		StorageID:  storage,
 	}
 
 	if err := p.cloudCapacityProvider.AllocateCapacityInZone(ctx, region, zone, newID, opt); err != nil {
@@ -115,7 +114,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		CPU:          opt.CPUs,
 		CPUAffinity:  opt.CPUSet.String(),
 		NUMANodes:    opt.NUMANodes,
-		Memory:       uint32(opt.MemoryMBytes),
+		Memory:       uint32(opt.Memory / 1024 / 1024),
 		DiskSize:     fmt.Sprintf("%dG", opt.DiskGBytes),
 		Tags:         strings.Join(nodeClass.Spec.Tags, ";"),
 		InstanceType: instanceType.Name,
@@ -231,30 +230,25 @@ func (p *DefaultProvider) instanceDelete(ctx context.Context,
 		return fmt.Errorf("failed to get vm config for VM %d: %v", vmr.VMID, err)
 	}
 
-	opt := &resourcemanager.VMResourceOptions{
-		ID:           int(vm.VMID),
-		CPUs:         vm.CPUs,
-		MemoryMBytes: vm.MaxMem / (1024 * 1024),
-		DiskGBytes:   uint64(nodeClaim.Status.Capacity.StorageEphemeral().ScaledValue(resource.Giga)),
-	}
+	opt, err := cloudresources.GenerateVMResourceRequest(vm)
+	if err != nil {
+		log.Error(err, "Failed to generate resource request for VM", "vmID", vmr.VMID)
 
-	if vm.VirtualMachineConfig != nil && vm.VirtualMachineConfig.Affinity != "" {
-		opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
-		if err != nil {
-			return fmt.Errorf("Failed to parse CPU affinity for VM %d: %w", vmr.VMID, err)
-		}
-
-		if opt.CPUSet.Size() != opt.CPUs {
-			log.Info("CPU affinity size does not match allocated CPUs", "vmID", vmr.VMID, "CPUs", opt.CPUs, "CPUSet", opt.CPUSet.String())
+		opt = &cloudresources.VMResources{
+			ID:     int(vmr.VMID),
+			CPUs:   int(nodeClaim.Status.Capacity.Cpu().Value()),
+			Memory: uint64(nodeClaim.Status.Capacity.Memory().Value()),
 		}
 	}
+
+	opt.DiskGBytes = uint64(nodeClaim.Status.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
 	if err := p.cluster.DeleteVMByIDInRegion(ctx, region, vmr); err != nil {
 		return fmt.Errorf("cannot delete VM with id %d: %w", vmr.VMID, err)
 	}
 
 	if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, int(vmr.VMID), opt); err != nil {
-		log.Error(err, "failed to release capacity after VM deletion", "vmID", vmr.VMID)
+		log.Error(err, "Failed to release capacity after VM deletion", "vmID", vmr.VMID)
 	}
 
 	return nil

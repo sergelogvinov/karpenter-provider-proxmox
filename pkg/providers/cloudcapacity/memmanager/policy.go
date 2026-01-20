@@ -16,6 +16,8 @@ limitations under the License.
 
 package memmanager
 
+import "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
+
 type policyName string
 
 type Policy interface {
@@ -24,7 +26,7 @@ type Policy interface {
 
 	AvailableMemory() uint64
 
-	Allocate(mem uint64) error
-	AllocateOrUpdate(mem uint64) error
-	Release(mem uint64) error
+	Allocate(op *cloudresources.VMResources) error
+	AllocateOrUpdate(op *cloudresources.VMResources) error
+	Release(op *cloudresources.VMResources) error
 }

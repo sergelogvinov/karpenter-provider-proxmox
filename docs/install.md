@@ -100,5 +100,5 @@ config:
 Deploy the Proxmox Karpenter Provider using Helm:
 
 ```shell
-helm upgrade -i -n kube-system -f karpenter-proxmox.yaml karpenter-proxmox oci://ghcr.io/sergelogvinov/charts/karpenter-proxmox
+helm upgrade -i -n kube-system -f karpenter-proxmox.yaml karpenter-provider-proxmox oci://ghcr.io/sergelogvinov/charts/karpenter-provider-proxmox
 ```

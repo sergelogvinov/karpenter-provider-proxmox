@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package resourcemanager
+package cloudresources
 
 import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
@@ -22,12 +22,19 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-type VMResourceOptions struct {
-	ID           int
-	CPUs         int
-	CPUSet       cpuset.CPUSet
-	NUMANodes    map[int]goproxmox.NUMANodeState
-	MemoryMBytes uint64
-	DiskGBytes   uint64
-	StorageID    string
+type VMResources struct {
+	ID int
+	// CPUs is the number of CPUs assigned to the VM.
+	CPUs int
+	// Memory is the amount of memory in bytes assigned to the VM.
+	Memory uint64
+	// DiskGBytes is the amount of system disk in gigabytes assigned to the VM.
+	DiskGBytes uint64
+	// StorageID is the ID of the storage where the VM's disk is located.
+	StorageID string
+
+	// CPUSet represents the specific CPUs on the Host assigned to the VM.
+	CPUSet cpuset.CPUSet
+	// NUMANodes represents the topology on the Host assigned to the VM.
+	NUMANodes map[int]goproxmox.NUMANodeState
 }

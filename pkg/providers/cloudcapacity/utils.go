@@ -25,9 +25,8 @@ import (
 	proxmox "github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
-
-	"k8s.io/utils/cpuset"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -69,17 +68,9 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		opt := &resourcemanager.VMResourceOptions{
-			ID:           int(vm.VMID),
-			CPUs:         vm.CPUs,
-			MemoryMBytes: vm.MaxMem / (1024 * 1024),
-		}
-
-		if vm.VirtualMachineConfig != nil && vm.VirtualMachineConfig.Affinity != "" {
-			opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
-			if err != nil {
-				return fmt.Errorf("failed to parse CPU affinity for VM %d: %w", vmr.VMID, err)
-			}
+		opt, err := cloudresources.GenerateVMResourceRequest(vm)
+		if err != nil {
+			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
 		}
 
 		err = i.ResourceManager.AllocateOrUpdate(opt)

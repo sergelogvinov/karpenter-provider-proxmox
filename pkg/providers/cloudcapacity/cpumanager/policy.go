@@ -17,7 +17,7 @@ limitations under the License.
 package cpumanager
 
 import (
-	"k8s.io/utils/cpuset"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 )
 
 type policyName string
@@ -28,8 +28,7 @@ type Policy interface {
 
 	AvailableCPUs() int
 
-	Allocate(numCPUs int) (cpuset.CPUSet, error)
-	AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset.CPUSet, error)
-
-	Release(numCPUs int, cpus cpuset.CPUSet) error
+	Allocate(op *cloudresources.VMResources) error
+	AllocateOrUpdate(op *cloudresources.VMResources) error
+	Release(op *cloudresources.VMResources) error
 }
