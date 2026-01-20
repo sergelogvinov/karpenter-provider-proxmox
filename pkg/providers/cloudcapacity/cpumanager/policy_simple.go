@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 
 	"k8s.io/utils/cpuset"
@@ -82,71 +83,72 @@ func (p *simplePolicy) AvailableCPUs() int {
 	return max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
 }
 
-func (p *simplePolicy) Allocate(numCPUs int) (cpuset.CPUSet, error) {
+func (p *simplePolicy) Allocate(op *cloudresources.VMResources) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.assignedCPUs+numCPUs > p.availableCPUs.Size() {
-		return cpuset.CPUSet{}, fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", numCPUs, p.availableCPUs.Size())
+	if p.assignedCPUs+op.CPUs > p.availableCPUs.Size() {
+		return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUs, p.availableCPUs.Size())
 	}
 
-	p.assignedCPUs += numCPUs
+	p.assignedCPUs += op.CPUs
 
-	return cpuset.New(), nil
+	return nil
 }
 
-func (p *simplePolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset.CPUSet, error) {
-	if numCPUs <= 0 && cpus.IsEmpty() {
-		return cpuset.New(), nil
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if !cpus.IsEmpty() {
-		if cpus.Size() > p.allCPUs.Size() {
-			return cpuset.New(), fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", cpus.Size(), p.allCPUs.Size())
-		}
-
-		pinned := cpus.Difference(p.reservedCPUs)
-		p.usedCPUs = p.usedCPUs.Union(pinned)
-		p.availableCPUs = p.availableCPUs.Difference(pinned)
-
-		return cpuset.New(), nil
-	}
-
-	if p.assignedCPUs+numCPUs > p.availableCPUs.Size() {
-		return cpuset.New(), fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", numCPUs, p.availableCPUs.Size())
-	}
-
-	p.assignedCPUs += numCPUs
-
-	return cpuset.New(), nil
-}
-
-//nolint:dupl
-func (p *simplePolicy) Release(numCPUs int, cpus cpuset.CPUSet) error {
-	if numCPUs == 0 && cpus.IsEmpty() {
+func (p *simplePolicy) AllocateOrUpdate(op *cloudresources.VMResources) error {
+	if op.CPUs <= 0 && op.CPUSet.IsEmpty() {
 		return nil
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if !cpus.IsEmpty() {
-		freed := cpus.Difference(p.reservedCPUs)
+	if !op.CPUSet.IsEmpty() {
+		if op.CPUSet.Size() > p.allCPUs.Size() {
+			return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUSet.Size(), p.allCPUs.Size())
+		}
+
+		pinned := op.CPUSet.Difference(p.reservedCPUs)
+		p.usedCPUs = p.usedCPUs.Union(pinned)
+		p.availableCPUs = p.availableCPUs.Difference(pinned)
+
+		return nil
+	}
+
+	available := p.availableCPUs.Size() - p.assignedCPUs
+	if op.CPUs > available {
+		return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUs, available)
+	}
+
+	p.assignedCPUs += op.CPUs
+
+	return nil
+}
+
+//nolint:dupl
+func (p *simplePolicy) Release(op *cloudresources.VMResources) error {
+	if op.CPUs == 0 && op.CPUSet.IsEmpty() {
+		return nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !op.CPUSet.IsEmpty() {
+		freed := op.CPUSet.Difference(p.reservedCPUs)
 		p.usedCPUs = p.usedCPUs.Difference(freed)
 		p.availableCPUs = p.availableCPUs.Union(freed)
 
 		return nil
 	}
 
-	if numCPUs > 0 {
-		if p.assignedCPUs < numCPUs {
+	if op.CPUs > 0 {
+		if p.assignedCPUs < op.CPUs {
 			return fmt.Errorf("cannot release CPUs")
 		}
 
-		p.assignedCPUs -= numCPUs
+		p.assignedCPUs -= op.CPUs
 	}
 
 	return nil

@@ -58,12 +58,8 @@ linters:
     - wsl
 
     # Temporary disabled linters
-    - copyloopvar
-    - nlreturn
-    - wsl
     - errcheck
     - revive
-    - unparam
     - staticcheck
     - noinlineerr
   settings:
@@ -94,7 +90,8 @@ linters:
       min-complexity: 30
     gomoddirectives:
       replace-local: true
-      replace-allow-list: []
+      replace-allow-list:
+        - github.com/luthermonson/go-proxmox
       retract-allow-no-explanation: false
       exclude-forbidden: true
     lll:
@@ -126,6 +123,10 @@ linters:
     unused:
       local-variables-are-used: false
   exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - dupl
     paths:
       # Copied from kubernetes repo
       - pkg/providers/cloudcapacity/cpumanager/topology

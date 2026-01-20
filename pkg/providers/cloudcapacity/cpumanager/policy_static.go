@@ -18,10 +18,14 @@ package cpumanager
 
 import (
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 
+	goproxmox "github.com/sergelogvinov/go-proxmox"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 
 	"k8s.io/utils/cpuset"
@@ -101,73 +105,94 @@ func (p *staticPolicy) AvailableCPUs() int {
 	return max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
 }
 
-func (p *staticPolicy) Allocate(numCPUs int) (cpuset.CPUSet, error) {
+func (p *staticPolicy) Allocate(op *cloudresources.VMResources) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	cpus, err := p.takeByTopology(p.log, p.availableCPUs, numCPUs)
+	cpus, err := p.takeByTopology(p.log, p.availableCPUs, op.CPUs)
 	if err != nil {
-		return cpuset.New(), err
+		return err
 	}
 
 	p.usedCPUs = p.usedCPUs.Union(cpus)
 	p.availableCPUs = p.availableCPUs.Difference(cpus)
+	op.CPUSet = cpus.Clone()
 
-	return cpus, nil
-}
+	CPUinx := 0
+	NUMANodes := make(map[int]goproxmox.NUMANodeState, p.topology.CPUDetails.NUMANodes().Size())
 
-func (p *staticPolicy) AllocateOrUpdate(numCPUs int, cpus cpuset.CPUSet) (cpuset.CPUSet, error) {
-	if numCPUs <= 0 && cpus.IsEmpty() {
-		return cpuset.New(), nil
-	}
+	for _, i := range p.topology.CPUDetails.NUMANodes().List() {
+		numaCPUs := op.CPUSet.Intersection(p.topology.CPUDetails.CPUsInNUMANodes(i))
+		if numaCPUs.Size() > 0 {
+			NUMANodes[i] = goproxmox.NUMANodeState{
+				CPUs:   lo.Must(cpuset.Parse(fmt.Sprintf("%d-%d", CPUinx, CPUinx+numaCPUs.Size()-1))),
+				Policy: "bind",
+			}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if !cpus.IsEmpty() {
-		if cpus.Size() > p.allCPUs.Size() {
-			return cpuset.New(), fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", cpus.Size(), p.allCPUs.Size())
+			CPUinx += numaCPUs.Size()
 		}
-
-		pinned := cpus.Difference(p.reservedCPUs)
-		p.usedCPUs = p.usedCPUs.Union(pinned)
-		p.availableCPUs = p.availableCPUs.Difference(pinned)
-
-		return cpuset.New(), nil
 	}
 
-	if p.assignedCPUs+numCPUs > p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size() {
-		return cpuset.New(), fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", numCPUs, p.availableCPUs.Size())
+	if len(NUMANodes) > 0 {
+		op.NUMANodes = make(map[int]goproxmox.NUMANodeState, len(NUMANodes))
+		maps.Copy(op.NUMANodes, NUMANodes)
 	}
 
-	p.assignedCPUs += numCPUs
-
-	return cpuset.New(), nil
+	return nil
 }
 
-//nolint:dupl
-func (p *staticPolicy) Release(numCPUs int, cpus cpuset.CPUSet) error {
-	if numCPUs == 0 && cpus.IsEmpty() {
+func (p *staticPolicy) AllocateOrUpdate(op *cloudresources.VMResources) error {
+	if op.CPUs <= 0 && op.CPUSet.IsEmpty() {
 		return nil
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if !cpus.IsEmpty() {
-		freed := cpus.Difference(p.reservedCPUs)
+	if !op.CPUSet.IsEmpty() {
+		if op.CPUSet.Size() > p.allCPUs.Size() {
+			return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUSet.Size(), p.allCPUs.Size())
+		}
+
+		pinned := op.CPUSet.Difference(p.reservedCPUs)
+		p.usedCPUs = p.usedCPUs.Union(pinned)
+		p.availableCPUs = p.availableCPUs.Difference(pinned)
+
+		return nil
+	}
+
+	if p.assignedCPUs+op.CPUs > p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size() {
+		return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUs, p.availableCPUs.Size())
+	}
+
+	p.assignedCPUs += op.CPUs
+
+	return nil
+}
+
+//nolint:dupl
+func (p *staticPolicy) Release(op *cloudresources.VMResources) error {
+	if op.CPUs == 0 && op.CPUSet.IsEmpty() {
+		return nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !op.CPUSet.IsEmpty() {
+		freed := op.CPUSet.Difference(p.reservedCPUs)
 		p.usedCPUs = p.usedCPUs.Difference(freed)
 		p.availableCPUs = p.availableCPUs.Union(freed)
 
 		return nil
 	}
 
-	if numCPUs > 0 {
-		if p.assignedCPUs < numCPUs {
+	if op.CPUs > 0 {
+		if p.assignedCPUs < op.CPUs {
 			return fmt.Errorf("cannot release CPUs")
 		}
 
-		p.assignedCPUs -= numCPUs
+		p.assignedCPUs -= op.CPUs
 	}
 
 	return nil

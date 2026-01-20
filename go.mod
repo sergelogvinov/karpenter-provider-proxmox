@@ -3,18 +3,19 @@ module github.com/sergelogvinov/karpenter-provider-proxmox
 go 1.25.5
 
 // replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
-// replace github.com/luthermonson/go-proxmox => github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20251223032417-72ddd47a4a37
+// replace github.com/luthermonson/go-proxmox => ../../proxmox/go-proxmox-luthermonson
+// replace github.com/luthermonson/go-proxmox => github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20260120011308-748c88d65172
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20251024191238-14554b75b88a
 	github.com/go-logr/logr v1.4.3
 	github.com/google/go-cmp v0.7.0
-	github.com/luthermonson/go-proxmox v0.3.2
+	github.com/luthermonson/go-proxmox v0.3.3-0.20260121044809-b9a857e04af3
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
-	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260119124002-36e1fe604b60
+	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260120020858-3f5457e4c539
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0

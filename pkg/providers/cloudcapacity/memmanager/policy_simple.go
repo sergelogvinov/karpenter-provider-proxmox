@@ -18,10 +18,9 @@ package memmanager
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 	"sync"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
 )
 
@@ -59,18 +58,9 @@ func (p *simplePolicy) Name() string {
 	return string(PolicySimple)
 }
 
-func (p *simplePolicy) AvailableMemory() uint64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+func (p *simplePolicy) Allocate(op *cloudresources.VMResources) error {
+	mem := op.Memory
 
-	if p.assignedMemory > p.maxMemory {
-		return 0
-	}
-
-	return p.maxMemory - p.assignedMemory
-}
-
-func (p *simplePolicy) Allocate(mem uint64) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -83,7 +73,9 @@ func (p *simplePolicy) Allocate(mem uint64) error {
 	return nil
 }
 
-func (p *simplePolicy) AllocateOrUpdate(mem uint64) error {
+func (p *simplePolicy) AllocateOrUpdate(op *cloudresources.VMResources) error {
+	mem := op.Memory
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -96,7 +88,9 @@ func (p *simplePolicy) AllocateOrUpdate(mem uint64) error {
 	return nil
 }
 
-func (p *simplePolicy) Release(mem uint64) error {
+func (p *simplePolicy) Release(op *cloudresources.VMResources) error {
+	mem := op.Memory
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -111,19 +105,17 @@ func (p *simplePolicy) Release(mem uint64) error {
 	return nil
 }
 
+func (p *simplePolicy) AvailableMemory() uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.assignedMemory >= p.maxMemory {
+		return 0
+	}
+
+	return p.maxMemory - p.assignedMemory
+}
+
 func (p *simplePolicy) Status() string {
-	r := []string{fmt.Sprintf("%dM", p.AvailableMemory()/1024/1024)}
-
-	nodeIDs := make([]int, 0, len(p.topology.NUMANodes))
-	for i := range p.topology.NUMANodes {
-		nodeIDs = append(nodeIDs, i)
-	}
-
-	sort.Ints(nodeIDs)
-
-	for _, i := range nodeIDs {
-		r = append(r, fmt.Sprintf("N%d:%dM", i, p.topology.NUMANodes[i]/1024/1024))
-	}
-
-	return strings.Join(r, ", ")
+	return fmt.Sprintf("%dM", p.AvailableMemory()/1024/1024)
 }

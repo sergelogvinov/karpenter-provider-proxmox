@@ -6,12 +6,10 @@
       "nodes": {
         "0": {
           "cpus": "0-7",
-          "threads": 2,
           "memsize": 33245628416
         },
         "1": {
           "cpus": "8-15",
-          "threads": 2,
           "memsize": 33245628416
         }
       },
