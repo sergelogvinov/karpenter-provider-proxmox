@@ -80,10 +80,10 @@ func TestStaticAllocate(t *testing.T) {
 				CPUs:   2,
 				Memory: 6 * 1024 * 1024 * 1024,
 				NUMANodes: map[int]goproxmox.NUMANodeState{
-					0: {CPUs: lo.Must(cpuset.Parse("0-1"))},
+					1: {CPUs: lo.Must(cpuset.Parse("0-1"))},
 				},
 			},
-			status: "8192M, N0:2048M, N1:8192M",
+			status: "8192M, N0:8192M, N1:2048M",
 		},
 	}
 
