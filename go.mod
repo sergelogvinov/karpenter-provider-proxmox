@@ -1,6 +1,6 @@
 module github.com/sergelogvinov/karpenter-provider-proxmox
 
-go 1.25.5
+go 1.25.6
 
 // replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
 // replace github.com/luthermonson/go-proxmox => ../../proxmox/go-proxmox-luthermonson
@@ -15,7 +15,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
-	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260120020858-3f5457e4c539
+	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260124063411-198293aba58a
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/multierr v1.11.0
