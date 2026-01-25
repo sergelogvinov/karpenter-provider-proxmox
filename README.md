@@ -32,8 +32,10 @@ Also, having free resources can provide more advantages than we might initially 
 * [x] Simple IPAM (IP Address Management) for VM network interfaceses
 * [x] VM optimization: Placement across zones
 * [x] VM optimization: Network performance
-* [ ] VM optimization: CPU pinning
-* [ ] VM optimization: NUMA node affinity
+* [x] VM optimization: CPU pinning, see [limitations](docs/noderesource.md)
+* [x] VM optimization: NUMA node affinity, see [limitations](docs/noderesource.md)
+* [ ] Dynamic VM sizing (instance types) based on the best fit in the Proxmox Node(s)
+* [ ] Spot instances support
 
 ## Requirements
 
