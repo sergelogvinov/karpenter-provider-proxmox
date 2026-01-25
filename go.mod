@@ -4,7 +4,8 @@ go 1.25.6
 
 // replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
 // replace github.com/luthermonson/go-proxmox => ../../proxmox/go-proxmox-luthermonson
-// replace github.com/luthermonson/go-proxmox => github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20260120011308-748c88d65172
+
+replace github.com/luthermonson/go-proxmox => github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20260125082001-0d6b289c23e5
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
