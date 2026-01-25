@@ -18,12 +18,12 @@ package topology
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/luthermonson/go-proxmox"
 	"k8s.io/utils/cpuset"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	nodesettings "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 )
 
 // Discover returns CPUTopology based on proxmox node info
@@ -39,56 +39,20 @@ func Discover(n *proxmox.Node) (*CPUTopology, error) {
 		return nil, fmt.Errorf("could not detect CPU topology from incomplete machine info: %+v", machineInfo)
 	}
 
-	CPUDetails := CPUDetails{}
-
-	nCache := 4
-	nCPUsNodes := 1
-	if c := machineInfo.Cores / machineInfo.Sockets; c > 16 {
-		for _, i := range []int{12, 10, 8, 6, 4} {
-			if c%i == 0 {
-				nCPUsNodes = i
-
-				break
-			}
-		}
+	st, err := nodesettings.GetNodeSettingByNode(n)
+	if err != nil {
+		return nil, fmt.Errorf("getting node settings: %w", err)
 	}
 
-	numaModes := machineInfo.Cores / nCPUsNodes
-
-	for cpu := range machineInfo.CPUs {
-		socketID := int(cpu/(machineInfo.Cores/machineInfo.Sockets)) % machineInfo.Sockets
-		numaID := int(cpu/nCPUsNodes) % nCPUsNodes % numaModes
-
-		coreID := cpu
-		if coreID >= machineInfo.Cores {
-			coreID = cpu - machineInfo.Cores
-		}
-
-		cacheID := (coreID / nCache)
-		if strings.Contains(machineInfo.Model, "Intel") {
-			cacheID = 0
-		}
-
-		CPUDetails[cpu] = CPUInfo{
-			CoreID:        coreID,
-			SocketID:      socketID,
-			NUMANodeID:    numaID,
-			UncoreCacheID: cacheID,
-		}
+	if st == nil {
+		return nil, fmt.Errorf("could not get node settings from machine info: %+v", machineInfo)
 	}
 
-	return &CPUTopology{
-		NumCPUs:        machineInfo.CPUs,
-		NumSockets:     machineInfo.Sockets,
-		NumCores:       machineInfo.Cores,
-		NumNUMANodes:   CPUDetails.NUMANodes().Size(),
-		NumUncoreCache: CPUDetails.UncoreCaches().Size(),
-		CPUDetails:     CPUDetails,
-	}, nil
+	return DiscoverFromSettings(st)
 }
 
-func DiscoverFromSettings(settings settings.NodeSettings) (*CPUTopology, error) {
-	if len(settings.NUMANodes) == 0 {
+func DiscoverFromSettings(settings *settings.NodeSettings) (*CPUTopology, error) {
+	if settings == nil || len(settings.NUMANodes) == 0 {
 		return nil, fmt.Errorf("could not detect cpu topology from incomplete node settings")
 	}
 
@@ -110,6 +74,7 @@ func DiscoverFromSettings(settings settings.NodeSettings) (*CPUTopology, error) 
 		nCores += cpus.Size() / max(1, nThreads)
 	}
 
+	coresPerCache := max(1, nCores/nCache)
 	CPUDetails := CPUDetails{}
 
 	for i, cpus := range parsedCPUs {
@@ -122,7 +87,7 @@ func DiscoverFromSettings(settings settings.NodeSettings) (*CPUTopology, error) 
 				coreID = cpu - nCores
 			}
 
-			cacheID := (coreID / nCache)
+			cacheID := coreID / coresPerCache
 
 			CPUDetails[cpu] = CPUInfo{
 				NUMANodeID:    i,

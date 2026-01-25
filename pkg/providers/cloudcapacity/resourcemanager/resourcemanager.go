@@ -93,12 +93,12 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 			log.V(4).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
 		}
 
-		nodeCPUTopology, err = cputopology.DiscoverFromSettings(manager.nodeSettings)
+		nodeCPUTopology, err = cputopology.DiscoverFromSettings(&manager.nodeSettings)
 		if err != nil {
 			log.Info("failed to discover CPU topology from settings for node", "node", manager.zone, "error", err)
 		}
 
-		nodeMemTopology, err = memtopology.DiscoverFromSettings(manager.nodeSettings)
+		nodeMemTopology, err = memtopology.DiscoverFromSettings(&manager.nodeSettings)
 		if err != nil {
 			log.Info("failed to discover memory topology from settings for node", "node", manager.zone, "error", err)
 		}
