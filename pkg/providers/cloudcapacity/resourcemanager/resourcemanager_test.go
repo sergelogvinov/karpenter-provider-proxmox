@@ -55,8 +55,8 @@ var testNodeSettings = settings.NodeSettings{
 func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 	t.Parallel()
 
-	cpuPolicy := lo.Must(cputopology.DiscoverFromSettings(testNodeSettings))
-	memPolicy := lo.Must(memtopology.DiscoverFromSettings(testNodeSettings))
+	cpuPolicy := lo.Must(cputopology.DiscoverFromSettings(&testNodeSettings))
+	memPolicy := lo.Must(memtopology.DiscoverFromSettings(&testNodeSettings))
 
 	testCases := []struct { //nolint:dupl
 		name    string
@@ -213,8 +213,8 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 	t.Parallel()
 	logger, _ := ktesting.NewTestContext(t)
 
-	cpuTopology := lo.Must(cputopology.DiscoverFromSettings(testNodeSettings))
-	memTopology := lo.Must(memtopology.DiscoverFromSettings(testNodeSettings))
+	cpuTopology := lo.Must(cputopology.DiscoverFromSettings(&testNodeSettings))
+	memTopology := lo.Must(memtopology.DiscoverFromSettings(&testNodeSettings))
 
 	testCases := []struct { //nolint:dupl
 		name    string

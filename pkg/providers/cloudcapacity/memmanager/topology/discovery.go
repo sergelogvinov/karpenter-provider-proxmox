@@ -22,6 +22,7 @@ import (
 	"github.com/luthermonson/go-proxmox"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	nodesettings "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 )
 
 // Discover returns MemTopology based on proxmox node info
@@ -32,24 +33,25 @@ func Discover(n *proxmox.Node) (*MemTopology, error) {
 		return nil, fmt.Errorf("cannot discover memory topology from nil node info")
 	}
 
-	topology := &MemTopology{
-		TotalMemory: n.Memory.Total,
+	st, err := nodesettings.GetNodeSettingByNode(n)
+	if err != nil {
+		return nil, fmt.Errorf("getting node settings: %w", err)
 	}
 
-	sockets := max(1, n.CPUInfo.Sockets)
-	mem := n.Memory.Total / uint64(sockets)
+	if st == nil {
+		topology := &MemTopology{
+			TotalMemory: n.Memory.Total,
+		}
 
-	topology.NUMANodes = make(map[int]uint64, n.CPUInfo.Sockets)
-	for i := range sockets {
-		topology.NUMANodes[i] = mem
+		return topology, nil
 	}
 
-	return topology, nil
+	return DiscoverFromSettings(st)
 }
 
 // DiscoverFromSettings returns MemTopology based on resourcemanager.NodeSettings
-func DiscoverFromSettings(settings settings.NodeSettings) (*MemTopology, error) {
-	if len(settings.NUMANodes) == 0 {
+func DiscoverFromSettings(settings *settings.NodeSettings) (*MemTopology, error) {
+	if settings == nil || len(settings.NUMANodes) == 0 {
 		return nil, fmt.Errorf("could not detect memory topology from incomplete node settings")
 	}
 

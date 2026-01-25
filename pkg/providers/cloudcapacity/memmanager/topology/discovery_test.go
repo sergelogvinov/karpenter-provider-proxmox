@@ -48,6 +48,9 @@ func TestDiscover(t *testing.T) {
 					Total: 65536,
 				},
 				CPUInfo: proxmox.CPUInfo{
+					Model:   "8 x Intel(R) Core(TM) i7-6700 CPU",
+					CPUs:    8,
+					Cores:   4,
 					Sockets: 1,
 				},
 			},
@@ -65,6 +68,9 @@ func TestDiscover(t *testing.T) {
 					Total: 128000,
 				},
 				CPUInfo: proxmox.CPUInfo{
+					Model:   "16 x Intel(R) Core(TM) i7-6700 CPU",
+					CPUs:    16,
+					Cores:   8,
 					Sockets: 2,
 				},
 			},
@@ -101,7 +107,7 @@ func TestDiscoverFromSettings(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		settings settings.NodeSettings
+		settings *settings.NodeSettings
 		topo     *topology.MemTopology
 		error    error
 	}{
@@ -111,7 +117,7 @@ func TestDiscoverFromSettings(t *testing.T) {
 		},
 		{
 			name: "single socket machine",
-			settings: settings.NodeSettings{
+			settings: &settings.NodeSettings{
 				NUMANodes: settings.NUMANodes{
 					0: settings.NUMAInfo{
 						MemSize: 65536,
@@ -127,7 +133,7 @@ func TestDiscoverFromSettings(t *testing.T) {
 		},
 		{
 			name: "dual socket machine",
-			settings: settings.NodeSettings{
+			settings: &settings.NodeSettings{
 				NUMANodes: settings.NUMANodes{
 					0: settings.NUMAInfo{
 						MemSize: 64000,
