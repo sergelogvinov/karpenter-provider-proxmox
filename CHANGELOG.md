@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.9.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.8.0...v0.9.0) (2026-01-25)
+
+
+### Features
+
+* enhance cpu management and node resource reservation ([7cfea7f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/7cfea7f16e96e0e6ad5562af94d4dbe1e0915185))
+* hugepages in instance types ([14b02e6](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/14b02e62a4762814343d3260f55ae91421946c6d))
+* static policy allocation ([fa66916](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/fa6691670e13bcda8e62cf5d486dad74909fb711))
+* static policy allocation ([ae721bb](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/ae721bbbea55129a72ea50b62c5b6a1ca93d59e6))
+* support numa topology in node settings ([6f25278](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/6f2527838752b4cc31a8c6179eb1514d64385b97))
+
+
+### Bug Fixes
+
+* error handling in capacity management ([17f2156](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/17f21568e65728352c6eb567a7df3cc0d1ea8a7b))
+* ipam contoller ([93c75ac](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/93c75ac72d87b30fb6e8169b27a9a0f193a96a46))
+* proxmox node topology prediction ([b3a9867](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b3a98670a2553c58564c6aba37d8e9176e2f1916))
+
 ## [0.8.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.7.2...v0.8.0) (2026-01-11)
 
 
