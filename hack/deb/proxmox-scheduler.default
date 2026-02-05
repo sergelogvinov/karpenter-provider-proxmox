@@ -1,0 +1,8 @@
+# Default parameters for proxmox-scheduler
+# This file is sourced by the systemd service
+
+# Feature flags - enable karpenter integration by default
+PROXMOX_FEATURE_FLAGS=karpenter
+
+# Additional command line arguments
+EXTRA_ARGS=""

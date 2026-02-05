@@ -71,6 +71,7 @@ linters:
       disable:
         - err
         - if
+        - go
     cyclop:
       max-complexity: 30
     dupl:

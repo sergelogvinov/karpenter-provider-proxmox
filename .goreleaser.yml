@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: karpenter
+
+builds:
+  - id: proxmox-scheduler
+    dir: ./cmd/proxmox-scheduler
+    binary: proxmox-scheduler
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -X main.Version={{ .Version }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+nfpms:
+  - id: proxmox-scheduler-deb
+    package_name: proxmox-scheduler
+    vendor: Serge Logvinov
+    homepage: https://github.com/sergelogvinov/karpenter-provider-proxmox
+    maintainer: Serge Logvinov <serge.logvinov@sinextra.dev>
+    description: |
+      Proxmox Scheduler Daemon
+      A scheduler daemon for Proxmox Virtual Environment integration with Karpenter.
+    license: Apache-2.0
+    section: utils
+    priority: optional
+    formats:
+      - deb
+    dependencies:
+      - proxmox-ve
+    bindir: /usr/sbin
+    ids:
+      - proxmox-scheduler
+    contents:
+      - src: hack/deb/proxmox-scheduler.service
+        dst: /lib/systemd/system/proxmox-scheduler.service
+        file_info:
+          mode: 0644
+      - src: hack/deb/proxmox-scheduler.default
+        dst: /etc/default/proxmox-scheduler
+        file_info:
+          mode: 0644
+        type: config
+      - src: LICENSE
+        dst: /usr/share/doc/proxmox-scheduler/copyright
+        file_info:
+          mode: 0644
+    scripts:
+      postinstall: hack/deb/postinstall.sh
+      preremove: hack/deb/preremove.sh
+      postremove: hack/deb/postremove.sh
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: 0.0.0-snapshot

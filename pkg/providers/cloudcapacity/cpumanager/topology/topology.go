@@ -21,6 +21,8 @@ package topology
 import (
 	"fmt"
 
+	"github.com/go-logr/logr"
+	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"k8s.io/utils/cpuset"
 )
 
@@ -332,4 +334,78 @@ func (d CPUDetails) CPUsInCores(ids ...int) cpuset.CPUSet {
 		}
 	}
 	return cpuset.New(cpuIDs...)
+}
+
+func getUncoreCacheID(core cadvisorapi.Core) int {
+	if len(core.UncoreCaches) < 1 {
+		// In case cAdvisor is nil, failback to socket alignment since uncorecache is not shared
+		return core.SocketID
+	}
+	// Even though cadvisor API returns a slice, we only expect either 0 or a 1 uncore caches,
+	// so everything past the first entry should be discarded or ignored
+	return core.UncoreCaches[0].Id
+}
+
+// DiscoverCadvisor returns CPUTopology based on cadvisor node info
+func DiscoverCadvisor(logger logr.Logger, machineInfo *cadvisorapi.MachineInfo) (*CPUTopology, error) {
+	if machineInfo == nil {
+		return nil, nil
+	}
+
+	if machineInfo.NumCores == 0 {
+		return nil, fmt.Errorf("could not detect number of cpus")
+	}
+
+	cpuDetails := CPUDetails{}
+	numPhysicalCores := 0
+
+	for _, node := range machineInfo.Topology {
+		numPhysicalCores += len(node.Cores)
+		for _, core := range node.Cores {
+			if coreID, err := getUniqueCoreID(core.Threads); err == nil {
+				for _, cpu := range core.Threads {
+					cpuDetails[cpu] = CPUInfo{
+						CoreID:        coreID,
+						SocketID:      core.SocketID,
+						NUMANodeID:    node.Id,
+						UncoreCacheID: getUncoreCacheID(core),
+					}
+				}
+			} else {
+				logger.Info("Could not get unique coreID for socket", "socket", core.SocketID, "core", core.Id, "threads", core.Threads)
+				return nil, err
+			}
+		}
+	}
+
+	return &CPUTopology{
+		NumCPUs:        machineInfo.NumCores,
+		NumSockets:     machineInfo.NumSockets,
+		NumCores:       numPhysicalCores,
+		NumNUMANodes:   cpuDetails.NUMANodes().Size(),
+		NumUncoreCache: cpuDetails.UncoreCaches().Size(),
+		CPUDetails:     cpuDetails,
+	}, nil
+}
+
+// getUniqueCoreID computes coreId as the lowest cpuID
+// for a given Threads []int slice. This will assure that coreID's are
+// platform unique (opposite to what cAdvisor reports)
+func getUniqueCoreID(threads []int) (coreID int, err error) {
+	if len(threads) == 0 {
+		return 0, fmt.Errorf("no cpus provided")
+	}
+
+	if len(threads) != cpuset.New(threads...).Size() {
+		return 0, fmt.Errorf("cpus provided are not unique")
+	}
+
+	min := threads[0]
+	for _, thread := range threads[1:] {
+		if thread < min {
+			min = thread
+		}
+	}
+
+	return min, nil
 }
