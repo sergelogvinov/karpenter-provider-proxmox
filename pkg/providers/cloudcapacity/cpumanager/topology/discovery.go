@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/luthermonson/go-proxmox"
+
 	"k8s.io/utils/cpuset"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"

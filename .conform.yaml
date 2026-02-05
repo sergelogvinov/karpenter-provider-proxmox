@@ -33,6 +33,7 @@ policies:
       skipPaths:
         - .git/
         - vendor/
+        - pkg/utils/systeminfo/
       includeSuffixes:
         - .go
       excludeSuffixes:

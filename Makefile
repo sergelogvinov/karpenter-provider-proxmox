@@ -77,7 +77,7 @@ build-all-archs:
 
 .PHONY: clean
 clean: ## Clean
-	rm -rf bin
+	rm -rf bin/ dist/
 
 .PHONY: tools
 tools:
@@ -113,6 +113,19 @@ build: ## Build
 	CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(GO_LDFLAGS)" \
 		-o bin/karpenter-provider-proxmox-$(ARCH) ./cmd/controller
 
+.PHONY: build-scheduler
+build-scheduler: ## Build Proxmox Scheduler
+	CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(GO_LDFLAGS)" \
+		-o bin/proxmox-scheduler-$(ARCH) ./cmd/proxmox-scheduler
+
+.PHONY: build-instancetypes
+build-instancetypes: ## Build Instance Types
+	CGO_ENABLED=0 GOOS=$(OS) GOARCH=$(ARCH) go build -ldflags "$(GO_LDFLAGS)" \
+		-o bin/instancetypes-$(ARCH) ./cmd/instancetypes
+
+.PHONY: build-all
+build-all: build build-scheduler build-instancetypes ## Build all binaries
+
 .PHONY: run
 run: ## Run
 	go run ./cmd/controller -cloud-config=cloud.yaml -disable-leader-election -log-level=debug -health-probe-port=8081 -metrics-port=8080
@@ -131,7 +144,7 @@ licenses:
 
 .PHONY: conformance
 conformance:
-	docker run --rm -it -v $(PWD):/src -w /src ghcr.io/siderolabs/conform:latest enforce
+	docker run --rm -it -v $(PWD):/src -w /src ghcr.io/siderolabs/conform:v0.1.0-alpha.31 enforce
 
 ############
 

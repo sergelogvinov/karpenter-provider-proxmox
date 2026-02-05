@@ -1,0 +1,34 @@
+[Unit]
+Description=Proxmox Scheduler Daemon
+Documentation=https://github.com/sergelogvinov/karpenter-provider-proxmox
+ConditionPathExists=/usr/sbin/proxmox-scheduler
+Wants=pve-cluster.service
+After=pve-cluster.service
+After=pve-guests.service
+After=pve-storage.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=-/etc/default/proxmox-scheduler
+ExecStart=/usr/sbin/proxmox-scheduler $EXTRA_ARGS
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=proxmox-scheduler
+
+# Security settings
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectHostname=yes
+ProtectClock=yes
+ProtectKernelModules=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target
