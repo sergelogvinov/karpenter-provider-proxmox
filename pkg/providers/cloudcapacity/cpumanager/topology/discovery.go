@@ -27,10 +27,10 @@ import (
 	nodesettings "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 )
 
-// Discover returns CPUTopology based on proxmox node info
+// Discover returns Topology based on proxmox node info
 // We do not have access to real information,
 // so, we will predict architecture based on the provided CPUInfo.
-func Discover(n *proxmox.Node) (*CPUTopology, error) {
+func Discover(n *proxmox.Node) (*Topology, error) {
 	if n == nil {
 		return nil, fmt.Errorf("cannot discover cpu topology from nil node info")
 	}
@@ -49,10 +49,22 @@ func Discover(n *proxmox.Node) (*CPUTopology, error) {
 		return nil, fmt.Errorf("could not get node settings from machine info: %+v", machineInfo)
 	}
 
-	return DiscoverFromSettings(st)
+	topology, err := DiscoverFromSettings(st)
+	if err != nil {
+		return nil, fmt.Errorf("discovering topology from settings: %w", err)
+	}
+
+	if len(topology.NUMANodes) == 0 || topology.MemTopology.TotalMemory == 0 {
+		topology.MemTopology.TotalMemory = n.Memory.Total
+		topology.MemTopology.NUMANodes = map[int]uint64{
+			0: n.Memory.Total,
+		}
+	}
+
+	return topology, nil
 }
 
-func DiscoverFromSettings(settings *settings.NodeSettings) (*CPUTopology, error) {
+func DiscoverFromSettings(settings *settings.NodeSettings) (*Topology, error) {
 	if settings == nil || len(settings.NUMANodes) == 0 {
 		return nil, fmt.Errorf("could not detect cpu topology from incomplete node settings")
 	}
@@ -62,6 +74,9 @@ func DiscoverFromSettings(settings *settings.NodeSettings) (*CPUTopology, error)
 	nSockets := max(1, settings.NumSockets)
 	nCache := max(1, settings.NumUncoreCaches)
 	nThreads := max(1, settings.NumThreads)
+
+	memTotal := uint64(0)
+	memNUMA := make(map[int]uint64)
 
 	parsedCPUs := make(map[int]cpuset.CPUSet, len(settings.NUMANodes))
 	for i, numa := range settings.NUMANodes {
@@ -73,6 +88,9 @@ func DiscoverFromSettings(settings *settings.NodeSettings) (*CPUTopology, error)
 		parsedCPUs[i] = cpus
 		nCPUs += cpus.Size()
 		nCores += cpus.Size() / max(1, nThreads)
+
+		memTotal += numa.MemSize
+		memNUMA[i] = numa.MemSize
 	}
 
 	coresPerCache := max(1, nCores/nCache)
@@ -99,12 +117,18 @@ func DiscoverFromSettings(settings *settings.NodeSettings) (*CPUTopology, error)
 		}
 	}
 
-	return &CPUTopology{
-		NumCPUs:        nCPUs,
-		NumSockets:     nSockets,
-		NumCores:       nCores,
-		NumNUMANodes:   CPUDetails.NUMANodes().Size(),
-		NumUncoreCache: CPUDetails.UncoreCaches().Size(),
-		CPUDetails:     CPUDetails,
+	return &Topology{
+		CPUTopology: CPUTopology{
+			NumCPUs:        nCPUs,
+			NumSockets:     nSockets,
+			NumCores:       nCores,
+			NumNUMANodes:   CPUDetails.NUMANodes().Size(),
+			NumUncoreCache: CPUDetails.UncoreCaches().Size(),
+			CPUDetails:     CPUDetails,
+		},
+		MemTopology: MemTopology{
+			NUMANodes:   memNUMA,
+			TotalMemory: memTotal,
+		},
 	}, nil
 }

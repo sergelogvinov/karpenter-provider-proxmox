@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cloudresources_test
+package vmresources_test
 
 import (
 	"testing"
@@ -24,18 +24,19 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
+	resources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	"k8s.io/utils/cpuset"
 )
 
-func TestGenerateVMResourceRequest(t *testing.T) {
+func TestGetResourceFromVM(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct { //nolint:dupl
 		name     string
 		vm       *proxmox.VirtualMachine
-		expected *cloudresources.VMResources
+		expected *resources.VMResources
 		error    error
 	}{
 		{
@@ -46,7 +47,7 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 				MaxMem:               8192 * 1024 * 1024,
 				VirtualMachineConfig: &proxmox.VirtualMachineConfig{},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   4,
 				CPUSet: cpuset.New(),
@@ -63,7 +64,7 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 					Affinity: "0-3",
 				},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   4,
 				CPUSet: lo.Must(cpuset.Parse("0-3")),
@@ -82,13 +83,38 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 					Numa0:    "cpus=0-3,hostnodes=0,memory=8192",
 				},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   4,
 				CPUSet: lo.Must(cpuset.Parse("0-1,8-9")),
 				Memory: 8192 * 1024 * 1024,
 				NUMANodes: map[int]goproxmox.NUMANodeState{
 					0: {
+						Memory: 8192,
+						CPUs:   lo.Must(cpuset.Parse("0-3")),
+					},
+				},
+			},
+		},
+		{
+			name: "static VM with numa binding 2",
+			vm: &proxmox.VirtualMachine{
+				VMID:   100,
+				CPUs:   4,
+				MaxMem: 8 * 1024 * 1024 * 1024,
+				VirtualMachineConfig: &proxmox.VirtualMachineConfig{
+					Affinity: "0-1,8-9",
+					Numa:     1,
+					Numa0:    "cpus=0-3,hostnodes=1,memory=8192",
+				},
+			},
+			expected: &resources.VMResources{
+				ID:     100,
+				CPUs:   4,
+				CPUSet: lo.Must(cpuset.Parse("0-1,8-9")),
+				Memory: 8192 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					1: {
 						Memory: 8192,
 						CPUs:   lo.Must(cpuset.Parse("0-3")),
 					},
@@ -108,7 +134,7 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 					Numa1:    "cpus=2-3,hostnodes=1,memory=8192,policy=bind",
 				},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   4,
 				CPUSet: lo.Must(cpuset.Parse("0-1,8-9")),
@@ -140,7 +166,7 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 					Numa1:    "cpus=4-7,hostnodes=2-3,memory=8192,policy=bind",
 				},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   8,
 				CPUSet: lo.Must(cpuset.Parse("0-3,8-11")),
@@ -182,7 +208,7 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 					Numa1:    "cpus=4-7,hostnodes=0-1,memory=8192,policy=bind",
 				},
 			},
-			expected: &cloudresources.VMResources{
+			expected: &resources.VMResources{
 				ID:     100,
 				CPUs:   8,
 				CPUSet: lo.Must(cpuset.Parse("0-3,8-11")),
@@ -207,7 +233,155 @@ func TestGenerateVMResourceRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			req, err := cloudresources.GenerateVMResourceRequest(tc.vm)
+			req, err := vmresources.GetResourceFromVM(tc.vm)
+			if tc.error != nil {
+				assert.EqualError(t, err, tc.error.Error())
+
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, req)
+		})
+	}
+}
+
+func TestGenerateVMOptionsFromResources(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct { //nolint:dupl
+		name      string
+		resources *resources.VMResources
+		expected  map[string]any
+		error     error
+	}{
+		{
+			name: "dynamic VM",
+			resources: &resources.VMResources{
+				ID:     100,
+				CPUs:   4,
+				CPUSet: cpuset.New(),
+				Memory: 8192 * 1024 * 1024,
+			},
+			expected: map[string]any{
+				"cores":  4,
+				"memory": uint64(8192),
+			},
+		},
+		{
+			name: "static VM",
+			resources: &resources.VMResources{
+				ID:     100,
+				CPUs:   4,
+				CPUSet: lo.Must(cpuset.Parse("0-3")),
+				Memory: 8192 * 1024 * 1024,
+			},
+			expected: map[string]any{
+				"cores":    4,
+				"memory":   uint64(8192),
+				"affinity": "0-3",
+			},
+		},
+		{
+			name: "static VM with numa binding",
+			resources: &resources.VMResources{
+				ID:     100,
+				CPUs:   4,
+				CPUSet: lo.Must(cpuset.Parse("0-1,8-9")),
+				Memory: 8192 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					1: {
+						Memory: 8192,
+						CPUs:   lo.Must(cpuset.Parse("0-3")),
+						Policy: "bind",
+					},
+				},
+			},
+			expected: map[string]any{
+				"cores":    4,
+				"memory":   uint64(8192),
+				"affinity": "0-1,8-9",
+				"numa":     1,
+				"numa0":    "cpus=0-3,hostnodes=1,memory=8192,policy=bind",
+			},
+		},
+		{
+			name: "static VM with multi cpu numa binding",
+			resources: &resources.VMResources{
+				ID:     100,
+				CPUs:   8,
+				CPUSet: lo.Must(cpuset.Parse("0-3,8-11")),
+				Memory: 16384 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					0: {
+						Memory: 4096,
+						CPUs:   lo.Must(cpuset.Parse("0-1")),
+						Policy: "bind",
+					},
+					1: {
+						Memory: 4096,
+						CPUs:   lo.Must(cpuset.Parse("2-3")),
+						Policy: "bind",
+					},
+					2: {
+						Memory: 4096,
+						CPUs:   lo.Must(cpuset.Parse("4-5")),
+						Policy: "bind",
+					},
+					3: {
+						Memory: 4096,
+						CPUs:   lo.Must(cpuset.Parse("6-7")),
+						Policy: "bind",
+					},
+				},
+			},
+			expected: map[string]any{
+				"cores":    8,
+				"memory":   uint64(16384),
+				"affinity": "0-3,8-11",
+				"numa":     1,
+				"numa0":    "cpus=0-1,hostnodes=0,memory=4096,policy=bind",
+				"numa1":    "cpus=2-3,hostnodes=1,memory=4096,policy=bind",
+				"numa2":    "cpus=4-5,hostnodes=2,memory=4096,policy=bind",
+				"numa3":    "cpus=6-7,hostnodes=3,memory=4096,policy=bind",
+			},
+		},
+		{
+			name: "static VM with multi cpu cross numa binding",
+			resources: &resources.VMResources{
+				ID:     100,
+				CPUs:   8,
+				CPUSet: lo.Must(cpuset.Parse("0-3,8-11")),
+				Memory: 16384 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					0: {
+						Memory: 8192,
+						CPUs:   lo.Must(cpuset.Parse("0-3")),
+						Policy: "bind",
+					},
+					1: {
+						Memory: 8192,
+						CPUs:   lo.Must(cpuset.Parse("4-7")),
+						Policy: "bind",
+					},
+				},
+			},
+			expected: map[string]any{
+				"cores":    8,
+				"memory":   uint64(16384),
+				"affinity": "0-3,8-11",
+				"numa":     1,
+				"numa0":    "cpus=0-3,hostnodes=0,memory=8192,policy=bind",
+				"numa1":    "cpus=4-7,hostnodes=1,memory=8192,policy=bind",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			req, err := vmresources.GenerateVMOptionsFromResources(tc.resources)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 

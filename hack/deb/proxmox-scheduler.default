@@ -1,6 +1,9 @@
 # Default parameters for proxmox-scheduler
 # This file is sourced by the systemd service
 
+# Logging verbosity level (0=info, 1=debug, 2=trace, -1=errors only)
+VERBOSITY=0
+
 # Feature flags - enable karpenter integration by default
 PROXMOX_FEATURE_FLAGS=karpenter
 

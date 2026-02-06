@@ -20,20 +20,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
 )
 
 type simplePolicy struct {
-	mu sync.Mutex
-
-	// Maximum CPUs that can be assigned
-	// maxCPUs int
-	// Assigned CPUs of VM with dynamic assignments
-	assignedCPUs int
-
 	// allCPUs is the set of online CPUs as reported by the system
 	allCPUs cpuset.CPUSet
 	// availableCPUs is the set of CPUs that are available for exclusive assignment
@@ -42,6 +35,15 @@ type simplePolicy struct {
 	usedCPUs cpuset.CPUSet
 	// Reserved CPUs that cannot be assigned
 	reservedCPUs cpuset.CPUSet
+	// Assigned CPUs of VM with dynamic assignments
+	assignedCPUs int
+
+	// Available memory for allocation
+	availableMemory uint64
+	// Assigned memory of all VMs
+	assignedMemory uint64
+
+	mu sync.Mutex
 }
 
 // PolicySimple name of simple policy
@@ -50,25 +52,29 @@ const PolicySimple policyName = "simple"
 // Ensure simplePolicy implements Policy interface
 var _ Policy = &simplePolicy{}
 
-// NewSimplePolicy returns a cpuset manager policy that does nothing
-func NewSimplePolicy(topology *topology.CPUTopology, reserved []int) (Policy, error) {
-	if topology == nil {
-		return nil, fmt.Errorf("topology must be provided for simple cpu policy")
+// NewSimplePolicy returns a resource manager policy that handles both CPU and memory allocation
+func NewSimplePolicy(sysTopology *topology.Topology, reservedCPUs []int, reservedMemory uint64) (Policy, error) {
+	if sysTopology == nil {
+		return nil, fmt.Errorf("system topology must be provided for %s policy", string(PolicySimple))
 	}
 
-	reservedCPUs := cpuset.New(reserved...)
-	if topology.NumCPUs < reservedCPUs.Size() {
-		return nil, fmt.Errorf("not enough CPUs available: maxCPUs=%d, reservedCPUs=%d", topology.NumCPUs, reservedCPUs.Size())
+	reservedCPUSet := cpuset.New(reservedCPUs...)
+	if sysTopology.NumCPUs < reservedCPUSet.Size() {
+		return nil, fmt.Errorf("not enough CPUs available: maxCPUs: %d, reservedCPUs: %d", sysTopology.NumCPUs, reservedCPUSet.Size())
 	}
 
-	allCPUs := topology.CPUDetails.CPUs()
+	if reservedMemory >= sysTopology.TotalMemory {
+		return nil, fmt.Errorf("reserved memory %d must be less than max memory %d", reservedMemory, sysTopology.TotalMemory)
+	}
+
+	allCPUs := sysTopology.CPUDetails.CPUs()
 
 	return &simplePolicy{
-		// maxCPUs:       topology.NumCPUs,
-		allCPUs:       allCPUs,
-		availableCPUs: allCPUs.Difference(reservedCPUs),
-		usedCPUs:      cpuset.New(),
-		reservedCPUs:  reservedCPUs,
+		allCPUs:         allCPUs,
+		availableCPUs:   allCPUs.Difference(reservedCPUSet),
+		usedCPUs:        cpuset.New(),
+		reservedCPUs:    reservedCPUSet,
+		availableMemory: sysTopology.TotalMemory - reservedMemory,
 	}, nil
 }
 
@@ -83,73 +89,111 @@ func (p *simplePolicy) AvailableCPUs() int {
 	return max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
 }
 
-func (p *simplePolicy) Allocate(op *cloudresources.VMResources) error {
+func (p *simplePolicy) AvailableMemory() uint64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.assignedCPUs+op.CPUs > p.availableCPUs.Size() {
-		return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUs, p.availableCPUs.Size())
+	if p.assignedMemory >= p.availableMemory {
+		return 0
 	}
 
-	p.assignedCPUs += op.CPUs
-
-	return nil
+	return p.availableMemory - p.assignedMemory
 }
 
-func (p *simplePolicy) AllocateOrUpdate(op *cloudresources.VMResources) error {
-	if op.CPUs <= 0 && op.CPUSet.IsEmpty() {
+//nolint:dupl
+func (p *simplePolicy) Allocate(op *resources.VMResources) error {
+	if op.CPUs <= 0 && op.Memory == 0 {
 		return nil
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.assignedMemory+op.Memory > p.availableMemory {
+		available := uint64(0)
+		if p.assignedMemory < p.availableMemory {
+			available = p.availableMemory - p.assignedMemory
+		}
+
+		return fmt.Errorf("not enough memory available: requested=%d, available=%d", op.Memory, available)
+	}
+
+	if p.assignedCPUs+op.CPUs > p.availableCPUs.Size() {
+		return fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, p.availableCPUs.Size()-p.assignedCPUs)
+	}
+
+	p.assignedCPUs += op.CPUs
+	p.assignedMemory += op.Memory
+
+	return nil
+}
+
+// nolint:dupl
+func (p *simplePolicy) AllocateOrUpdate(op *resources.VMResources) error {
+	if op.CPUs <= 0 && op.CPUSet.IsEmpty() && op.Memory == 0 {
+		return nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.assignedMemory+op.Memory > p.availableMemory {
+		available := uint64(0)
+		if p.assignedMemory < p.availableMemory {
+			available = p.availableMemory - p.assignedMemory
+		}
+
+		return fmt.Errorf("not enough memory available: requested=%d, available=%d", op.Memory, available)
+	}
+
 	if !op.CPUSet.IsEmpty() {
 		if op.CPUSet.Size() > p.allCPUs.Size() {
-			return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUSet.Size(), p.allCPUs.Size())
+			return fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUSet.Size(), p.allCPUs.Size())
 		}
 
 		pinned := op.CPUSet.Difference(p.reservedCPUs)
 		p.usedCPUs = p.usedCPUs.Union(pinned)
 		p.availableCPUs = p.availableCPUs.Difference(pinned)
+	} else if op.CPUs > 0 {
+		available := p.availableCPUs.Size() - p.assignedCPUs
+		if op.CPUs > available {
+			return fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, available)
+		}
 
-		return nil
+		p.assignedCPUs += op.CPUs
 	}
 
-	available := p.availableCPUs.Size() - p.assignedCPUs
-	if op.CPUs > available {
-		return fmt.Errorf("not enough CPUs available to satisfy request: requested=%d, available=%d", op.CPUs, available)
-	}
-
-	p.assignedCPUs += op.CPUs
+	p.assignedMemory += op.Memory
 
 	return nil
 }
 
 //nolint:dupl
-func (p *simplePolicy) Release(op *cloudresources.VMResources) error {
-	if op.CPUs == 0 && op.CPUSet.IsEmpty() {
+func (p *simplePolicy) Release(op *resources.VMResources) error {
+	if op.CPUs == 0 && op.CPUSet.IsEmpty() && op.Memory == 0 {
 		return nil
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.assignedMemory < op.Memory {
+		return fmt.Errorf("cannot release memory: requested=%d, assigned=%d", op.Memory, p.assignedMemory)
+	}
+
 	if !op.CPUSet.IsEmpty() {
 		freed := op.CPUSet.Difference(p.reservedCPUs)
 		p.usedCPUs = p.usedCPUs.Difference(freed)
 		p.availableCPUs = p.availableCPUs.Union(freed)
-
-		return nil
-	}
-
-	if op.CPUs > 0 {
+	} else if op.CPUs > 0 {
 		if p.assignedCPUs < op.CPUs {
-			return fmt.Errorf("cannot release CPUs")
+			return fmt.Errorf("cannot release CPUs: requested=%d, assigned=%d", op.CPUs, p.assignedCPUs)
 		}
 
 		p.assignedCPUs -= op.CPUs
 	}
+
+	p.assignedMemory -= op.Memory
 
 	return nil
 }
@@ -158,7 +202,12 @@ func (p *simplePolicy) Status() string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	available := max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
+	availableCPUs := max(0, p.allCPUs.Size()-p.reservedCPUs.Size()-p.usedCPUs.Size()-p.assignedCPUs)
+	availableMemory := uint64(0)
+	if p.assignedMemory < p.availableMemory {
+		availableMemory = p.availableMemory - p.assignedMemory
+	}
 
-	return fmt.Sprintf("Free: %d, Static: [%v], Common: [%v], Reserved: [%v]", available, p.usedCPUs, p.availableCPUs, p.reservedCPUs)
+	return fmt.Sprintf("CPU: Free: %d, Static: [%v], Common: [%v], Reserved: [%v], Mem: %dM",
+		availableCPUs, p.usedCPUs, p.availableCPUs, p.reservedCPUs, availableMemory/1024/1024)
 }

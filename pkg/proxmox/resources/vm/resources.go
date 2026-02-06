@@ -14,22 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cloudresources
+package vmresources
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
+	resources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
+	"k8s.io/utils/ptr"
 )
 
-// GenerateVMResourceRequest generates a VMResources from a Proxmox VirtualMachine object.
-func GenerateVMResourceRequest(vm *proxmox.VirtualMachine) (opt *VMResources, err error) {
-	opt = &VMResources{
+// GetResourceFromVM extracts VMResources from a Proxmox VirtualMachine object.
+func GetResourceFromVM(vm *proxmox.VirtualMachine) (opt *resources.VMResources, err error) {
+	if vm == nil {
+		return nil, fmt.Errorf("virtual machine config cannot be nil")
+	}
+
+	opt = &resources.VMResources{
 		ID:     int(vm.VMID),
 		CPUs:   vm.CPUs,
 		CPUSet: cpuset.New(),
@@ -94,4 +101,58 @@ func GenerateVMResourceRequest(vm *proxmox.VirtualMachine) (opt *VMResources, er
 	}
 
 	return opt, nil
+}
+
+// GenerateVMOptionsFromResources creates Proxmox VirtualMachineOptions from VMResources.
+func GenerateVMOptionsFromResources(res *resources.VMResources) (opts map[string]any, err error) {
+	if res == nil {
+		return nil, fmt.Errorf("VM resources cannot be nil")
+	}
+
+	opts = map[string]any{
+		"cores":  res.CPUs,
+		"memory": res.Memory / 1024 / 1024,
+	}
+
+	if !res.CPUSet.IsEmpty() {
+		opts["affinity"] = res.CPUSet.String()
+	}
+
+	if len(res.NUMANodes) > 0 {
+		opts["numa"] = 1
+
+		cpuIdx := 0
+
+		numaKeys := make([]int, 0, len(res.NUMANodes))
+		for k := range res.NUMANodes {
+			numaKeys = append(numaKeys, k)
+		}
+
+		sort.Ints(numaKeys)
+
+		for i, k := range numaKeys {
+			node := res.NUMANodes[k]
+			if node.CPUs.IsEmpty() {
+				return nil, fmt.Errorf("NUMA node %d has no CPUs assigned", k)
+			}
+
+			numaKey := fmt.Sprintf("numa%d", i)
+			numaConfig := goproxmox.VMNUMA{
+				Memory:        ptr.To(int(node.Memory)),
+				CPUIDs:        []string{},
+				Policy:        node.Policy,
+				HostNodeNames: []string{fmt.Sprintf("%d", k)},
+			}
+
+			numaConfig.CPUIDs = []string{fmt.Sprintf("%d-%d", cpuIdx, cpuIdx+node.CPUs.Size()-1)}
+			cpuIdx += node.CPUs.Size()
+
+			opts[numaKey], err = numaConfig.ToString()
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate NUMA config string for NUMA node %d: %w", i, err)
+			}
+		}
+	}
+
+	return opts, nil
 }

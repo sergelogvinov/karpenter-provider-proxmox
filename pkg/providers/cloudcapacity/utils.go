@@ -25,8 +25,8 @@ import (
 	proxmox "github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
+	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -68,7 +68,7 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		opt, err := cloudresources.GenerateVMResourceRequest(vm)
+		opt, err := vmresources.GetResourceFromVM(vm)
 		if err != nil {
 			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
 		}

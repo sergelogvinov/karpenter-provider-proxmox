@@ -16,9 +16,7 @@ limitations under the License.
 
 package cpumanager
 
-import (
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
-)
+import "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 type policyName string
 
@@ -27,8 +25,9 @@ type Policy interface {
 	Status() string
 
 	AvailableCPUs() int
+	AvailableMemory() uint64
 
-	Allocate(op *cloudresources.VMResources) error
-	AllocateOrUpdate(op *cloudresources.VMResources) error
-	Release(op *cloudresources.VMResources) error
+	Allocate(op *resources.VMResources) error
+	AllocateOrUpdate(op *resources.VMResources) error
+	Release(op *resources.VMResources) error
 }

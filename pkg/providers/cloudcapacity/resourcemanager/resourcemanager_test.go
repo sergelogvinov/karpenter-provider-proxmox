@@ -23,12 +23,10 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
-	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager"
-	memtopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
+	topology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/klog/v2/ktesting"
 	"k8s.io/utils/cpuset"
@@ -55,33 +53,30 @@ var testNodeSettings = settings.NodeSettings{
 func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 	t.Parallel()
 
-	cpuPolicy := lo.Must(cputopology.DiscoverFromSettings(&testNodeSettings))
-	memPolicy := lo.Must(memtopology.DiscoverFromSettings(&testNodeSettings))
+	sysPolicy := lo.Must(topology.DiscoverFromSettings(&testNodeSettings))
 
 	testCases := []struct { //nolint:dupl
 		name    string
 		manager *resourceManager
-		request []cloudresources.VMResources
+		request []resources.VMResources
 		status  string
 		error   error
 	}{
 		{
 			name: "empty",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewSimplePolicy(cpuPolicy, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewSimplePolicy(memPolicy, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewSimplePolicy(sysPolicy, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
 			status: "CPU: Free: 16, Static: [], Common: [0-15], Reserved: [], Mem: 31744M",
 		},
 		{
 			name: "simple allocate",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewSimplePolicy(cpuPolicy, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewSimplePolicy(memPolicy, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewSimplePolicy(sysPolicy, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -93,11 +88,10 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewSimplePolicy(cpuPolicy, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewSimplePolicy(memPolicy, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewSimplePolicy(sysPolicy, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -114,11 +108,10 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs with topology",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewSimplePolicy(cpuPolicy, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewSimplePolicy(memPolicy, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewSimplePolicy(sysPolicy, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -146,11 +139,10 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs with topology overlap",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewSimplePolicy(cpuPolicy, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewSimplePolicy(memPolicy, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewSimplePolicy(sysPolicy, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -213,33 +205,30 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 	t.Parallel()
 	logger, _ := ktesting.NewTestContext(t)
 
-	cpuTopology := lo.Must(cputopology.DiscoverFromSettings(&testNodeSettings))
-	memTopology := lo.Must(memtopology.DiscoverFromSettings(&testNodeSettings))
+	sysTopology := lo.Must(topology.DiscoverFromSettings(&testNodeSettings))
 
 	testCases := []struct { //nolint:dupl
 		name    string
 		manager *resourceManager
-		request []cloudresources.VMResources
+		request []resources.VMResources
 		status  string
 		error   error
 	}{
 		{
 			name: "empty",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewStaticPolicy(logger, cpuTopology, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewStaticPolicy(logger, memTopology, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewStaticPolicy(logger, sysTopology, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
 			status: "CPU: Free: 16, Static: [], Common: [0-15], Reserved: [], Mem: 31744M, N0:16384M, N1:16384M",
 		},
 		{
 			name: "simple allocate",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewStaticPolicy(logger, cpuTopology, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewStaticPolicy(logger, memTopology, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewStaticPolicy(logger, sysTopology, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -251,11 +240,10 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewStaticPolicy(logger, cpuTopology, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewStaticPolicy(logger, memTopology, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewStaticPolicy(logger, sysTopology, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -272,11 +260,10 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs with topology",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewStaticPolicy(logger, cpuTopology, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewStaticPolicy(logger, memTopology, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewStaticPolicy(logger, sysTopology, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,
@@ -304,11 +291,10 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 		{
 			name: "simple allocate two VMs with topology overlap",
 			manager: &resourceManager{
-				nodeSettings:     testNodeSettings,
-				nodeCPUPolicy:    lo.Must(cpumanager.NewStaticPolicy(logger, cpuTopology, testNodeSettings.ReservedCPUs)),
-				nodeMemoryPolicy: lo.Must(memmanager.NewStaticPolicy(logger, memTopology, testNodeSettings.ReservedMemory)),
+				nodeSettings: testNodeSettings,
+				nodePolicy:   lo.Must(cpumanager.NewStaticPolicy(logger, sysTopology, testNodeSettings.ReservedCPUs, testNodeSettings.ReservedMemory)),
 			},
-			request: []cloudresources.VMResources{
+			request: []resources.VMResources{
 				{
 					ID:     1,
 					CPUs:   4,

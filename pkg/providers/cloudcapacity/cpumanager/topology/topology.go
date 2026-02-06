@@ -26,6 +26,12 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
+// Topology contains details of node cpu and memory topology
+type Topology struct {
+	CPUTopology
+	MemTopology
+}
+
 // NUMANodeInfo is a map from NUMANode ID to a list of CPU IDs associated with
 // that NUMANode.
 type NUMANodeInfo map[int]cpuset.CPUSet
@@ -48,6 +54,18 @@ type CPUTopology struct {
 	NumSockets     int
 	NumNUMANodes   int
 	CPUDetails     CPUDetails
+}
+
+// MemTopology contains details of node memory topology
+type MemTopology struct {
+	// TotalMemory is the total memory of the node in bytes
+	TotalMemory uint64
+	// NUMANodes is a map from NUMA Node ID to the amount of memory in bytes associated with that NUMA Node
+	NUMANodes map[int]uint64
+}
+
+func (topo *Topology) String() string {
+	return fmt.Sprintf("CPUs: %d, Cores: %d, Sockets: %d, NUMANodes: %d, UncoreCaches: %d, TotalMemory: %d", topo.NumCPUs, topo.NumCores, topo.NumSockets, topo.NumNUMANodes, topo.NumUncoreCache, topo.TotalMemory)
 }
 
 // String returns a string representation of the CPUTopology.

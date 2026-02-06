@@ -24,20 +24,18 @@ import (
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
-	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager"
-	memtopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type ResourceManager interface {
-	Allocate(*cloudresources.VMResources) error
-	AllocateOrUpdate(*cloudresources.VMResources) error
-	Release(*cloudresources.VMResources) error
+	Allocate(*resources.VMResources) error
+	AllocateOrUpdate(*resources.VMResources) error
+	Release(*resources.VMResources) error
 
 	AvailableCPUs() int
 	AvailableMemory() uint64
@@ -50,9 +48,8 @@ type resourceManager struct {
 	zone string
 	log  logr.Logger
 
-	nodeSettings     settings.NodeSettings
-	nodeCPUPolicy    cpumanager.Policy
-	nodeMemoryPolicy memmanager.Policy
+	nodeSettings settings.NodeSettings
+	nodePolicy   cpumanager.Policy
 }
 
 var _ ResourceManager = &resourceManager{}
@@ -76,9 +73,8 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 	}
 
 	var (
-		nodeCPUTopology *cputopology.CPUTopology
-		nodeMemTopology *memtopology.MemTopology
-		err             error
+		sysTopology *topology.Topology
+		err         error
 	)
 
 	if name := opts.NodeSettingFilePath; name != "" {
@@ -93,64 +89,39 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 			log.V(4).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
 		}
 
-		nodeCPUTopology, err = cputopology.DiscoverFromSettings(&manager.nodeSettings)
+		sysTopology, err = topology.DiscoverFromSettings(&manager.nodeSettings)
 		if err != nil {
-			log.Info("failed to discover CPU topology from settings for node", "node", manager.zone, "error", err)
-		}
-
-		nodeMemTopology, err = memtopology.DiscoverFromSettings(&manager.nodeSettings)
-		if err != nil {
-			log.Info("failed to discover memory topology from settings for node", "node", manager.zone, "error", err)
+			log.Info("failed to discover topology from settings for node", "node", manager.zone, "error", err)
 		}
 	}
 
-	if nodeCPUTopology == nil || nodeMemTopology == nil {
+	if sysTopology == nil {
 		n, err := cl.Client.Node(ctx, manager.zone)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get node %s: %w", manager.zone, err)
 		}
 
-		if nodeCPUTopology == nil {
-			nodeCPUTopology, err = cputopology.Discover(n)
-			if err != nil {
-				return nil, fmt.Errorf("failed to discover CPU topology for node %s: %w", manager.zone, err)
-			}
-		}
-
-		if nodeMemTopology == nil {
-			nodeMemTopology, err = memtopology.Discover(n)
-			if err != nil {
-				return nil, fmt.Errorf("failed to discover memory topology for node %s: %w", manager.zone, err)
-			}
+		sysTopology, err = topology.Discover(n)
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover topology for node %s: %w", manager.zone, err)
 		}
 	}
 
 	switch opts.NodePolicy { //nolint:gocritic
 	case string(cpumanager.PolicyStatic):
-		manager.nodeCPUPolicy, err = cpumanager.NewStaticPolicy(log, nodeCPUTopology, manager.nodeSettings.ReservedCPUs)
+		manager.nodePolicy, err = cpumanager.NewStaticPolicy(log, sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create static policy for node %s: %w", manager.zone, err)
 		}
-
-		manager.nodeMemoryPolicy, err = memmanager.NewStaticPolicy(log, nodeMemTopology, manager.nodeSettings.ReservedMemory)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create memory policy for node %s: %w", manager.zone, err)
-		}
 	default:
-		manager.nodeCPUPolicy, err = cpumanager.NewSimplePolicy(nodeCPUTopology, manager.nodeSettings.ReservedCPUs)
+		manager.nodePolicy, err = cpumanager.NewSimplePolicy(sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create simple policy for node %s: %w", manager.zone, err)
-		}
-
-		manager.nodeMemoryPolicy, err = memmanager.NewSimplePolicy(nodeMemTopology, manager.nodeSettings.ReservedMemory)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create memory policy for node %s: %w", manager.zone, err)
 		}
 	}
 
 	log.V(1).Info("Created resource manager",
-		"capacityCPU", manager.nodeCPUPolicy.Status(),
-		"capacityMem", manager.nodeMemoryPolicy.Status(),
+		"capacity", manager.nodePolicy.Status(),
 		"settings", manager.nodeSettings,
 		"policy", opts.NodePolicy,
 	)
@@ -159,24 +130,39 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 }
 
 // Allocate implements ResourceManager.
-func (r *resourceManager) Allocate(op *cloudresources.VMResources) (err error) {
+func (r *resourceManager) Allocate(op *resources.VMResources) (err error) {
 	if op == nil || op.CPUs <= 0 || op.Memory == 0 {
-		return fmt.Errorf("cannot allocate resources, invalid options")
+		return fmt.Errorf("cannot allocate resources, invalid resources request")
 	}
 
-	err = r.nodeCPUPolicy.Allocate(op)
+	err = r.nodePolicy.Allocate(op)
 	if err != nil {
 		return err
 	}
 
-	err = r.nodeMemoryPolicy.Allocate(op)
-	if err != nil {
-		r.nodeCPUPolicy.Release(op)
+	r.log.V(1).Info("Allocated resources", "id", op.ID,
+		"availableCapacity", r.Status(),
+		"CPUs", op.CPUs,
+		"CPUSet", op.CPUSet.String(),
+		"memory", op.Memory/1024/1024,
+		"numaNodes", op.NUMANodes,
+	)
 
+	return nil
+}
+
+// AllocateOrUpdate implements ResourceManager.
+func (r *resourceManager) AllocateOrUpdate(op *resources.VMResources) error {
+	if op == nil || op.CPUs <= 0 || op.Memory == 0 || op.ID == 0 {
+		return fmt.Errorf("cannot allocate resources, invalid resources request")
+	}
+
+	err := r.nodePolicy.AllocateOrUpdate(op)
+	if err != nil {
 		return err
 	}
 
-	r.log.V(4).Info("Allocated resources", "id", op.ID,
+	r.log.V(4).Info("Allocated or updated resources", "id", op.ID,
 		"availableCapacity", r.Status(),
 		"CPUs", op.CPUs,
 		"CPUSet", op.CPUSet.String(),
@@ -185,40 +171,13 @@ func (r *resourceManager) Allocate(op *cloudresources.VMResources) (err error) {
 	return nil
 }
 
-// AllocateOrUpdate implements ResourceManager.
-func (r *resourceManager) AllocateOrUpdate(op *cloudresources.VMResources) error {
-	if op == nil || op.CPUs <= 0 || op.Memory == 0 || op.ID == 0 {
-		return fmt.Errorf("cannot allocate resources, invalid options")
-	}
-
-	err := r.nodeCPUPolicy.AllocateOrUpdate(op)
-	if err != nil {
-		return err
-	}
-
-	err = r.nodeMemoryPolicy.AllocateOrUpdate(op)
-	if err != nil {
-		r.nodeCPUPolicy.Release(op)
-
-		return err
-	}
-
-	r.log.V(4).Info("Allocated/Updated resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", op.CPUSet.String())
-
-	return nil
-}
-
 // Release implements ResourceManager.
-func (r *resourceManager) Release(op *cloudresources.VMResources) (err error) {
+func (r *resourceManager) Release(op *resources.VMResources) (err error) {
 	if op == nil || op.CPUs <= 0 || op.Memory == 0 || op.ID == 0 {
 		return nil
 	}
 
-	if err := r.nodeMemoryPolicy.Release(op); err != nil {
-		return err
-	}
-
-	if err := r.nodeCPUPolicy.Release(op); err != nil {
+	if err := r.nodePolicy.Release(op); err != nil {
 		return err
 	}
 
@@ -229,15 +188,15 @@ func (r *resourceManager) Release(op *cloudresources.VMResources) (err error) {
 
 // AvailableCPUs implements ResourceManager.
 func (r *resourceManager) AvailableCPUs() int {
-	return r.nodeCPUPolicy.AvailableCPUs()
+	return r.nodePolicy.AvailableCPUs()
 }
 
 // AvailableMemory implements ResourceManager.
 func (r *resourceManager) AvailableMemory() uint64 {
-	return r.nodeMemoryPolicy.AvailableMemory()
+	return r.nodePolicy.AvailableMemory()
 }
 
 // Status implements ResourceManager.
 func (r *resourceManager) Status() string {
-	return fmt.Sprintf("CPU: %s, Mem: %s", r.nodeCPUPolicy.Status(), r.nodeMemoryPolicy.Status())
+	return r.nodePolicy.Status()
 }

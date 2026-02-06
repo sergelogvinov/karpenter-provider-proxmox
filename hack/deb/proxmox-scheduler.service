@@ -2,10 +2,8 @@
 Description=Proxmox Scheduler Daemon
 Documentation=https://github.com/sergelogvinov/karpenter-provider-proxmox
 ConditionPathExists=/usr/sbin/proxmox-scheduler
-Wants=pve-cluster.service
-After=pve-cluster.service
-After=pve-guests.service
-After=pve-storage.target
+Requires=pvedaemon.service
+After=pve-cluster.service pvedaemon.service
 
 [Service]
 Type=simple
@@ -29,6 +27,7 @@ ProtectKernelModules=yes
 RestrictSUIDSGID=yes
 RemoveIPC=yes
 RestrictRealtime=yes
+ReadWritePaths=/run/lock/ /etc/pve/nodes/ /var/log/pve/
 
 [Install]
 WantedBy=multi-user.target
