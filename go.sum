@@ -166,8 +166,8 @@ github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWN
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/samber/lo v1.52.0 h1:Rvi+3BFHES3A8meP33VPAxiBZX/Aws5RxrschYGjomw=
 github.com/samber/lo v1.52.0/go.mod h1:4+MXEGsJzbKGaUEQFKBq2xtfuznW9oz/WrgyzMzRoM0=
-github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206050513-e7fe4fa0b5cc h1:IWK9zaeHVA4kf8owhJ8GMeQ66a47zwV7Q5ju6vI1tsY=
-github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206050513-e7fe4fa0b5cc/go.mod h1:vw450poBG+/roS2orKPR+pgOGkNSltJoMpzuQ/Toohw=
+github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206115911-f7532aa8ce81 h1:1c2HeDHOf+PffUdSNCPO6jtOlz+sXvbU0Ehgk9PPSV4=
+github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206115911-f7532aa8ce81/go.mod h1:vw450poBG+/roS2orKPR+pgOGkNSltJoMpzuQ/Toohw=
 github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20260125082001-0d6b289c23e5 h1:eOrr55+pYe5/oy+ef+7rXuLAYYUjy+5teUsHDV7dVUg=
 github.com/sergelogvinov/go-proxmox-luthermonson v0.0.0-20260125082001-0d6b289c23e5/go.mod h1:U6dAkJ+iiwaeb1g/LMWpWuWN4nmvWeXhmoMuYJMumS4=
 github.com/sirupsen/logrus v1.9.4-0.20230606125235-dd1b4c2e81af h1:Sp5TG9f7K39yfB+If0vjp97vuT74F72r8hfRpP8jLU0=
