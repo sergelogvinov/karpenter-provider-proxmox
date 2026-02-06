@@ -18,7 +18,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.52.0
-	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206050513-e7fe4fa0b5cc
+	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260206115911-f7532aa8ce81
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
