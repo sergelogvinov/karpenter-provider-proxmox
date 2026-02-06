@@ -56,7 +56,7 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 	log := log.FromContext(ctx).WithName("updateNodeCapacity()")
 
 	vms, err := cl.GetVMsByFilter(ctx, func(vm *proxmox.ClusterResource) (bool, error) {
-		return vm.Node == i.Name && vm.Status == "running", nil
+		return vm.Type == "qemu" && vm.Node == i.Name && vm.Status == "running", nil
 	})
 	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
 		return fmt.Errorf("cannot list vms for node %s: %w", i.Name, err)
