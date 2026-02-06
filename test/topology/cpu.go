@@ -18,11 +18,10 @@ package topology
 
 import (
 	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
-	memtopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/memmanager/topology"
 )
 
 var (
-	MemTopoUncoreDualSocketNoSMT16G = &memtopology.MemTopology{
+	MemTopoUncoreDualSocketNoSMT16G = &cputopology.MemTopology{
 		TotalMemory: 16384 * 1024 * 1024,
 		NUMANodes: map[int]uint64{
 			0: 8192 * 1024 * 1024,

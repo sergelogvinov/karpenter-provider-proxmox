@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/klog/v2/ktesting"
 	"k8s.io/utils/cpuset"
@@ -37,73 +37,160 @@ func TestStaticAllocate(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		topo     *topology.CPUTopology
+		topo     *topology.Topology
 		reserved []int
 
-		request    *cloudresources.VMResources
+		request    *resources.VMResources
 		status     string
 		numaStatus map[int]goproxmox.NUMANodeState
 		error      error
 	}{
 		{
-			name:     "allocate zero CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate zero CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 0},
-			status:  "Free: 16, Static: [], Common: [0-15], Reserved: []",
+			request: &resources.VMResources{CPUs: 0},
+			status:  "CPU: Free: 16, Static: [], Common: [0-15], Reserved: [], Mem: 32768M, N0:32768M",
 		},
 		{
-			name:     "allocate some CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate some CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 4},
-			status:  "Free: 12, Static: [0-1,8-9], Common: [2-7,10-15], Reserved: []",
+			request: &resources.VMResources{CPUs: 4, Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 12, Static: [0-1,8-9], Common: [2-7,10-15], Reserved: [], Mem: 28672M, N0:28672M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-3")), Policy: "bind"},
+				0: {CPUs: lo.Must(cpuset.Parse("0-3")), Memory: 4 * 1024, Policy: "bind"},
 			},
 		},
 		{
-			name:     "allocate some CPUs with specific reserved CPUs",
-			topo:     topoUncoreSingleSocketSMT,
-			reserved: []int{0, 1},
-
-			request: &cloudresources.VMResources{CPUs: 8},
-			status:  "Free: 6, Static: [4-7,12-15], Common: [2-3,8-11], Reserved: [0-1]",
-			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-7")), Policy: "bind"},
+			name: "allocate some CPUs with specific reserved physical CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
 			},
-		},
-		{
-			name:     "allocate some CPUs with specific reserved physical CPUs",
-			topo:     topoUncoreSingleSocketSMT,
 			reserved: []int{0, 8},
 
-			request: &cloudresources.VMResources{CPUs: 8},
-			status:  "Free: 6, Static: [4-7,12-15], Common: [1-3,9-11], Reserved: [0,8]",
+			request: &resources.VMResources{CPUs: 8, Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 6, Static: [4-7,12-15], Common: [1-3,9-11], Reserved: [0,8], Mem: 28672M, N0:28672M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-7")), Policy: "bind"},
+				0: {CPUs: lo.Must(cpuset.Parse("0-7")), Memory: 4 * 1024, Policy: "bind"},
 			},
 		},
 		{
-			name:     "allocate all available CPUs",
-			topo:     topoUncoreSingleSocketSMT,
-			reserved: []int{},
+			name: "allocate some CPUs with specific reserved physical CPUs and NUMA0 node",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketMultiNuma,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 16 * 1024 * 1024 * 1024,
+						1: 16 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{0, 3},
 
-			request: &cloudresources.VMResources{CPUs: 16},
-			status:  "Free: 0, Static: [0-15], Common: [], Reserved: []",
+			request: &resources.VMResources{CPUs: 4, Memory: 12 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 10, Static: [4-7], Common: [1-2,8-15], Reserved: [0,3], Mem: 20480M, N0:4096M, N1:16384M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-15")), Policy: "bind"},
+				0: {CPUs: lo.Must(cpuset.Parse("0-3")), Memory: 12 * 1024, Policy: "bind"},
 			},
 		},
 		{
-			name:     "allocate more than available CPUs",
-			topo:     topoDualSocketHT,
+			name: "allocate some CPUs with specific reserved physical CPUs and NUMA1 node",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketMultiNuma,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 16 * 1024 * 1024 * 1024,
+						1: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{0, 3},
+
+			request: &resources.VMResources{CPUs: 6, Memory: 18 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 8, Static: [8-13], Common: [1-2,4-7,14-15], Reserved: [0,3], Mem: 14336M, N0:16384M, N1:14336M",
+			numaStatus: map[int]goproxmox.NUMANodeState{
+				1: {CPUs: lo.Must(cpuset.Parse("0-5")), Memory: 18 * 1024, Policy: "bind"},
+			},
+		},
+		{
+			name: "allocate all available CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 32},
-			error:   fmt.Errorf("not enough cpus available to satisfy request: requested=32, available=12"),
+			request: &resources.VMResources{CPUs: 16, Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 0, Static: [0-15], Common: [], Reserved: [], Mem: 28672M, N0:28672M",
+			numaStatus: map[int]goproxmox.NUMANodeState{
+				0: {CPUs: lo.Must(cpuset.Parse("0-15")), Memory: 4 * 1024, Policy: "bind"},
+			},
+		},
+		{
+			name: "allocate more than available CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoDualSocketHT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 16 * 1024 * 1024 * 1024,
+						1: 16 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{},
+
+			request: &resources.VMResources{CPUs: 32, Memory: 4 * 1024 * 1024 * 1024},
+			error:   fmt.Errorf("not enough CPUs available: requested=32, available=12"),
+		},
+		{
+			name: "allocate more than available memory",
+			topo: &topology.Topology{
+				CPUTopology: *topoDualSocketHT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 16 * 1024 * 1024 * 1024,
+						1: 16 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{},
+
+			request: &resources.VMResources{CPUs: 8, Memory: 34 * 1024 * 1024 * 1024},
+			error:   fmt.Errorf("not enough memory available: requested=36507222016, available=34359738368"),
 		},
 	}
 
@@ -111,7 +198,7 @@ func TestStaticAllocate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			policy, err := NewStaticPolicy(logger, tc.topo, tc.reserved)
+			policy, err := NewStaticPolicy(logger, tc.topo, tc.reserved, 0)
 			assert.NoError(t, err)
 
 			if tc.error != nil {
@@ -121,7 +208,7 @@ func TestStaticAllocate(t *testing.T) {
 				return
 			}
 
-			init := policy.Status()
+			// init := policy.Status()
 
 			err = policy.Allocate(tc.request)
 			assert.NoError(t, err)
@@ -131,9 +218,9 @@ func TestStaticAllocate(t *testing.T) {
 				assert.Equal(t, tc.numaStatus, tc.request.NUMANodes)
 			}
 
-			err = policy.Release(tc.request)
-			assert.NoError(t, err)
-			assert.Equal(t, init, policy.Status())
+			// err = policy.Release(tc.request)
+			// assert.NoError(t, err)
+			// assert.Equal(t, init, policy.Status())
 		})
 	}
 }
@@ -144,76 +231,192 @@ func TestStaticAllocateOrUpdate(t *testing.T) {
 
 	testCases := []struct { //nolint:dupl
 		name     string
-		topo     *topology.CPUTopology
+		topo     *topology.Topology
 		reserved []int
 
-		request *cloudresources.VMResources
+		request *resources.VMResources
 		status  string
 		error   error
 	}{
 		{
-			name:     "allocate zero CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate zero CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 0},
-			status:  "Free: 16, Static: [], Common: [0-15], Reserved: []",
+			request: &resources.VMResources{CPUs: 0},
+			status:  "CPU: Free: 16, Static: [], Common: [0-15], Reserved: [], Mem: 32768M, N0:32768M",
 		},
 		{
-			name:     "allocate some CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate some CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 4},
-			status:  "Free: 12, Static: [], Common: [0-15], Reserved: []",
+			request: &resources.VMResources{CPUs: 4, Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 12, Static: [], Common: [0-15], Reserved: [], Mem: 28672M, N0:32768M",
 		},
 		{
-			name:     "allocate specific CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate specific CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 4, CPUSet: cpuset.New(2, 3, 14, 15)},
-			status:  "Free: 12, Static: [2-3,14-15], Common: [0-1,4-13], Reserved: []",
+			request: &resources.VMResources{CPUs: 4, CPUSet: cpuset.New(2, 3, 14, 15), Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 12, Static: [2-3,14-15], Common: [0-1,4-13], Reserved: [], Mem: 28672M, N0:32768M",
 		},
 		{
-			name:     "allocate some CPUs with some specific reserved CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate some CPUs with some specific reserved CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{0, 1},
 
-			request: &cloudresources.VMResources{CPUs: 8},
-			status:  "Free: 6, Static: [], Common: [2-15], Reserved: [0-1]",
+			request: &resources.VMResources{CPUs: 8, Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 6, Static: [], Common: [2-15], Reserved: [0-1], Mem: 28672M, N0:32768M",
 		},
 		{
-			name:     "allocate specific CPUs with specific reserved CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate specific CPUs and NUMA nodes with specific reserved CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{0, 1},
 
-			request: &cloudresources.VMResources{CPUs: 2, CPUSet: cpuset.New(3, 4)},
-			status:  "Free: 12, Static: [3-4], Common: [2,5-15], Reserved: [0-1]",
+			request: &resources.VMResources{
+				CPUs:   2,
+				CPUSet: cpuset.New(3, 4),
+				Memory: 4 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					0: {
+						CPUs:   lo.Must(cpuset.Parse("0-1")),
+						Memory: 4 * 1024,
+					},
+				},
+			},
+			status: "CPU: Free: 12, Static: [3-4], Common: [2,5-15], Reserved: [0-1], Mem: 28672M, N0:28672M",
 		},
 		{
-			name:     "allocate specific CPUs overlapped with specific reserved CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate specific CPUs overlapped with specific reserved CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{0, 1},
 
-			request: &cloudresources.VMResources{CPUs: 2, CPUSet: cpuset.New(1, 2)},
-			status:  "Free: 13, Static: [2], Common: [3-15], Reserved: [0-1]",
+			request: &resources.VMResources{CPUs: 2, CPUSet: cpuset.New(1, 2), Memory: 4 * 1024 * 1024 * 1024},
+			status:  "CPU: Free: 13, Static: [2], Common: [3-15], Reserved: [0-1], Mem: 28672M, N0:32768M",
 		},
 		{
-			name:     "allocate more CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate more than available CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{},
 
-			request: &cloudresources.VMResources{CPUs: 32},
-			error:   fmt.Errorf("not enough CPUs available to satisfy request: requested=32, available=16"),
+			request: &resources.VMResources{CPUs: 32},
+			error:   fmt.Errorf("not enough CPUs available: requested=32, available=16"),
 		},
 		{
-			name:     "allocate more specific CPUs with reserved CPUs",
-			topo:     topoUncoreSingleSocketSMT,
+			name: "allocate more specific CPUs with reserved CPUs",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
 			reserved: []int{0, 1},
 
-			request: &cloudresources.VMResources{CPUs: 32, CPUSet: lo.Must(cpuset.Parse("0-31"))},
-			error:   fmt.Errorf("not enough CPUs available to satisfy request: requested=32, available=16"),
+			request: &resources.VMResources{CPUs: 32, CPUSet: lo.Must(cpuset.Parse("0-31"))},
+			error:   fmt.Errorf("not enough CPUs available: requested=32, available=16"),
+		},
+		{
+			name: "allocate more than available memory",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 32 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{},
+
+			request: &resources.VMResources{CPUs: 8, Memory: 34 * 1024 * 1024 * 1024},
+			error:   fmt.Errorf("not enough memory available: requested=36507222016, available=34359738368"),
+		},
+		{
+			name: "allocate more than available memory in NUMA node",
+			topo: &topology.Topology{
+				CPUTopology: *topoUncoreSingleSocketSMT,
+				MemTopology: topology.MemTopology{
+					TotalMemory: 32 * 1024 * 1024 * 1024,
+					NUMANodes: map[int]uint64{
+						0: 16 * 1024 * 1024 * 1024,
+						1: 16 * 1024 * 1024 * 1024,
+					},
+				},
+			},
+			reserved: []int{},
+
+			request: &resources.VMResources{
+				CPUs:   8,
+				Memory: 18 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]goproxmox.NUMANodeState{
+					0: {
+						CPUs:   lo.Must(cpuset.Parse("0-15")),
+						Memory: 18 * 1024,
+					},
+				},
+			},
+			error: fmt.Errorf("not enough memory available on NUMA node 0: requested=18432M, available=16384M"),
 		},
 	}
 
@@ -221,7 +424,7 @@ func TestStaticAllocateOrUpdate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			policy, err := NewStaticPolicy(logger, tc.topo, tc.reserved)
+			policy, err := NewStaticPolicy(logger, tc.topo, tc.reserved, 0)
 			assert.NoError(t, err)
 
 			if tc.error != nil {

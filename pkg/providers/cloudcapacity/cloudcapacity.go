@@ -27,8 +27,8 @@ import (
 	"github.com/go-logr/logr"
 	proxmox "github.com/luthermonson/go-proxmox"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -38,9 +38,9 @@ import (
 
 type Provider interface {
 	// AllocateCapacityInZone allocates the specified capacity in the given region and zone.
-	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *cloudresources.VMResources) error
+	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error
 	// ReleaseCapacityInZone releases the specified capacity in the given region and zone.
-	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *cloudresources.VMResources) error
+	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error
 
 	// SyncNodeCapacity updates the node CPU and RAM capacity information for all regions.
 	SyncNodeCapacity(ctx context.Context) error
@@ -90,7 +90,7 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 }
 
 //nolint:dupl
-func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *cloudresources.VMResources) error {
+func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error {
 	if op == nil {
 		return fmt.Errorf("cannot allocate capacity: VMResources must be provided")
 	}
@@ -117,7 +117,7 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 }
 
 //nolint:dupl
-func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *cloudresources.VMResources) error {
+func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error {
 	if op == nil {
 		return fmt.Errorf("cannot release capacity: VMResources must be provided")
 	}

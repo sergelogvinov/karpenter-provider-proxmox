@@ -29,6 +29,22 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
+
+	"sigs.k8s.io/karpenter/pkg/utils/env"
+)
+
+const (
+	verbosityEnvVarName = "VERBOSITY"
+	verbosityFlagName   = "verbosity"
+
+	watchPathEnvVarName = "WATCH_PATH"
+	watchPathFlagName   = "watch-path"
+
+	maxRetriesEnvVarName = "MAX_RETRIES"
+	maxRetriesFlagName   = "max-retries"
+
+	resyncIntervalEnvVarName = "RESYNC_INTERVAL"
+	resyncIntervalFlagName   = "resync-interval"
 )
 
 var (
@@ -36,11 +52,11 @@ var (
 	Version = "edge"
 
 	showVersion = pflag.Bool("version", false, "Print the version and exit.")
-	verbosity   = pflag.IntP("verbosity", "v", 1, "Verbosity level (0=info, 1=debug, 2=trace, -1=errors only)")
 
-	watchPath     = pflag.String("watch-path", "/run/qemu-server", "Path to watch of qemu pid files")
-	maxRetries    = pflag.Int("max-retries", 5, "Maximum number of retry attempts")
-	timerInterval = pflag.Duration("timer-interval", 60*time.Minute, "Timer event interval")
+	verbosity      = pflag.IntP(verbosityFlagName, "v", env.WithDefaultInt(verbosityEnvVarName, 0), "Verbosity level (0=info, 1=debug, 2=trace, -1=errors only)")
+	watchPath      = pflag.String(watchPathFlagName, env.WithDefaultString(watchPathEnvVarName, "/run/qemu-server"), "Path to watch of qemu pid files")
+	maxRetries     = pflag.Int(maxRetriesFlagName, env.WithDefaultInt(maxRetriesEnvVarName, 5), "Maximum number of retry attempts")
+	resyncInterval = pflag.Duration(resyncIntervalFlagName, env.WithDefaultDuration(resyncIntervalEnvVarName, 60*time.Minute), "Resync interval")
 )
 
 func main() {
@@ -100,7 +116,7 @@ func scheduler(handler *SchedulerHandler, logger logr.Logger) error {
 	config := reconciler.DefaultConfig(logger)
 	config.MaxRetries = *maxRetries
 	config.WatchPath = *watchPath
-	config.SyncDelay = *timerInterval
+	config.SyncDelay = *resyncInterval
 
 	rec, err := reconciler.NewReconciler(ctx, cancel, config, handler)
 	if err != nil {

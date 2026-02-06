@@ -27,10 +27,11 @@ import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cloudresources"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -79,7 +80,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
 	size := max(nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga), instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
-	opt := &cloudresources.VMResources{
+	opt := &resources.VMResources{
 		ID:         newID,
 		CPUs:       int(instanceType.Capacity.Cpu().Value()),
 		Memory:     uint64(instanceType.Capacity.Memory().Value()),
@@ -230,11 +231,11 @@ func (p *DefaultProvider) instanceDelete(ctx context.Context,
 		return fmt.Errorf("failed to get vm config for VM %d: %v", vmr.VMID, err)
 	}
 
-	opt, err := cloudresources.GenerateVMResourceRequest(vm)
+	opt, err := vmresources.GetResourceFromVM(vm)
 	if err != nil {
 		log.Error(err, "Failed to generate resource request for VM", "vmID", vmr.VMID)
 
-		opt = &cloudresources.VMResources{
+		opt = &resources.VMResources{
 			ID:     int(vmr.VMID),
 			CPUs:   int(nodeClaim.Status.Capacity.Cpu().Value()),
 			Memory: uint64(nodeClaim.Status.Capacity.Memory().Value()),
