@@ -208,7 +208,7 @@ func TestStaticAllocate(t *testing.T) {
 				return
 			}
 
-			// init := policy.Status()
+			init := policy.Status()
 
 			err = policy.Allocate(tc.request)
 			assert.NoError(t, err)
@@ -218,9 +218,9 @@ func TestStaticAllocate(t *testing.T) {
 				assert.Equal(t, tc.numaStatus, tc.request.NUMANodes)
 			}
 
-			// err = policy.Release(tc.request)
-			// assert.NoError(t, err)
-			// assert.Equal(t, init, policy.Status())
+			err = policy.Release(tc.request)
+			assert.NoError(t, err)
+			assert.Equal(t, init, policy.Status())
 		})
 	}
 }
