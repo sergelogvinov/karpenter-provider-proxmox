@@ -18,9 +18,13 @@ package resourcemanager
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/go-logr/logr"
+	"github.com/luthermonson/go-proxmox"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
@@ -28,6 +32,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -57,16 +63,6 @@ var _ ResourceManager = &resourceManager{}
 func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zone string) (ResourceManager, error) {
 	log := log.FromContext(ctx).WithName("ResourceManager").WithValues("node", zone)
 
-	manager := &resourceManager{
-		cl:   cl,
-		zone: zone,
-		log:  log,
-		nodeSettings: settings.NodeSettings{
-			// By default reserve 1 GiB memory for system use
-			ReservedMemory: 1024 * 1024 * 1024, // 1GiB
-		},
-	}
-
 	opts := options.FromContext(ctx)
 	if opts == nil {
 		return nil, fmt.Errorf("missing options in context")
@@ -77,6 +73,17 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		err         error
 	)
 
+	manager := &resourceManager{
+		cl:   cl,
+		zone: zone,
+		log:  log,
+	}
+
+	manager.nodeSettings, err = nodeSettingsFromCluster(ctx, cl, zone)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get node settings from VM: %w", err)
+	}
+
 	if name := opts.NodeSettingFilePath; name != "" {
 		setting, err := settings.LoadNodeSettingsFromFile(name, region, zone)
 		if err != nil {
@@ -84,27 +91,37 @@ func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zo
 		}
 
 		if setting != nil {
-			manager.nodeSettings = *setting
+			if setting.NumSockets != 0 {
+				manager.nodeSettings.NumSockets = setting.NumSockets
+			}
 
-			log.V(4).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
-		}
+			if setting.NumThreads != 0 {
+				manager.nodeSettings.NumThreads = setting.NumThreads
+			}
 
-		sysTopology, err = topology.DiscoverFromSettings(&manager.nodeSettings)
-		if err != nil {
-			log.Info("failed to discover topology from settings for node", "node", manager.zone, "error", err)
+			if setting.NumUncoreCaches != 0 {
+				manager.nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
+			}
+
+			if len(setting.ReservedCPUs) != 0 {
+				manager.nodeSettings.ReservedCPUs = setting.ReservedCPUs
+			}
+
+			if setting.ReservedMemory != 0 {
+				manager.nodeSettings.ReservedMemory = setting.ReservedMemory
+			}
+
+			if len(setting.NUMANodes) != 0 {
+				manager.nodeSettings.NUMANodes = setting.NUMANodes
+			}
+
+			log.V(1).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
 		}
 	}
 
-	if sysTopology == nil {
-		n, err := cl.Client.Node(ctx, manager.zone)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get node %s: %w", manager.zone, err)
-		}
-
-		sysTopology, err = topology.Discover(n)
-		if err != nil {
-			return nil, fmt.Errorf("failed to discover topology for node %s: %w", manager.zone, err)
-		}
+	sysTopology, err = topology.DiscoverFromSettings(&manager.nodeSettings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", manager.zone, err)
 	}
 
 	switch opts.NodePolicy { //nolint:gocritic
@@ -199,4 +216,66 @@ func (r *resourceManager) AvailableMemory() uint64 {
 // Status implements ResourceManager.
 func (r *resourceManager) Status() string {
 	return r.nodePolicy.Status()
+}
+
+func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone string) (settings.NodeSettings, error) {
+	nodeSettings := settings.NodeSettings{
+		ReservedMemory: 1024 * 1024 * 1024, // 1GiB
+	}
+
+	n, err := cl.Client.Node(ctx, zone)
+	if err != nil {
+		return nodeSettings, fmt.Errorf("failed to get node %s: %w", zone, err)
+	}
+
+	st, err := nodesettings.GetNodeSettingByNode(n)
+	if err != nil {
+		return nodeSettings, fmt.Errorf("getting node settings: %w", err)
+	}
+
+	if st != nil {
+		nodeSettings = *st
+		nodeSettings.ReservedMemory = 1024 * 1024 * 1024 // 1GiB
+	}
+
+	vmr, err := cl.GetVMByFilter(ctx, func(v *proxmox.ClusterResource) (bool, error) {
+		return v.Node == zone && v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
+	})
+	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+		return nodeSettings, fmt.Errorf("failed to get VM by filter for node settings: %w", err)
+	}
+
+	if vmr == nil {
+		return nodeSettings, nil
+	}
+
+	vm, err := cl.GetVMConfig(ctx, int(vmr.VMID))
+	if err != nil {
+		return nodeSettings, fmt.Errorf("failed to get VM config for node settings: %w", err)
+	}
+
+	opt, err := vmresources.GetResourceFromVM(vm)
+	if err != nil {
+		return nodeSettings, fmt.Errorf("failed to get resources from VM config for node settings: %w", err)
+	}
+
+	nodeSettings.NUMANodes = make(settings.NUMANodes, len(opt.NUMANodes))
+
+	for nodeID, numaNode := range opt.NUMANodes {
+		numaInfo := settings.NUMAInfo{
+			CPUs:    numaNode.CPUs.String(),
+			MemSize: numaNode.Memory * 1024 * 1024, // Convert from MiB to bytes
+		}
+		nodeSettings.NUMANodes[nodeID] = numaInfo
+	}
+
+	// If no NUMA nodes were found but we have CPU affinity set, create a single NUMA node
+	if len(nodeSettings.NUMANodes) == 0 && !opt.CPUSet.IsEmpty() {
+		nodeSettings.NUMANodes[0] = settings.NUMAInfo{
+			CPUs:    opt.CPUSet.String(),
+			MemSize: opt.Memory,
+		}
+	}
+
+	return nodeSettings, nil
 }

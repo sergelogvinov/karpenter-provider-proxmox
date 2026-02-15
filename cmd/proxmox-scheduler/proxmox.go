@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 	}
 
 	vm, err := goproxmox.GetLocalVMConfigByFilter(func(v *proxmox.VirtualMachineConfig) (bool, error) {
-		return v.Name == "node-capacity" && v.Tags == "karpenter", nil
+		return v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
 	})
 	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
 		return fmt.Errorf("failed to check existing VMs: %w", err)
