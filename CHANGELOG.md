@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.9.0...v0.10.0) (2026-02-15)
+
+
+### Features
+
+* proxmox sheduler ([421335e](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/421335ee7190d1185b4c543ba1cc6c4fd41b09a3))
+
+
+### Bug Fixes
+
+* skip lxc containrs ([14af1b1](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/14af1b17d94cd38fc12ec6e8704210803be96e40))
+
 ## [0.9.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.8.0...v0.9.0) (2026-01-25)
 
 
