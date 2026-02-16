@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.10.0...v0.10.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* goreleaser ([af88bab](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/af88babfb739d51065006ed984077d90e3f3c8f4))
+
 ## [0.10.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.9.0...v0.10.0) (2026-02-16)
 
 
