@@ -46,6 +46,7 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:        48,
 				NumSockets:      1,
 				NumThreads:      2,
 				NumUncoreCaches: 8,
@@ -83,6 +84,7 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:        64,
 				NumSockets:      1,
 				NumThreads:      2,
 				NumUncoreCaches: 8,
@@ -121,6 +123,7 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:        64,
 				NumSockets:      2,
 				NumThreads:      2,
 				NumUncoreCaches: 8,
@@ -200,6 +203,7 @@ func TestNodeSettingsAMD(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:   8,
 				NumSockets: 1,
 				NumThreads: 2,
 				NUMANodes: settings.NUMANodes{
@@ -250,6 +254,7 @@ func TestNodeSettingsIntel(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:        6,
 				NumSockets:      1,
 				NumThreads:      2,
 				NumUncoreCaches: 1,
@@ -275,6 +280,7 @@ func TestNodeSettingsIntel(t *testing.T) {
 				},
 			},
 			settings: &settings.NodeSettings{
+				NumCores:        28,
 				NumSockets:      2,
 				NumThreads:      2,
 				NumUncoreCaches: 2,

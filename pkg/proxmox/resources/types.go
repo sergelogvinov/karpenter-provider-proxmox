@@ -26,6 +26,8 @@ type VMResources struct {
 	ID int
 	// CPUs is the number of CPUs assigned to the VM.
 	CPUs int
+	// Affinity is the CPU affinity string assigned to the VM.
+	Affinity string
 	// Memory is the amount of memory in bytes assigned to the VM.
 	Memory uint64
 	// DiskGBytes is the amount of system disk in gigabytes assigned to the VM.

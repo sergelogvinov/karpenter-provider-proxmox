@@ -77,7 +77,7 @@ func TestStaticAllocate(t *testing.T) {
 			request: &resources.VMResources{CPUs: 4, Memory: 4 * 1024 * 1024 * 1024},
 			status:  "CPU: Free: 12, Static: [0-1,8-9], Common: [2-7,10-15], Reserved: [], Mem: 28672M, N0:28672M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-3")), Memory: 4 * 1024, Policy: "bind"},
+				0: {CPUs: "0-3", Memory: 4 * 1024, Policy: "bind"},
 			},
 		},
 		{
@@ -96,7 +96,7 @@ func TestStaticAllocate(t *testing.T) {
 			request: &resources.VMResources{CPUs: 8, Memory: 4 * 1024 * 1024 * 1024},
 			status:  "CPU: Free: 6, Static: [4-7,12-15], Common: [1-3,9-11], Reserved: [0,8], Mem: 28672M, N0:28672M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-7")), Memory: 4 * 1024, Policy: "bind"},
+				0: {CPUs: "0-7", Memory: 4 * 1024, Policy: "bind"},
 			},
 		},
 		{
@@ -116,7 +116,7 @@ func TestStaticAllocate(t *testing.T) {
 			request: &resources.VMResources{CPUs: 4, Memory: 12 * 1024 * 1024 * 1024},
 			status:  "CPU: Free: 10, Static: [4-7], Common: [1-2,8-15], Reserved: [0,3], Mem: 20480M, N0:4096M, N1:16384M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-3")), Memory: 12 * 1024, Policy: "bind"},
+				0: {CPUs: "0-3", Memory: 12 * 1024, Policy: "bind"},
 			},
 		},
 		{
@@ -136,7 +136,7 @@ func TestStaticAllocate(t *testing.T) {
 			request: &resources.VMResources{CPUs: 6, Memory: 18 * 1024 * 1024 * 1024},
 			status:  "CPU: Free: 8, Static: [8-13], Common: [1-2,4-7,14-15], Reserved: [0,3], Mem: 14336M, N0:16384M, N1:14336M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				1: {CPUs: lo.Must(cpuset.Parse("0-5")), Memory: 18 * 1024, Policy: "bind"},
+				1: {CPUs: "0-5", Memory: 18 * 1024, Policy: "bind"},
 			},
 		},
 		{
@@ -155,7 +155,7 @@ func TestStaticAllocate(t *testing.T) {
 			request: &resources.VMResources{CPUs: 16, Memory: 4 * 1024 * 1024 * 1024},
 			status:  "CPU: Free: 0, Static: [0-15], Common: [], Reserved: [], Mem: 28672M, N0:28672M",
 			numaStatus: map[int]goproxmox.NUMANodeState{
-				0: {CPUs: lo.Must(cpuset.Parse("0-15")), Memory: 4 * 1024, Policy: "bind"},
+				0: {CPUs: "0-15", Memory: 4 * 1024, Policy: "bind"},
 			},
 		},
 		{
@@ -321,7 +321,7 @@ func TestStaticAllocateOrUpdate(t *testing.T) {
 				Memory: 4 * 1024 * 1024 * 1024,
 				NUMANodes: map[int]goproxmox.NUMANodeState{
 					0: {
-						CPUs:   lo.Must(cpuset.Parse("0-1")),
+						CPUs:   "0-1",
 						Memory: 4 * 1024,
 					},
 				},
@@ -411,7 +411,7 @@ func TestStaticAllocateOrUpdate(t *testing.T) {
 				Memory: 18 * 1024 * 1024 * 1024,
 				NUMANodes: map[int]goproxmox.NUMANodeState{
 					0: {
-						CPUs:   lo.Must(cpuset.Parse("0-15")),
+						CPUs:   "0-15",
 						Memory: 18 * 1024,
 					},
 				},

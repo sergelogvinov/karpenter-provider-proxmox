@@ -52,6 +52,7 @@ func GetNodeSettingByNode(n *proxmox.Node) (*settings.NodeSettings, error) {
 //nolint:dupl
 func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
+		NumCores:   n.CPUInfo.Cores,
 		NumSockets: n.CPUInfo.Sockets,
 		NumThreads: n.CPUInfo.CPUs / n.CPUInfo.Cores,
 	}
@@ -128,6 +129,7 @@ func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 //nolint:dupl
 func nodeSettingsAMD(n *proxmox.Node) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
+		NumCores:   n.CPUInfo.Cores,
 		NumSockets: n.CPUInfo.Sockets,
 		NumThreads: n.CPUInfo.CPUs / n.CPUInfo.Cores,
 	}
@@ -167,6 +169,7 @@ func nodeSettingsAMD(n *proxmox.Node) (*settings.NodeSettings, error) {
 //nolint:dupl
 func nodeSettingsIntel(n *proxmox.Node) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
+		NumCores:        n.CPUInfo.Cores,
 		NumSockets:      n.CPUInfo.Sockets,
 		NumThreads:      n.CPUInfo.CPUs / n.CPUInfo.Cores,
 		NumUncoreCaches: n.CPUInfo.Sockets,

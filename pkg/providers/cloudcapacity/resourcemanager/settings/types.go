@@ -18,6 +18,8 @@ package settings
 
 // NodeSettings represents the hardware settings of a node.
 type NodeSettings struct {
+	// NumCores is the physical core count of the CPU.
+	NumCores int `json:"cores,omitempty"`
 	// NumSockets is the number of CPU sockets.
 	NumSockets int `json:"sockets,omitempty"`
 	// NumThreads is the number of threads per core.

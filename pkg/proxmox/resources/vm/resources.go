@@ -45,6 +45,7 @@ func GetResourceFromVM(vm *proxmox.VirtualMachine) (opt *resources.VMResources, 
 
 	if vm.VirtualMachineConfig != nil {
 		if vm.VirtualMachineConfig.Affinity != "" {
+			opt.Affinity = vm.VirtualMachineConfig.Affinity
 			opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse CPU affinity: %w", err)
@@ -89,9 +90,15 @@ func GetResourceFromVM(vm *proxmox.VirtualMachine) (opt *resources.VMResources, 
 
 					for i, nodeID := range hostNuma.List() {
 						old := opt.NUMANodes[nodeID]
+
+						oldCPUs, err := cpuset.Parse(old.CPUs)
+						if err != nil {
+							return nil, fmt.Errorf("failed to parse existing CPUs for NUMA node %d: %w", nodeID, err)
+						}
+
 						opt.NUMANodes[nodeID] = goproxmox.NUMANodeState{
 							Memory: old.Memory + uint64(*n.Memory)/uint64(numHostNodes),
-							CPUs:   old.CPUs.Union(cpuset.New(cpuList[i*nodeCpus : (i+1)*nodeCpus]...)),
+							CPUs:   oldCPUs.Union(cpuset.New(cpuList[i*nodeCpus : (i+1)*nodeCpus]...)).String(),
 							Policy: n.Policy,
 						}
 					}
@@ -132,20 +139,24 @@ func GenerateVMOptionsFromResources(res *resources.VMResources) (opts map[string
 
 		for i, k := range numaKeys {
 			node := res.NUMANodes[k]
-			if node.CPUs.IsEmpty() {
+			if node.CPUs == "" {
 				return nil, fmt.Errorf("NUMA node %d has no CPUs assigned", k)
 			}
 
 			numaKey := fmt.Sprintf("numa%d", i)
 			numaConfig := goproxmox.VMNUMA{
 				Memory:        ptr.To(int(node.Memory)),
-				CPUIDs:        []string{},
 				Policy:        node.Policy,
 				HostNodeNames: []string{fmt.Sprintf("%d", k)},
 			}
 
-			numaConfig.CPUIDs = []string{fmt.Sprintf("%d-%d", cpuIdx, cpuIdx+node.CPUs.Size()-1)}
-			cpuIdx += node.CPUs.Size()
+			cpus, err := cpuset.Parse(node.CPUs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse CPUs for NUMA node %d: %w", k, err)
+			}
+
+			numaConfig.CPUIDs = []string{fmt.Sprintf("%d-%d", cpuIdx, cpuIdx+cpus.Size()-1)}
+			cpuIdx += cpus.Size()
 
 			opts[numaKey], err = numaConfig.ToString()
 			if err != nil {
