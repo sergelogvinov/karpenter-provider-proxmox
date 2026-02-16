@@ -179,9 +179,9 @@ func TestGetCapacityType(t *testing.T) {
 			nodeClaim: &karpv1.NodeClaim{
 				Spec: karpv1.NodeClaimSpec{
 					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand}}},
+						{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}},
+						{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}},
+						{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand}},
 					},
 				},
 			},
@@ -206,9 +206,9 @@ func TestGetCapacityType(t *testing.T) {
 			nodeClaim: &karpv1.NodeClaim{
 				Spec: karpv1.NodeClaimSpec{
 					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand}}},
+						{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}},
+						{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}},
+						{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeSpot, karpv1.CapacityTypeOnDemand}},
 					},
 				},
 			},
@@ -233,8 +233,8 @@ func TestGetCapacityType(t *testing.T) {
 			nodeClaim: &karpv1.NodeClaim{
 				Spec: karpv1.NodeClaimSpec{
 					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}}},
+						{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}},
+						{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}},
 					},
 				},
 			},
@@ -266,9 +266,9 @@ func TestGetCapacityType(t *testing.T) {
 			nodeClaim: &karpv1.NodeClaim{
 				Spec: karpv1.NodeClaimSpec{
 					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}}},
-						{NodeSelectorRequirement: corev1.NodeSelectorRequirement{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeSpot}}},
+						{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}},
+						{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}},
+						{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeSpot}},
 					},
 				},
 			},
