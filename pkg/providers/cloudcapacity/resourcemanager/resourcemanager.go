@@ -35,6 +35,8 @@ import (
 	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 
+	"k8s.io/utils/cpuset"
+
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -254,22 +256,62 @@ func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone 
 		return nodeSettings, fmt.Errorf("failed to get VM config for node settings: %w", err)
 	}
 
-	opt, err := vmresources.GetResourceFromVM(vm)
+	err = nodeSettingsFromVM(vm, &nodeSettings)
 	if err != nil {
-		return nodeSettings, fmt.Errorf("failed to get resources from VM config for node settings: %w", err)
+		return nodeSettings, fmt.Errorf("failed to get node settings from VM: %w", err)
 	}
 
-	nodeSettings.NUMANodes = make(settings.NUMANodes, len(opt.NUMANodes))
+	return nodeSettings, nil
+}
+
+func nodeSettingsFromVM(vm *proxmox.VirtualMachine, nodeSettings *settings.NodeSettings) error {
+	if vm == nil || nodeSettings == nil {
+		return fmt.Errorf("invalid input: vm and nodeSettings cannot be nil")
+	}
+
+	opt, err := vmresources.GetResourceFromVM(vm)
+	if err != nil {
+		return fmt.Errorf("failed to get resources from VM config for node settings: %w", err)
+	}
+
+	if nodeSettings.NUMANodes == nil {
+		nodeSettings.NUMANodes = make(settings.NUMANodes, len(opt.NUMANodes))
+	}
+
+	cpuList := []int{}
+
+	for part := range strings.SplitSeq(opt.Affinity, ",") {
+		cpus, err := cpuset.Parse(part)
+		if err != nil {
+			return fmt.Errorf("failed to parse CPU affinity part %q: %w", part, err)
+		}
+
+		cpuList = append(cpuList, cpus.List()...)
+	}
 
 	for nodeID, numaNode := range opt.NUMANodes {
+		numaCPUs, err := cpuset.Parse(numaNode.CPUs)
+		if err != nil {
+			return fmt.Errorf("failed to parse NUMA node %d CPUs %q: %w", nodeID, numaNode.CPUs, err)
+		}
+
+		cpus := cpuset.New()
+
+		for _, c := range numaCPUs.List() {
+			if c >= len(cpuList) {
+				return fmt.Errorf("NUMA node %d CPU index %d exceeds affinity CPU list length %d", nodeID, c, len(cpuList))
+			}
+
+			cpus = cpus.Union(cpuset.New(cpuList[c]))
+		}
+
 		numaInfo := settings.NUMAInfo{
-			CPUs:    numaNode.CPUs.String(),
+			CPUs:    cpus.String(),
 			MemSize: numaNode.Memory * 1024 * 1024, // Convert from MiB to bytes
 		}
 		nodeSettings.NUMANodes[nodeID] = numaInfo
 	}
 
-	// If no NUMA nodes were found but we have CPU affinity set, create a single NUMA node
 	if len(nodeSettings.NUMANodes) == 0 && !opt.CPUSet.IsEmpty() {
 		nodeSettings.NUMANodes[0] = settings.NUMAInfo{
 			CPUs:    opt.CPUSet.String(),
@@ -277,5 +319,5 @@ func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone 
 		}
 	}
 
-	return nodeSettings, nil
+	return nil
 }

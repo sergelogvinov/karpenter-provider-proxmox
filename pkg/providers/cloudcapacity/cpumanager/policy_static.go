@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
-	"github.com/samber/lo"
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
@@ -189,7 +188,7 @@ func (p *staticPolicy) Allocate(op *resources.VMResources) error {
 		numaCPUs := op.CPUSet.Intersection(p.cpuTopology.CPUDetails.CPUsInNUMANodes(i))
 		if numaCPUs.Size() > 0 {
 			NUMANodes[i] = goproxmox.NUMANodeState{
-				CPUs:   lo.Must(cpuset.Parse(fmt.Sprintf("%d-%d", CPUinx, CPUinx+numaCPUs.Size()-1))),
+				CPUs:   fmt.Sprintf("%d-%d", CPUinx, CPUinx+numaCPUs.Size()-1),
 				Memory: op.Memory / 1024 / 1024,
 				Policy: "bind",
 			}

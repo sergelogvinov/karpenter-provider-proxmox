@@ -19,6 +19,7 @@ package resourcemanager
 import (
 	"testing"
 
+	"github.com/luthermonson/go-proxmox"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
@@ -119,11 +120,11 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(0, 1, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -150,11 +151,11 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(0, 1, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -166,11 +167,11 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(2, 3, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -271,11 +272,11 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(0, 1, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -302,11 +303,11 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(0, 1, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -318,11 +319,11 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUSet: cpuset.New(2, 3, 8, 9),
 					NUMANodes: map[int]goproxmox.NUMANodeState{
 						0: {
-							CPUs:   cpuset.New(0, 1),
+							CPUs:   "0-1",
 							Memory: 4 * 1024,
 						},
 						1: {
-							CPUs:   cpuset.New(2, 3),
+							CPUs:   "2-3",
 							Memory: 4 * 1024,
 						},
 					},
@@ -349,6 +350,69 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 
 			assert.NoError(t, err)
 			assert.Equal(t, tc.status, tc.manager.Status())
+		})
+	}
+}
+
+func TestNodeSettingsFromVM(t *testing.T) {
+	testCases := []struct { //nolint:dupl
+		name         string
+		vm           *proxmox.VirtualMachine
+		nodeSettings *settings.NodeSettings
+
+		expected *settings.NodeSettings
+		error    error
+	}{
+		{
+			name: "VM with Affinity and NUMA nodes",
+			vm: &proxmox.VirtualMachine{
+				VMID:   100,
+				CPUs:   96,
+				MaxMem: 124 * 4 * 1024 * 1024,
+				VirtualMachineConfig: &proxmox.VirtualMachineConfig{
+					Affinity: "0-11,48-59,12-23,60-71,24-35,72-83,36-47,84-95",
+					Numa:     1,
+					Numa0:    "cpus=0-23,hostnodes=0,memory=126976",
+					Numa1:    "cpus=24-47,hostnodes=1,memory=126976",
+					Numa2:    "cpus=48-71,hostnodes=2,memory=126976",
+					Numa3:    "cpus=72-95,hostnodes=3,memory=126976",
+				},
+			},
+			nodeSettings: &settings.NodeSettings{},
+			expected: &settings.NodeSettings{
+				NUMANodes: settings.NUMANodes{
+					0: {
+						CPUs:    "0-11,48-59",
+						MemSize: 126976 * 1024 * 1024,
+					},
+					1: {
+						CPUs:    "12-23,60-71",
+						MemSize: 126976 * 1024 * 1024,
+					},
+					2: {
+						CPUs:    "24-35,72-83",
+						MemSize: 126976 * 1024 * 1024,
+					},
+					3: {
+						CPUs:    "36-47,84-95",
+						MemSize: 126976 * 1024 * 1024,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := nodeSettingsFromVM(tc.vm, tc.nodeSettings)
+			if tc.error != nil {
+				assert.EqualError(t, err, tc.error.Error())
+
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, tc.nodeSettings)
 		})
 	}
 }
