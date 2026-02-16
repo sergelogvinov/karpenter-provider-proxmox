@@ -32,29 +32,39 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 )
 
-func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.CPUTopology) error {
+func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	vmID, err := goproxmox.GetLocalNextID(ctx)
-	if err != nil || vmID == 0 {
-		return fmt.Errorf("failed to get available VM ID: %w", err)
-	}
-
-	vm, err := goproxmox.GetLocalVMConfigByFilter(func(v *proxmox.VirtualMachineConfig) (bool, error) {
+	vmID, vm, err := goproxmox.GetLocalVMConfigByFilter(func(v *proxmox.VirtualMachineConfig) (bool, error) {
 		return v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
 	})
 	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
 		return fmt.Errorf("failed to check existing VMs: %w", err)
 	}
 
+	options := buildVMOptions(serverInfo, tp)
+
 	if vm != nil {
+		err = goproxmox.UpdateLocalVM(ctx, vmID, options)
+		if err != nil {
+			return fmt.Errorf("failed to update existing VM %d: %w", vmID, err)
+		}
+
 		return nil
+	}
+
+	vmID, err = goproxmox.GetLocalNextID(ctx)
+	if err != nil || vmID == 0 {
+		if err != nil {
+			logger.Error(err, "Failed to get next VM ID")
+		}
+
+		return fmt.Errorf("failed to get available VM ID")
 	}
 
 	logger.Info("Creating Proxmox VM for Karpenter discovery service", "vmID", vmID)
 
-	options := buildVMOptions(serverInfo, tp)
 	if err := goproxmox.CreateLocalVM(ctx, vmID, options); err != nil {
 		return err
 	}
@@ -62,7 +72,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 	return nil
 }
 
-func buildVMOptions(serverInfo *info.MachineInfo, tp *topology.CPUTopology) map[string]any {
+func buildVMOptions(serverInfo *info.MachineInfo, tp *topology.Topology) map[string]any {
 	totalCores := serverInfo.NumCores
 	totalMemoryMB := serverInfo.MemoryCapacity / (1024 * 1024)
 
@@ -90,7 +100,7 @@ func buildVMOptions(serverInfo *info.MachineInfo, tp *topology.CPUTopology) map[
 				continue
 			}
 
-			affinity = append(affinity, fmt.Sprintf("%s", cpus))
+			affinity = append(affinity, cpus.String())
 
 			memoryInNode := nodeInfo.Memory / (1024 * 1024 * 1024)
 			if memoryInNode > 1 {

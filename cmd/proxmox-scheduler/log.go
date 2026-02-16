@@ -42,7 +42,7 @@ func setupLogger(verbosity int) logr.Logger {
 	return zap.New(zap.UseFlagOptions(opt))
 }
 
-func showServerInfo(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.CPUTopology) {
+func showServerInfo(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) {
 	logger.Info("===== Server Hardware Information =====")
 	defer logger.Info("=======================================")
 
@@ -62,7 +62,7 @@ func showServerInfo(logger logr.Logger, serverInfo *info.MachineInfo, tp *topolo
 				"nodeID", nodeID,
 				"sockets", tp.CPUDetails.SocketsInNUMANodes(nodeID),
 				"cpus", tp.CPUDetails.CPUsInNUMANodes(nodeID),
-				"memory", serverInfo.Topology[nodeID].Memory,
+				"memory", tp.MemTopology.NUMANodes[nodeID],
 			)
 		}
 	}

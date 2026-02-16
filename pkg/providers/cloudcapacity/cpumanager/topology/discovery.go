@@ -21,6 +21,8 @@ import (
 
 	"github.com/luthermonson/go-proxmox"
 
+	"github.com/go-logr/logr"
+	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"k8s.io/utils/cpuset"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
@@ -129,6 +131,57 @@ func DiscoverFromSettings(settings *settings.NodeSettings) (*Topology, error) {
 		MemTopology: MemTopology{
 			NUMANodes:   memNUMA,
 			TotalMemory: memTotal,
+		},
+	}, nil
+}
+
+// DiscoverCadvisor returns CPUTopology based on cadvisor node info
+func DiscoverCadvisor(logger logr.Logger, machineInfo *cadvisorapi.MachineInfo) (*Topology, error) {
+	if machineInfo == nil {
+		return nil, nil
+	}
+
+	if machineInfo.NumCores == 0 {
+		return nil, fmt.Errorf("could not detect number of cpus")
+	}
+
+	cpuDetails := CPUDetails{}
+	numPhysicalCores := 0
+	memNUMA := make(map[int]uint64, len(machineInfo.Topology))
+
+	for _, node := range machineInfo.Topology {
+		memNUMA[node.Id] = node.Memory
+
+		numPhysicalCores += len(node.Cores)
+		for _, core := range node.Cores {
+			if coreID, err := getUniqueCoreID(core.Threads); err == nil {
+				for _, cpu := range core.Threads {
+					cpuDetails[cpu] = CPUInfo{
+						CoreID:        coreID,
+						SocketID:      core.SocketID,
+						NUMANodeID:    node.Id,
+						UncoreCacheID: getUncoreCacheID(core),
+					}
+				}
+			} else {
+				logger.Info("Could not get unique coreID for socket", "socket", core.SocketID, "core", core.Id, "threads", core.Threads)
+				return nil, err
+			}
+		}
+	}
+
+	return &Topology{
+		CPUTopology: CPUTopology{
+			NumCPUs:        machineInfo.NumCores,
+			NumSockets:     machineInfo.NumSockets,
+			NumCores:       numPhysicalCores,
+			NumNUMANodes:   cpuDetails.NUMANodes().Size(),
+			NumUncoreCache: cpuDetails.UncoreCaches().Size(),
+			CPUDetails:     cpuDetails,
+		},
+		MemTopology: MemTopology{
+			NUMANodes:   memNUMA,
+			TotalMemory: machineInfo.MemoryCapacity,
 		},
 	}, nil
 }

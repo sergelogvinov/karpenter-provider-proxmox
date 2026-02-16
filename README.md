@@ -34,6 +34,7 @@ Also, having free resources can provide more advantages than we might initially 
 * [x] VM optimization: Network performance
 * [x] VM optimization: CPU pinning, see [limitations](docs/noderesource.md)
 * [x] VM optimization: NUMA node affinity, see [limitations](docs/noderesource.md)
+* [x] VM and Node optimization: by additional debian service [proxmox scheduler](docs/scheduler.md)
 * [ ] Dynamic VM sizing (instance types) based on the best fit in the Proxmox Node(s)
 * [ ] Spot instances support
 
@@ -41,7 +42,7 @@ Also, having free resources can provide more advantages than we might initially 
 
 - Kubernetes 1.30+
 - Proxmox VE 8+
-- Proxmox CCM plugin
+- Proxmox CCM plugin (optional, but recommended for better integration)
 
 ## Installation
 
