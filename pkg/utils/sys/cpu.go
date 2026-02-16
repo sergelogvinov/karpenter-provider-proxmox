@@ -22,6 +22,19 @@ import (
 	"strings"
 )
 
+// GetCPUGovernor returns the current CPU governor for a given CPU
+func GetCPUGovernor(cpuID int) (string, error) {
+	governorFile := fmt.Sprintf("/sys/devices/system/cpu/cpu%d/cpufreq/scaling_governor", cpuID)
+
+	data, err := os.ReadFile(governorFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read CPU governor for CPU %d: %w", cpuID, err)
+	}
+
+	return strings.TrimSpace(string(data)), nil
+}
+
+// SetCPUGovernor sets the CPU governor for a list of CPUs
 func SetCPUGovernor(vmID int, cpus []int, governor string) error {
 	if len(cpus) == 0 {
 		return nil

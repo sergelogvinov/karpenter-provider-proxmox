@@ -45,6 +45,12 @@ const (
 
 	resyncIntervalEnvVarName = "RESYNC_INTERVAL"
 	resyncIntervalFlagName   = "resync-interval"
+
+	cpuGovernorBusyEnvVarName = "CPU_GOVERNOR_BUSY"
+	cpuGovernorBusyFlagName   = "cpu-governor-busy"
+
+	cpuGovernorFreeEnvVarName = "CPU_GOVERNOR_FREE"
+	cpuGovernorFreeFlagName   = "cpu-governor-free"
 )
 
 var (
@@ -57,6 +63,9 @@ var (
 	watchPath      = pflag.String(watchPathFlagName, env.WithDefaultString(watchPathEnvVarName, "/run/qemu-server"), "Path to watch of qemu pid files")
 	maxRetries     = pflag.Int(maxRetriesFlagName, env.WithDefaultInt(maxRetriesEnvVarName, 5), "Maximum number of retry attempts")
 	resyncInterval = pflag.Duration(resyncIntervalFlagName, env.WithDefaultDuration(resyncIntervalEnvVarName, 60*time.Minute), "Resync interval")
+
+	cpuGovernorBusy = pflag.String(cpuGovernorBusyFlagName, env.WithDefaultString(cpuGovernorBusyEnvVarName, "performance"), "CPU governor to set when CPU is busy")
+	cpuGovernorFree = pflag.String(cpuGovernorFreeFlagName, env.WithDefaultString(cpuGovernorFreeEnvVarName, "powersave"), "CPU governor to set when CPU is free")
 )
 
 func main() {
@@ -81,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var tp *topology.CPUTopology
+	var tp *topology.Topology
 
 	tp, err = topology.DiscoverCadvisor(logger, serverInfo)
 	if err != nil {

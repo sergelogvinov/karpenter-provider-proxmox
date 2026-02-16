@@ -32,8 +32,8 @@ import (
 type EventType string
 
 const (
-	FileEvent  EventType = "file"
-	TimerEvent EventType = "timer"
+	FileEvent EventType = "file"
+	SyncEvent EventType = "sync"
 )
 
 // Event represents a reconciliation event
@@ -158,7 +158,7 @@ func (rf *Reconciler) Start() error {
 
 	if rf.config.SyncDelay > 0 {
 		rf.SendEvent(Event{
-			Type: TimerEvent,
+			Type: SyncEvent,
 			Key:  "sync",
 			Data: time.Now(),
 		})
@@ -242,15 +242,15 @@ func (rf *Reconciler) watchTimer() {
 	for {
 		select {
 		case <-rf.ticker.C:
-			rf.logger.V(3).Info("Timer event triggered")
+			rf.logger.V(3).Info("Sync event triggered")
 			rf.SendEvent(Event{
-				Type: TimerEvent,
+				Type: SyncEvent,
 				Key:  "sync",
 				Data: time.Now(),
 			})
 
 		case <-rf.ctx.Done():
-			rf.logger.V(1).Info("Timer watcher shutting down")
+			rf.logger.V(1).Info("Sync watcher shutting down")
 
 			return
 		}
@@ -318,7 +318,7 @@ func (rf *Reconciler) processRetries() {
 
 // processRetryableEvent handles a single retryable event
 func (rf *Reconciler) processRetryableEvent(retryEvent retryableEvent) *retryableEvent {
-	rf.logger.V(1).Info("Processing retryable event", "type", retryEvent.event.Type, "key", retryEvent.event.Key, "attempts", retryEvent.attempts)
+	rf.logger.V(4).Info("Processing retryable event", "type", retryEvent.event.Type, "key", retryEvent.event.Key, "attempts", retryEvent.attempts)
 
 	err := rf.handler.Reconcile(rf.ctx, rf, retryEvent.event)
 
@@ -340,7 +340,7 @@ func (rf *Reconciler) processRetryableEvent(retryEvent retryableEvent) *retryabl
 	case err != nil:
 		rf.logger.Error(err, "Reconciliation permanently failed", "attempts", retryEvent.attempts)
 	default:
-		rf.logger.V(1).Info("Reconciliation succeeded", "type", retryEvent.event.Type, "key", retryEvent.event.Key)
+		rf.logger.V(4).Info("Reconciliation succeeded", "type", retryEvent.event.Type, "key", retryEvent.event.Key)
 	}
 
 	return nil

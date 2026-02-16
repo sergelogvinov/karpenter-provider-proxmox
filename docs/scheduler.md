@@ -2,6 +2,9 @@
 
 The Proxmox Scheduler is a server component that monitors the Proxmox VE environment and makes scheduling decisions for virtual machines based on CPU and memory affinity rules defined in each VM configuration.
 
+Currently the scheduler focuses on VMs which have specific CPU affinity requirements defined in their configuration.
+All other VMs are left unaffined and can be scheduled on any available CPU cores by the default Proxmox scheduler.
+
 ## Features
 
 - Pins VM vCPUs to specific physical CPU cores.
@@ -10,6 +13,33 @@ The Proxmox Scheduler is a server component that monitors the Proxmox VE environ
 - Optionally provides node topology information for Karpenter.
 
 I hope some of these tasks may eventually be handled directly by Proxmox itself.
+
+## Environment Variables
+
+All command-line flags can be configured using environment variables. This is particularly useful for systemd service configuration or containerized deployments.
+
+| Flag | Environment Variable | Default Value |
+|---|---|---|
+| `--verbosity` | `VERBOSITY` | `0` |
+| `--watch-path` | `WATCH_PATH` | `/run/qemu-server` |
+| `--max-retries` | `MAX_RETRIES` | `5` |
+| `--resync-interval` | `RESYNC_INTERVAL` | `60m` |
+| `--cpu-governor-busy` | `CPU_GOVERNOR_BUSY` | `performance` |
+| `--cpu-governor-free` | `CPU_GOVERNOR_FREE` | `powersave` |
+
+### Verbosity
+
+Enable debug logging or troubleshoot issues by increasing the verbosity level.
+
+### CPU Governor Management
+
+Specify the CPU governor to apply to the CPU cores used by VMs and the idle CPU cores not assigned to any VM.
+It helps to optimize performance and power consumption based on allocated vCPU resources.
+
+**Common Values:**
+- `performance`: Maximum performance, highest power consumption
+- `powersave`: Lowest power consumption, reduced performance
+- `schedutil`: Scheduler-driven scaling based on CPU load
 
 ## Feature Flags
 

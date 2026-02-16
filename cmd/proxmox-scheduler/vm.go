@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/luthermonson/go-proxmox"
+
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/vmconfig"
 
@@ -70,11 +72,13 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 				r.logger.Error(err, "Failed to pin VM threads to cores", "vmID", vmID)
 			}
 
-			r.logger.Info("VM governing CPUs", "vmID", vmID, "governor", "performance", "cores", cpus.String())
+			if *cpuGovernorBusy != "" {
+				r.logger.Info("VM governing CPUs", "vmID", vmID, "governor", *cpuGovernorBusy, "cores", cpus.String())
 
-			err = utilsys.SetCPUGovernor(vmID, cpus.List(), "performance")
-			if err != nil {
-				r.logger.Error(err, "Failed to set CPU governor for VM", "vmID", vmID)
+				err = utilsys.SetCPUGovernor(vmID, cpus.List(), *cpuGovernorBusy)
+				if err != nil {
+					r.logger.Error(err, "Failed to set CPU governor for VM", "vmID", vmID)
+				}
 			}
 		}
 
@@ -110,14 +114,79 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 		}
 	}
 
+	if err := r.updateVMInfo(vmID, pid, vmConfig); err != nil {
+		r.logger.Error(err, "Failed to update VM info", "vmID", vmID)
+	}
+
 	return nil
 }
 
 // handleVMStop handles when a VM stops (PID file removed)
-//
-// nolint:unused,unparam
-func (r *SchedulerHandler) handleVMStop(_ context.Context, vmID int, pid int) error {
-	r.logger.Info("Handling VM stop", "vmID", vmID, "pid", pid)
+func (r *SchedulerHandler) handleVMStop(_ context.Context, vmID int) error {
+	r.logger.Info("Handling VM stop", "vmID", vmID)
+
+	r.tracker.mu.Lock()
+	defer r.tracker.mu.Unlock()
+
+	if _, ok := r.tracker.vms[vmID]; !ok {
+		r.logger.Info("VM not found in tracker, skipping cleanup", "vmID", vmID)
+
+		return nil
+	}
+
+	cpus := r.tracker.vms[vmID].AffinitySet
+	for id, vmInfo := range r.tracker.vms {
+		if id == vmID {
+			continue
+		}
+
+		if vmInfo.AffinitySet.Size() > 0 {
+			cpus = cpus.Difference(vmInfo.AffinitySet)
+		}
+	}
+
+	if cpus.Size() > 0 && *cpuGovernorFree != "" {
+		r.logger.Info("VM governing CPUs", "vmID", vmID, "governor", *cpuGovernorFree, "cores", cpus.String())
+
+		if err := utilsys.SetCPUGovernor(vmID, cpus.List(), *cpuGovernorFree); err != nil {
+			r.logger.Error(err, "Failed to set CPU governor for VM", "vmID", vmID)
+		}
+	}
+
+	delete(r.tracker.vms, vmID)
+
+	return nil
+}
+
+// updateVMInfo updates the tracker when a VM starts
+func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *proxmox.VirtualMachineConfig) error {
+	r.tracker.mu.Lock()
+	defer r.tracker.mu.Unlock()
+
+	vmInfo := &VMInfo{
+		VMID:  vmID,
+		PID:   pid,
+		Cores: vmConfig.Cores,
+		Name:  vmConfig.Name,
+	}
+
+	if vmConfig.Affinity != "" {
+		affinitySet, err := cpuset.Parse(vmConfig.Affinity)
+		if err != nil {
+			r.logger.Error(err, "Failed to parse CPU affinity for VM", "vmID", vmID, "affinity", vmConfig.Affinity)
+		}
+
+		if affinitySet.Size() > 0 {
+			vmInfo.AffinitySet = affinitySet
+			r.tracker.usedCPUs = r.tracker.usedCPUs.Union(affinitySet)
+		}
+	}
+
+	r.tracker.vms[vmID] = vmInfo
+
+	if r.topology != nil {
+		r.tracker.sharedCPUs = r.topology.CPUDetails.CPUs().Difference(r.tracker.usedCPUs)
+	}
 
 	return nil
 }
