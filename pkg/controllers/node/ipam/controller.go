@@ -60,12 +60,6 @@ func (c *Controller) Name() string {
 func (c *Controller) Reconcile(ctx context.Context, n *corev1.Node) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
-	if !n.GetDeletionTimestamp().IsZero() {
-		c.nodeIpamProvider.ReleaseNodeIPs(n)
-
-		return reconcile.Result{}, nil
-	}
-
 	err := c.nodeIpamProvider.OccupyNodeIPs(n)
 	if err != nil {
 		if err == nodeipam.ErrNoSubnetFound {

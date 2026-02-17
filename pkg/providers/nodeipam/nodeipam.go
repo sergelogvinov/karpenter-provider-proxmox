@@ -36,7 +36,7 @@ type Provider interface {
 	OccupyNodeIPs(node *corev1.Node) error
 	OccupyIP(subnet string) (net.IP, error)
 	ReleaseNodeIPs(node *corev1.Node) error
-	ReleaseIP(ip string) error
+	ReleaseIP(subnet string) error
 
 	String() string
 }
@@ -201,8 +201,29 @@ func (p *DefaultProvider) ReleaseNodeIPs(node *corev1.Node) error {
 	})
 }
 
-func (p *DefaultProvider) ReleaseIP(ip string) error {
-	return nil
+func (p *DefaultProvider) ReleaseIP(subnet string) error {
+	if len(p.subnets) == 0 {
+		return ErrNoSubnetFound
+	}
+
+	ip, cidr, err := net.ParseCIDR(subnet)
+	if err != nil {
+		return err
+	}
+
+	cidr.IP = ip
+
+	for i := range p.subnets {
+		if p.subnets[i] == nil {
+			continue
+		}
+
+		if p.subnets[i].ContainsCIDR(cidr) {
+			return p.subnets[i].Release(ip)
+		}
+	}
+
+	return ErrNoSubnetFound
 }
 
 func (p *DefaultProvider) String() string {
