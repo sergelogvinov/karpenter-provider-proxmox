@@ -27,6 +27,7 @@ import (
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
@@ -246,6 +247,16 @@ func (p *DefaultProvider) instanceDelete(ctx context.Context,
 
 	if err := p.cluster.DeleteVMByIDInRegion(ctx, region, vmr); err != nil {
 		return fmt.Errorf("cannot delete VM with id %d: %w", vmr.VMID, err)
+	}
+
+	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig, nil)
+	for _, iface := range networkValues.Interfaces {
+		for _, cidr := range iface.Address4 {
+			err := p.nodeIpamProvider.ReleaseIP(cidr)
+			if err != nil {
+				log.Error(err, "Failed to release IP", "cidr", cidr)
+			}
+		}
 	}
 
 	if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, int(vmr.VMID), opt); err != nil {

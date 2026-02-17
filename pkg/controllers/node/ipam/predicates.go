@@ -53,6 +53,5 @@ func (p ipChangedPredicate) Update(e event.UpdateEvent) bool {
 		return false
 	}
 
-	return !equality.Semantic.DeepEqual(typedOld.Status.Addresses, typedNew.Status.Addresses) ||
-		typedOld.ObjectMeta.DeletionTimestamp != typedNew.ObjectMeta.DeletionTimestamp
+	return !equality.Semantic.DeepEqual(typedOld.Status.Addresses, typedNew.Status.Addresses)
 }
