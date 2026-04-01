@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.10.1...v0.11.0) (2026-04-01)
+
+
+### Features
+
+* introduce advanced VM tracker ([e2e6eab](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e2e6eabdbb451e862136df0758f9e9e4ff44daf0))
+
+
+### Bug Fixes
+
+* release ip ([830d0c4](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/830d0c44bf2ef0c1c614055a74b9613fa5b7c9d7))
+
 ## [0.10.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.10.0...v0.10.1) (2026-02-16)
 
 
