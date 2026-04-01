@@ -27,7 +27,6 @@ import (
 	resources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
-	"k8s.io/utils/ptr"
 )
 
 // GetResourceFromVM extracts VMResources from a Proxmox VirtualMachine object.
@@ -145,7 +144,7 @@ func GenerateVMOptionsFromResources(res *resources.VMResources) (opts map[string
 
 			numaKey := fmt.Sprintf("numa%d", i)
 			numaConfig := goproxmox.VMNUMA{
-				Memory:        ptr.To(int(node.Memory)),
+				Memory:        new(int(node.Memory)),
 				Policy:        node.Policy,
 				HostNodeNames: []string{fmt.Sprintf("%d", k)},
 			}
