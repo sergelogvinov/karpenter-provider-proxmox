@@ -13,11 +13,11 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cadvisor v0.56.2
 	github.com/google/go-cmp v0.7.0
-	github.com/luthermonson/go-proxmox v0.4.1-0.20260319134006-cefc556cc24e
+	github.com/luthermonson/go-proxmox v0.4.1
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.53.0
-	github.com/sergelogvinov/go-proxmox v0.1.1-0.20260217150939-6d2cf3f82897
+	github.com/sergelogvinov/go-proxmox v0.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
