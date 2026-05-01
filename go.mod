@@ -9,7 +9,7 @@ go 1.26.1
 require (
 	github.com/apparentlymart/go-cidr v1.1.0
 	github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cadvisor v0.56.2
 	github.com/google/go-cmp v0.7.0
