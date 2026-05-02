@@ -17,6 +17,8 @@ output:
       colors: false
 linters:
   default: all
+  enable:
+    - gomodguard_v2
   disable:
     # - contextcheck
     - depguard
@@ -56,6 +58,7 @@ linters:
     - varnamelen
     - wrapcheck
     - wsl
+    - gomodguard
 
     # Temporary disabled linters
     - errcheck
@@ -63,6 +66,7 @@ linters:
     - staticcheck
     - noinlineerr
     - prealloc
+    - goconst
   settings:
     wsl_v5:
       allow-first-in-block: true
@@ -129,6 +133,7 @@ linters:
       - path: _test\.go
         linters:
           - dupl
+          - goconst
     paths:
       # Copied from kubernetes repo
       - pkg/providers/cloudcapacity/cpumanager/topology
