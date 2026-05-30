@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: nodepools.karpenter.sh
 spec:
   group: karpenter.sh
@@ -267,7 +267,7 @@ spec:
                           to every node.
                         items:
                           description: |-
-                            A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
+                            A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
                             and minValues that represent the requirement to have at least that many values.
                           properties:
                             key:
@@ -284,13 +284,16 @@ spec:
                             operator:
                               description: |-
                                 Represents a key's relationship to a set of values.
-                                Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                                Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
+                              enum:
+                              - Gte
+                              - Lte
                               type: string
                             values:
                               description: |-
                                 An array of string values. If the operator is In or NotIn,
                                 the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                the values array must be empty. If the operator is Gt or Lt, the values
+                                the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                                 array must have a single element, which will be interpreted as an integer.
                                 This array is replaced during a strategic merge patch.
                               items:
@@ -308,11 +311,11 @@ spec:
                             defined
                           rule: 'self.all(x, x.operator == ''In'' ? x.values.size()
                             != 0 : true)'
-                        - message: requirements operator 'Gt' or 'Lt' must have a
-                            single positive integer value
+                        - message: requirements operator 'Gt', 'Lt', 'Gte', or 'Lte'
+                            must have a single positive integer value
                           rule: 'self.all(x, (x.operator == ''Gt'' || x.operator ==
-                            ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >=
-                            0) : true)'
+                            ''Lt'' || x.operator == ''Gte'' || x.operator == ''Lte'')
+                            ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                         - message: requirements with 'minValues' must have at least
                             that many values specified in the 'values' field
                           rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues))
