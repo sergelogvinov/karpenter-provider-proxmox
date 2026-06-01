@@ -13,7 +13,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cadvisor v0.57.0
 	github.com/google/go-cmp v0.7.0
-	github.com/luthermonson/go-proxmox v0.5.1
+	github.com/luthermonson/go-proxmox v0.7.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.53.0
