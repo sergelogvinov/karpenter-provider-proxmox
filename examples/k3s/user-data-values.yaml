@@ -1,0 +1,11 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: karpenter-template-values
+  namespace: kube-system
+stringData:
+  K3sURL: "https://api.example.com:6443"
+  K3sToken: ...
+  K3sVersion: "v1.36.1+k3s1"
+  SSHAuthorizedKeys: "ssh-ed25519 AAAA..."
