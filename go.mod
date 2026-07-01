@@ -1,6 +1,6 @@
 module github.com/sergelogvinov/karpenter-provider-proxmox
 
-go 1.26.3
+go 1.26.4
 
 // replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
 // replace github.com/luthermonson/go-proxmox => ../../proxmox/go-proxmox-luthermonson
@@ -8,7 +8,7 @@ go 1.26.3
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.1
-	github.com/awslabs/operatorpkg v0.0.0-20251222193911-34e9a1898737
+	github.com/awslabs/operatorpkg v0.0.0-20260501204335-c49b4ca8d58d
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cadvisor v0.57.0
@@ -31,7 +31,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/karpenter v1.12.1
+	sigs.k8s.io/karpenter v1.13.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
