@@ -22,12 +22,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"k8s.io/utils/cpuset"
 )
 
-func PinThreadsToCores(ctx context.Context, vmID int, threads []int, cores []int) error {
-	if len(threads) == 0 || len(cores) == 0 {
+func PinThreadsToCores(ctx context.Context, vmID int, pid int, threads []int, cores []int) (err error) {
+	if len(threads) == 0 || len(cores) == 0 || pid <= 0 {
 		return nil
 	}
 
@@ -35,16 +36,35 @@ func PinThreadsToCores(ctx context.Context, vmID int, threads []int, cores []int
 		return fmt.Errorf("VM %d: thread count %d does not match core count %d", vmID, len(threads), len(cores))
 	}
 
-	for i, threadID := range threads {
-		core := cores[i]
+	return func() error {
+		defer func() {
+			// Revert the process affinity to all threads on exit
+			if err != nil {
+				strs := make([]string, len(cores))
+				for i, c := range cores {
+					strs[i] = strconv.Itoa(c)
+				}
 
-		cmd := exec.CommandContext(ctx, "taskset", "--cpu-list", "--pid", strconv.Itoa(cores[i]), strconv.Itoa(threadID))
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("VM %d: Failed to pin thread %d to core %d: %w", vmID, threadID, core, err)
+				cmd := exec.CommandContext(ctx, "taskset", "-pc", strings.Join(strs, ","), strconv.Itoa(pid))
+				if output, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("VM %d: Failed to set process %d CPU affinity to cores %v: %v, output: %s\n", vmID, pid, strings.Join(strs, ","), err, output)
+				}
+			}
+		}()
+
+		var output []byte
+
+		for i, threadID := range threads {
+			core := cores[i]
+
+			cmd := exec.CommandContext(ctx, "taskset", "--cpu-list", "--pid", strconv.Itoa(core), strconv.Itoa(threadID))
+			if output, err = cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("VM %d: Failed to pin thread %d to core %d: %w, output: %s", vmID, threadID, core, err, output)
+			}
 		}
-	}
 
-	return nil
+		return nil
+	}()
 }
 
 func SetPciIRQAffinity(vmID int, pciAddress string, irqs []int, cpus cpuset.CPUSet) error {

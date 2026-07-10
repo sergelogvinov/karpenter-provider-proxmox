@@ -94,7 +94,7 @@ func (r *SchedulerHandler) Reconcile(ctx context.Context, sender reconciler.Even
 			}
 
 			vmID, err := strconv.Atoi(filepath.Base(vmIDStr))
-			if err != nil { // Filename doesn't contain a valid VM ID, ignore
+			if err != nil || vmID <= 0 { // Filename doesn't contain a valid VM ID, ignore
 				return nil //nolint:nilerr
 			}
 

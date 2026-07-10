@@ -30,11 +30,33 @@ import (
 
 	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+
+	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 30*time.Second, false, func(ctx context.Context) (bool, error) {
+		ready, err := goproxmox.ClusterReadyLocal(ctx)
+		if err != nil {
+			logger.Error(err, "Failed to check Proxmox cluster quorum status, retrying...")
+
+			return false, nil //nolint:nilerr
+		}
+
+		if !ready {
+			logger.Info("Proxmox cluster has no quorum")
+
+			return false, nil
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to wait for Proxmox cluster quorum: %w", err)
+	}
 
 	vmID, vm, err := goproxmox.GetLocalVMConfigByFilter(func(v *proxmox.VirtualMachineConfig) (bool, error) {
 		return v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
