@@ -62,12 +62,12 @@ type ProxmoxCommonTemplate interface {
 }
 
 // StatusConditions returns the condition set for the status.Object interface
-func (in *ProxmoxTemplate) StatusConditions() status.ConditionSet {
+func (in *ProxmoxTemplate) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	conds := []string{
 		ConditionTemplateReady,
 	}
 
-	return status.NewReadyConditions(conds...).For(in)
+	return status.NewReadyConditions(conds...).For(in, opts...)
 }
 
 func (in *ProxmoxTemplate) GetStatus() *ProxmoxTemplateStatus {
@@ -116,12 +116,12 @@ func (in *ProxmoxUnmanagedTemplate) GetImageID() string {
 }
 
 // StatusConditions returns the condition set for the status.Object interface
-func (in *ProxmoxUnmanagedTemplate) StatusConditions() status.ConditionSet {
+func (in *ProxmoxUnmanagedTemplate) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	conds := []string{
 		ConditionTemplateReady,
 	}
 
-	return status.NewReadyConditions(conds...).For(in)
+	return status.NewReadyConditions(conds...).For(in, opts...)
 }
 
 // GetConditions returns the conditions as status.Conditions for the status.Object interface
