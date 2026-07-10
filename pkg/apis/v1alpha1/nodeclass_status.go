@@ -85,13 +85,13 @@ func (in *ProxmoxNodeClass) GetTemplateIDs(region string) []uint64 {
 }
 
 // StatusConditions returns the condition set for the status.Object interface
-func (in *ProxmoxNodeClass) StatusConditions() status.ConditionSet {
+func (in *ProxmoxNodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	conds := []string{
 		ConditionInstanceTemplateReady,
 		ConditionInstanceMetadataOptionsReady,
 	}
 
-	return status.NewReadyConditions(conds...).For(in)
+	return status.NewReadyConditions(conds...).For(in, opts...)
 }
 
 // GetConditions returns the conditions as status.Conditions for the status.Object interface
