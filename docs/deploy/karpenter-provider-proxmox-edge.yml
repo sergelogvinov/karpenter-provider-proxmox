@@ -5,7 +5,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: proxmoxnodeclasses.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -411,7 +411,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: proxmoxtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -813,7 +813,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: proxmoxunmanagedtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -980,7 +980,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: nodeclaims.karpenter.sh
 spec:
   group: karpenter.sh
@@ -1099,7 +1099,7 @@ spec:
                   every node.
                 items:
                   description: |-
-                    A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
+                    A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
                     and minValues that represent the requirement to have at least that many values.
                   properties:
                     key:
@@ -1115,13 +1115,16 @@ spec:
                     operator:
                       description: |-
                         Represents a key's relationship to a set of values.
-                        Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                        Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
+                      enum:
+                      - Gte
+                      - Lte
                       type: string
                     values:
                       description: |-
                         An array of string values. If the operator is In or NotIn,
                         the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                        the values array must be empty. If the operator is Gt or Lt, the values
+                        the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                         array must have a single element, which will be interpreted as an integer.
                         This array is replaced during a strategic merge patch.
                       items:
@@ -1138,10 +1141,11 @@ spec:
                 - message: requirements with operator 'In' must have a value defined
                   rule: 'self.all(x, x.operator == ''In'' ? x.values.size() != 0 :
                     true)'
-                - message: requirements operator 'Gt' or 'Lt' must have a single positive
-                    integer value
-                  rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'')
-                    ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
+                - message: requirements operator 'Gt', 'Lt', 'Gte', or 'Lte' must
+                    have a single positive integer value
+                  rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt''
+                    || x.operator == ''Gte'' || x.operator == ''Lte'') ? (x.values.size()
+                    == 1 && int(x.values[0]) >= 0) : true)'
                 - message: requirements with 'minValues' must have at least that many
                     values specified in the 'values' field
                   rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues)) ?
@@ -1359,7 +1363,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: nodeoverlays.karpenter.sh
 spec:
   group: karpenter.sh
@@ -1434,7 +1438,7 @@ spec:
                 description: |-
                   PriceAdjustment specifies the price change for matching instance types. Accepts either:
                   - A fixed price modifier (e.g., -0.5, 1.2)
-                  - A percentage modifier (e.g., +10% for increase, -15% for decrees)
+                  - A percentage modifier (e.g., +10% for increase, -15% for decrease)
                 pattern: ^(([+-]{1}(\d*\.?\d+))|(\+{1}\d*\.?\d+%)|(^(-\d{1,2}(\.\d+)?%)$)|(-100%))$
                 type: string
               requirements:
@@ -1445,8 +1449,8 @@ spec:
                   - Custom labels from NodePool's spec.template.labels
                 items:
                   description: |-
-                    A node selector requirement is a selector that contains values, a key, and an operator
-                    that relates the key and values.
+                    A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
+                    to have at least that many values.
                   properties:
                     key:
                       description: The label key that the selector applies to.
@@ -1454,15 +1458,17 @@ spec:
                     operator:
                       description: |-
                         Represents a key's relationship to a set of values.
-                        Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                        Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
+                      enum:
+                      - Gte
+                      - Lte
                       type: string
                     values:
                       description: |-
                         An array of string values. If the operator is In or NotIn,
                         the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                        the values array must be empty. If the operator is Gt or Lt, the values
+                        the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                         array must have a single element, which will be interpreted as an integer.
-                        This array is replaced during a strategic merge patch.
                       items:
                         type: string
                       type: array
@@ -1480,10 +1486,11 @@ spec:
                 - message: requirements with operator 'In' must have a value defined
                   rule: 'self.all(x, x.operator == ''In'' ? x.values.size() != 0 :
                     true)'
-                - message: requirements operator 'Gt' or 'Lt' must have a single positive
-                    integer value
-                  rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt'')
-                    ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
+                - message: requirements operator 'Gt', 'Lt', 'Gte' or 'Lte' must have
+                    a single positive integer value
+                  rule: 'self.all(x, (x.operator == ''Gt'' || x.operator == ''Lt''
+                    || x.operator == ''Gte'' || x.operator == ''Lte'') ? (x.values.size()
+                    == 1 && int(x.values[0]) >= 0) : true)'
               weight:
                 description: |-
                   Weight defines the priority of this NodeOverlay when overriding node attributes.
@@ -1576,7 +1583,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.21.0
   name: nodepools.karpenter.sh
 spec:
   group: karpenter.sh
@@ -1840,7 +1847,7 @@ spec:
                           to every node.
                         items:
                           description: |-
-                            A node selector requirement with min values is a selector that contains values, a key, an operator that relates the key and values
+                            A node selector requirement is a selector that contains values, a key, an operator that relates the key and values
                             and minValues that represent the requirement to have at least that many values.
                           properties:
                             key:
@@ -1857,13 +1864,16 @@ spec:
                             operator:
                               description: |-
                                 Represents a key's relationship to a set of values.
-                                Valid operators are In, NotIn, Exists, DoesNotExist. Gt, and Lt.
+                                Valid operators are In, NotIn, Exists, DoesNotExist. Gt, Lt, Gte, and Lte.
+                              enum:
+                              - Gte
+                              - Lte
                               type: string
                             values:
                               description: |-
                                 An array of string values. If the operator is In or NotIn,
                                 the values array must be non-empty. If the operator is Exists or DoesNotExist,
-                                the values array must be empty. If the operator is Gt or Lt, the values
+                                the values array must be empty. If the operator is Gt, Lt, Gte, or Lte, the values
                                 array must have a single element, which will be interpreted as an integer.
                                 This array is replaced during a strategic merge patch.
                               items:
@@ -1881,11 +1891,11 @@ spec:
                             defined
                           rule: 'self.all(x, x.operator == ''In'' ? x.values.size()
                             != 0 : true)'
-                        - message: requirements operator 'Gt' or 'Lt' must have a
-                            single positive integer value
+                        - message: requirements operator 'Gt', 'Lt', 'Gte', or 'Lte'
+                            must have a single positive integer value
                           rule: 'self.all(x, (x.operator == ''Gt'' || x.operator ==
-                            ''Lt'') ? (x.values.size() == 1 && int(x.values[0]) >=
-                            0) : true)'
+                            ''Lt'' || x.operator == ''Gte'' || x.operator == ''Lte'')
+                            ? (x.values.size() == 1 && int(x.values[0]) >= 0) : true)'
                         - message: requirements with 'minValues' must have at least
                             that many values specified in the 'values' field
                           rule: 'self.all(x, (x.operator == ''In'' && has(x.minValues))
@@ -2102,10 +2112,10 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
 ---
@@ -2115,10 +2125,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2166,10 +2176,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2197,10 +2207,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2217,10 +2227,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2237,10 +2247,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2257,10 +2267,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2278,10 +2288,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2328,10 +2338,10 @@ metadata:
   name: karpenter-provider-proxmox:bootstrap
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2384,10 +2394,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.7
+    helm.sh/chart: karpenter-provider-proxmox-0.4.8
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.11.0"
+    app.kubernetes.io/version: "v0.11.1"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1

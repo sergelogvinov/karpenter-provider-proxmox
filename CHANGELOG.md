@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.11.0...v0.11.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* vm affinity pinning ([e868773](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e8687734a7ed6062d63fca3b93b316977104e8f6))
+
 ## [0.11.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.10.1...v0.11.0) (2026-04-01)
 
 
