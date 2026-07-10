@@ -160,8 +160,8 @@ github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/samber/lo v1.53.0 h1:t975lj2py4kJPQ6haz1QMgtId2gtmfktACxIXArw3HM=
 github.com/samber/lo v1.53.0/go.mod h1:4+MXEGsJzbKGaUEQFKBq2xtfuznW9oz/WrgyzMzRoM0=
-github.com/sergelogvinov/go-proxmox v0.2.1-0.20260710102140-6d1982cc3975 h1:9HyPzfq89T8B6N0CLTNszyIO8hwx4BC83mBNxCPEkD4=
-github.com/sergelogvinov/go-proxmox v0.2.1-0.20260710102140-6d1982cc3975/go.mod h1:aBAwXyypY//9m2/CPRVtajV0SWBVq7eYlcwiSxoNSFU=
+github.com/sergelogvinov/go-proxmox v0.3.0 h1:HMhuORAFaaPSFDTA6FZQRxChEaNrYqdCO7okTh+oAOw=
+github.com/sergelogvinov/go-proxmox v0.3.0/go.mod h1:aBAwXyypY//9m2/CPRVtajV0SWBVq7eYlcwiSxoNSFU=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=

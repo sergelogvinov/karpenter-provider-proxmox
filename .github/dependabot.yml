@@ -13,6 +13,8 @@ updates:
       interval: "monthly"
       day: "monday"
       time: "08:00"
+    cooldown:
+      default-days: 5
 
   - package-ecosystem: "gomod"
     directory: "/"
