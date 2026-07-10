@@ -1,6 +1,6 @@
 module github.com/sergelogvinov/karpenter-provider-proxmox
 
-go 1.26.4
+go 1.26.5
 
 // replace github.com/sergelogvinov/go-proxmox => ../../proxmox/go-proxmox
 // replace github.com/luthermonson/go-proxmox => ../../proxmox/go-proxmox-luthermonson
