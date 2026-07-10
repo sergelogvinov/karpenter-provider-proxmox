@@ -67,7 +67,19 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 		if vmConfig.Cores == cpus.Size() {
 			r.logger.Info("VM pinning CPU threads to cores", "vmID", vmID, "threadCount", len(threads), "cores", cpus.String())
 
-			err = utilsys.PinThreadsToCores(ctx, vmID, threads, cpus.UnsortedList())
+			if r.topology != nil && r.topology.CPUDetails.CPUs().Intersection(cpus).Size() != cpus.Size() {
+				r.logger.Error(fmt.Errorf("topology mismatch"), "Failed to pin VM to cores",
+					"vmID", vmID,
+					"affinity", vmConfig.Affinity,
+					"topologyCPUs", r.topology.CPUDetails.CPUs().String(),
+				)
+
+				// Return nil to avoid retrying, as this is a configuration issue
+				// It can be fixed in the VM configuration when the VM is stopped and then restarted
+				return nil
+			}
+
+			err = utilsys.PinThreadsToCores(ctx, vmID, pid, threads, cpus.UnsortedList())
 			if err != nil {
 				r.logger.Error(err, "Failed to pin VM threads to cores", "vmID", vmID)
 			}
