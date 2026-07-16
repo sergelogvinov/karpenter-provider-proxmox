@@ -121,6 +121,10 @@ spec:
   tags:
     - talos-k8s-proxmox
     - karpenter
+
+  # Start the VM automatically when the Proxmox host boots (Optional)
+  # Nodes cloned from this template inherit this setting.
+  onBoot: true
 ```
 
 After applying the resource, Karpenter for Proxmox downloads the image from `spec.sourceImage.url` and stores it in the Proxmox `import` storage type.

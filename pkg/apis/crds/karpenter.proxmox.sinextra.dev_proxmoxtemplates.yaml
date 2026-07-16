@@ -193,6 +193,11 @@ spec:
                 maxItems: 6
                 minItems: 1
                 type: array
+              onBoot:
+                description: |-
+                  OnBoot specifies whether the VM should be automatically started when the Proxmox host boots.
+                  Nodes cloned from this template inherit this setting.
+                type: boolean
               pciDevices:
                 description: |-
                   PCIDevices is a list of PCI devices to attach to the VM template
