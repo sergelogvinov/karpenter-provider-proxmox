@@ -122,6 +122,11 @@ type ProxmoxTemplateSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9][a-zA-Z0-9._-]*(/[a-zA-Z0-9][a-zA-Z0-9._-]*){0,2}$`
 	// +optional
 	ResourcePool string `json:"resourcePool,omitempty" hash:"ignore"`
+
+	// OnBoot specifies whether the VM should be automatically started when the Proxmox host boots.
+	// Nodes cloned from this template inherit this setting.
+	// +optional
+	OnBoot *bool `json:"onBoot,omitempty"`
 }
 
 type SourceImage struct {

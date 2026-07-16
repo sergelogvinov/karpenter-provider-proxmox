@@ -302,7 +302,7 @@ func (p *DefaultProvider) updateTemplate(
 
 	removeOptions := []string{}
 
-	for key := range strings.SplitSeq("agent,cpu,vga,tags", ",") {
+	for key := range strings.SplitSeq("agent,cpu,vga,tags,onboot", ",") {
 		if _, ok := vm[key]; !ok {
 			removeOptions = append(removeOptions, key)
 		}
@@ -486,6 +486,10 @@ func applyVirtualMachineTemplateConfig(templateClass *v1alpha1.ProxmoxTemplate, 
 
 	if templateClass.Spec.ResourcePool != "" {
 		vm["pool"] = templateClass.Spec.ResourcePool
+	}
+
+	if templateClass.Spec.OnBoot != nil {
+		vm["onboot"] = lo.Ternary(*templateClass.Spec.OnBoot, 1, 0)
 	}
 }
 
