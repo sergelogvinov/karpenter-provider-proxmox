@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.11.1...v0.12.0) (2026-07-19)
+
+
+### Features
+
+* add onBoot to ProxmoxTemplateSpec ([74758b6](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/74758b60e9d78eb6636b4dd8aab933987b168b0c))
+
 ## [0.11.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.11.0...v0.11.1) (2026-07-10)
 
 

@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.21.0
+    controller-gen.kubebuilder.io/version: v0.20.1
   name: proxmoxtemplates.karpenter.proxmox.sinextra.dev
 spec:
   group: karpenter.proxmox.sinextra.dev
@@ -193,6 +193,11 @@ spec:
                 maxItems: 6
                 minItems: 1
                 type: array
+              onBoot:
+                description: |-
+                  OnBoot specifies whether the VM should be automatically started when the Proxmox host boots.
+                  Nodes cloned from this template inherit this setting.
+                type: boolean
               pciDevices:
                 description: |-
                   PCIDevices is a list of PCI devices to attach to the VM template
