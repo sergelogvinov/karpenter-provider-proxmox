@@ -81,7 +81,7 @@ clean: ## Clean
 
 .PHONY: tools
 tools:
-	go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
 	go install github.com/google/go-licenses@latest
 
 .PHONY: vendor
@@ -101,8 +101,7 @@ gen-objects: ## generate the controller-gen related objects
 manifests: ## generate the controller-gen kubernetes manifests
 	rm -rf pkg/apis/crds/*
 	$(CONTROLLER_GEN) crd object:headerFile="hack/boilerplate.go.txt" paths="./..." output:crd:artifacts:config=pkg/apis/crds
-	$(CONTROLLER_GEN) crd paths="./vendor/sigs.k8s.io/karpenter/..." output:crd:artifacts:config=pkg/apis/crds
-	$(CONTROLLER_GEN) rbac:roleName=karpenter-provider-proxmox paths="./pkg/..." output:rbac:dir=pkg/apis/rbac
+	cp vendor/sigs.k8s.io/karpenter/pkg/apis/crds/*.yaml pkg/apis/crds/
 
 .PHONY: install
 install: ## Install
