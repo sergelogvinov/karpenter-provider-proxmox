@@ -10,7 +10,7 @@ require (
 	github.com/apparentlymart/go-cidr v1.1.1
 	github.com/awslabs/operatorpkg v0.0.0-20260708223819-4da4c353c5fa
 	github.com/fsnotify/fsnotify v1.10.1
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/google/cadvisor v0.57.0
 	github.com/google/go-cmp v0.7.0
 	github.com/luthermonson/go-proxmox v0.5.1
