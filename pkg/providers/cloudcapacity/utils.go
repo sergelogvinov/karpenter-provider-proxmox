@@ -18,20 +18,20 @@ package cloudcapacity
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"net"
 	"strconv"
 
-	proxmox "github.com/luthermonson/go-proxmox"
-
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/network"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string, r *proxmox.ClusterResource) (NodeCapacityInfo, error) {
+func getNodeCapacity(ctx context.Context, cl *proxmoxrest.Client, region string, r *cluster.Resource) (NodeCapacityInfo, error) {
 	resourceManager, err := resourcemanager.NewResourceManager(ctx, cl, region, r.Node)
 	if err != nil {
 		return NodeCapacityInfo{}, fmt.Errorf("failed to create resource manager for node %s in region %s: %w", r.Node, region, err)
@@ -52,23 +52,30 @@ func getNodeCapacity(ctx context.Context, cl *goproxmox.APIClient, region string
 	return info, nil
 }
 
-func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox.APIClient) error {
+func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxrest.Client) error {
 	log := log.FromContext(ctx).WithName("updateNodeCapacity()")
 
-	vms, err := cl.GetVMsByFilter(ctx, func(vm *proxmox.ClusterResource) (bool, error) {
-		return vm.Node == i.Name && vm.Status == "running", nil
+	vms, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+		Type:      cluster.ResourceTypeVM,
+		GuestType: "qemu",
+		Node:      i.Name,
+		Match: func(r *cluster.Resource) (bool, error) {
+			return r.Status == "running", nil
+		},
 	})
-	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+	if err != nil {
 		return fmt.Errorf("cannot list vms for node %s: %w", i.Name, err)
 	}
 
-	for _, vmr := range vms {
-		vm, err := cl.GetVMConfig(ctx, int(vmr.VMID))
+	for idx := range vms {
+		vmr := vms[idx]
+
+		cfg, err := cl.Nodes(vmr.Node).Qemu().Config(ctx, vmr.VMID, nil)
 		if err != nil {
 			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		opt, err := vmresources.GetResourceFromVM(vm)
+		opt, err := vmresources.GetResourceFromVMConfig(&vmr, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
 		}
@@ -82,32 +89,29 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *goproxmox
 	return nil
 }
 
-func getNodeNetwork(ctx context.Context, cl *goproxmox.APIClient, region string, r *proxmox.ClusterResource) (NodeNetworkIfaceInfo, error) {
-	node := (&proxmox.Node{}).New(cl.Client, r.Node)
-	networks, err := node.Networks(ctx, "any_bridge")
+func getNodeNetwork(ctx context.Context, cl *proxmoxrest.Client, region string, r *cluster.Resource) (NodeNetworkIfaceInfo, error) {
+	networks, err := cl.Nodes(r.Node).Network().List(ctx, network.TypeAnyBridge)
 	if err != nil {
 		return NodeNetworkIfaceInfo{}, fmt.Errorf("failed to get network interfaces for node %s in region %s: %w", r.Node, region, err)
 	}
 
 	ifaces := map[string]NetworkIfaceInfo{}
 
-	for _, net := range networks {
-		if net.Active == 0 {
+	for _, iface := range networks {
+		if !iface.Active {
 			continue
 		}
 
 		mtu := 1500
-		if net.MTU != "" {
-			if mtu, err = strconv.Atoi(net.MTU); err != nil {
-				return NodeNetworkIfaceInfo{}, fmt.Errorf("failed to parse MTU for node %s in region %s: %w", r.Node, region, err)
-			}
+		if iface.MTU != 0 {
+			mtu = iface.MTU
 		}
 
-		ifaces[net.Iface] = NetworkIfaceInfo{
-			Address4: net.CIDR,
-			Address6: net.CIDR6,
-			Gateway4: net.Gateway,
-			Gateway6: net.Gateway6,
+		ifaces[iface.Iface] = NetworkIfaceInfo{
+			Address4: cidrString(iface.Address, iface.Netmask),
+			Address6: cidrString6(iface.Address6, iface.Netmask6),
+			Gateway4: iface.Gateway,
+			Gateway6: iface.Gateway6,
 			MTU:      uint32(mtu),
 		}
 	}
@@ -117,4 +121,42 @@ func getNodeNetwork(ctx context.Context, cl *goproxmox.APIClient, region string,
 		Region: region,
 		Ifaces: ifaces,
 	}, nil
+}
+
+// cidrString combines an IPv4 address with its network mask (either a
+// dotted-decimal mask or an already-numeric prefix length, as Proxmox
+// reports either depending on the interface's configuration) into CIDR
+// notation. Proxmox's network_config response has no combined field for
+// this, unlike the deprecated luthermonson client's derived "cidr" field.
+func cidrString(address, netmask string) string {
+	if address == "" {
+		return ""
+	}
+
+	if netmask == "" {
+		return address
+	}
+
+	if prefix, err := strconv.Atoi(netmask); err == nil {
+		return fmt.Sprintf("%s/%d", address, prefix)
+	}
+
+	mask := net.ParseIP(netmask).To4()
+	if mask == nil {
+		return address
+	}
+
+	prefix, _ := net.IPMask(mask).Size()
+
+	return fmt.Sprintf("%s/%d", address, prefix)
+}
+
+// cidrString6 combines an IPv6 address with its prefix length into CIDR
+// notation; see cidrString for why this isn't returned as a single field.
+func cidrString6(address string, prefixLen int) string {
+	if address == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("%s/%d", address, prefixLen)
 }

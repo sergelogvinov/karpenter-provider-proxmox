@@ -21,43 +21,68 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
-
+	"github.com/sergelogvinov/go-proxmox-rest/nodes"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
 
 	"k8s.io/utils/cpuset"
 )
 
-func GetNodeSettingByNode(n *proxmox.Node) (*settings.NodeSettings, error) {
-	if n == nil {
+// cpuFacts is the physical CPU/memory information needed to derive
+// NodeSettings, extracted from whichever Proxmox client returned it.
+type cpuFacts struct {
+	Model       string
+	Sockets     int
+	Cores       int
+	CPUs        int
+	MemoryTotal uint64
+}
+
+// GetNodeSettingByStatus derives NodeSettings from a go-proxmox-rest node
+// status (GET /nodes/{node}/status).
+func GetNodeSettingByStatus(st *nodes.Status) (*settings.NodeSettings, error) {
+	if st == nil {
 		return nil, nil
 	}
 
-	if n.CPUInfo.CPUs == 0 || n.CPUInfo.Cores == 0 || n.CPUInfo.Sockets == 0 || n.CPUInfo.Model == "" {
-		return nil, fmt.Errorf("incomplete cpu info: %+v", n.CPUInfo)
+	if st.CPUInfo == nil || st.Memory == nil {
+		return nil, fmt.Errorf("incomplete node status: %+v", st)
+	}
+
+	return nodeSettingsFromFacts(cpuFacts{
+		Model:       st.CPUInfo.Model,
+		Sockets:     st.CPUInfo.Sockets,
+		Cores:       st.CPUInfo.Cores,
+		CPUs:        st.CPUInfo.CPUs,
+		MemoryTotal: uint64(st.Memory.Total),
+	})
+}
+
+func nodeSettingsFromFacts(cf cpuFacts) (*settings.NodeSettings, error) {
+	if cf.CPUs == 0 || cf.Cores == 0 || cf.Sockets == 0 || cf.Model == "" {
+		return nil, fmt.Errorf("incomplete cpu info: %+v", cf)
 	}
 
 	switch {
-	case strings.Contains(n.CPUInfo.Model, "AMD EPYC"):
-		return nodeSettingsAMDEPYC(n)
-	case strings.Contains(n.CPUInfo.Model, "AMD"):
-		return nodeSettingsAMD(n)
-	case strings.Contains(n.CPUInfo.Model, "Intel"):
-		return nodeSettingsIntel(n)
+	case strings.Contains(cf.Model, "AMD EPYC"):
+		return nodeSettingsAMDEPYC(cf)
+	case strings.Contains(cf.Model, "AMD"):
+		return nodeSettingsAMD(cf)
+	case strings.Contains(cf.Model, "Intel"):
+		return nodeSettingsIntel(cf)
 	}
 
 	return nil, nil
 }
 
 //nolint:dupl
-func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
+func nodeSettingsAMDEPYC(cf cpuFacts) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
-		NumCores:   n.CPUInfo.Cores,
-		NumSockets: n.CPUInfo.Sockets,
-		NumThreads: n.CPUInfo.CPUs / n.CPUInfo.Cores,
+		NumCores:   cf.Cores,
+		NumSockets: cf.Sockets,
+		NumThreads: cf.CPUs / cf.Cores,
 	}
 
-	matches := regexp.MustCompile(`AMD EPYC\s? (\d)(\d)(\d)(\d)(\w*)\s+`).FindStringSubmatch(n.CPUInfo.Model)
+	matches := regexp.MustCompile(`AMD EPYC\s? (\d)(\d)(\d)(\d)(\w*)\s+`).FindStringSubmatch(cf.Model)
 	if len(matches) != 6 {
 		return nil, nil
 	}
@@ -78,7 +103,7 @@ func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 	}
 
 	if coresPerCCX > 0 {
-		st.NumUncoreCaches = (n.CPUInfo.Cores / n.CPUInfo.Sockets) / coresPerCCX
+		st.NumUncoreCaches = (cf.Cores / cf.Sockets) / coresPerCCX
 	}
 
 	nps := 1
@@ -94,18 +119,18 @@ func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 		nps = 4
 	}
 
-	nps = n.CPUInfo.Sockets * nps
+	nps = cf.Sockets * nps
 
 	st.NUMANodes = make(map[int]settings.NUMAInfo, nps)
 	for i := range nps {
-		cpuPerNuma := n.CPUInfo.Cores / nps
+		cpuPerNuma := cf.Cores / nps
 
 		startCPU := i * cpuPerNuma
 		endCPU := startCPU + cpuPerNuma
 		cpuList := []string{fmt.Sprintf("%d-%d", startCPU, endCPU-1)}
 
 		if st.NumThreads > 1 {
-			threadStartCPU := startCPU + n.CPUInfo.Cores
+			threadStartCPU := startCPU + cf.Cores
 			threadEndCPU := threadStartCPU + cpuPerNuma
 			cpuList = append(cpuList, fmt.Sprintf("%d-%d", threadStartCPU, threadEndCPU-1))
 		}
@@ -117,7 +142,7 @@ func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 
 		info := settings.NUMAInfo{
 			CPUs:    cpus.String(),
-			MemSize: n.Memory.Total / uint64(nps),
+			MemSize: cf.MemoryTotal / uint64(nps),
 		}
 
 		st.NUMANodes[i] = info
@@ -127,25 +152,25 @@ func nodeSettingsAMDEPYC(n *proxmox.Node) (*settings.NodeSettings, error) {
 }
 
 //nolint:dupl
-func nodeSettingsAMD(n *proxmox.Node) (*settings.NodeSettings, error) {
+func nodeSettingsAMD(cf cpuFacts) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
-		NumCores:   n.CPUInfo.Cores,
-		NumSockets: n.CPUInfo.Sockets,
-		NumThreads: n.CPUInfo.CPUs / n.CPUInfo.Cores,
+		NumCores:   cf.Cores,
+		NumSockets: cf.Sockets,
+		NumThreads: cf.CPUs / cf.Cores,
 	}
 
-	nps := n.CPUInfo.Sockets
+	nps := cf.Sockets
 
 	st.NUMANodes = make(map[int]settings.NUMAInfo, nps)
 	for i := range nps {
-		cpuPerNuma := n.CPUInfo.Cores / nps
+		cpuPerNuma := cf.Cores / nps
 
 		startCPU := i * cpuPerNuma
 		endCPU := startCPU + cpuPerNuma
 		cpuList := []string{fmt.Sprintf("%d-%d", startCPU, endCPU-1)}
 
 		if st.NumThreads > 1 {
-			threadStartCPU := startCPU + n.CPUInfo.Cores
+			threadStartCPU := startCPU + cf.Cores
 			threadEndCPU := threadStartCPU + cpuPerNuma
 			cpuList = append(cpuList, fmt.Sprintf("%d-%d", threadStartCPU, threadEndCPU-1))
 		}
@@ -157,7 +182,7 @@ func nodeSettingsAMD(n *proxmox.Node) (*settings.NodeSettings, error) {
 
 		info := settings.NUMAInfo{
 			CPUs:    cpus.String(),
-			MemSize: n.Memory.Total / uint64(nps),
+			MemSize: cf.MemoryTotal / uint64(nps),
 		}
 
 		st.NUMANodes[i] = info
@@ -167,26 +192,26 @@ func nodeSettingsAMD(n *proxmox.Node) (*settings.NodeSettings, error) {
 }
 
 //nolint:dupl
-func nodeSettingsIntel(n *proxmox.Node) (*settings.NodeSettings, error) {
+func nodeSettingsIntel(cf cpuFacts) (*settings.NodeSettings, error) {
 	st := &settings.NodeSettings{
-		NumCores:        n.CPUInfo.Cores,
-		NumSockets:      n.CPUInfo.Sockets,
-		NumThreads:      n.CPUInfo.CPUs / n.CPUInfo.Cores,
-		NumUncoreCaches: n.CPUInfo.Sockets,
+		NumCores:        cf.Cores,
+		NumSockets:      cf.Sockets,
+		NumThreads:      cf.CPUs / cf.Cores,
+		NumUncoreCaches: cf.Sockets,
 	}
 
-	nps := n.CPUInfo.Sockets
+	nps := cf.Sockets
 
 	st.NUMANodes = make(map[int]settings.NUMAInfo, nps)
 	for i := range nps {
-		cpuPerNuma := n.CPUInfo.Cores / nps
+		cpuPerNuma := cf.Cores / nps
 
 		startCPU := i * cpuPerNuma
 		endCPU := startCPU + cpuPerNuma
 		cpuList := []string{fmt.Sprintf("%d-%d", startCPU, endCPU-1)}
 
 		if st.NumThreads > 1 {
-			threadStartCPU := startCPU + n.CPUInfo.Cores
+			threadStartCPU := startCPU + cf.Cores
 			threadEndCPU := threadStartCPU + cpuPerNuma
 			cpuList = append(cpuList, fmt.Sprintf("%d-%d", threadStartCPU, threadEndCPU-1))
 		}
@@ -198,7 +223,7 @@ func nodeSettingsIntel(n *proxmox.Node) (*settings.NodeSettings, error) {
 
 		info := settings.NUMAInfo{
 			CPUs:    cpus.String(),
-			MemSize: n.Memory.Total / uint64(nps),
+			MemSize: cf.MemoryTotal / uint64(nps),
 		}
 
 		st.NUMANodes[i] = info

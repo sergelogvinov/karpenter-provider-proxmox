@@ -18,15 +18,15 @@ package resourcemanager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/go-logr/logr"
-	"github.com/luthermonson/go-proxmox"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
@@ -52,7 +52,7 @@ type ResourceManager interface {
 }
 
 type resourceManager struct {
-	cl   *goproxmox.APIClient
+	cl   *proxmoxrest.Client
 	zone string
 	log  logr.Logger
 
@@ -62,7 +62,7 @@ type resourceManager struct {
 
 var _ ResourceManager = &resourceManager{}
 
-func NewResourceManager(ctx context.Context, cl *goproxmox.APIClient, region, zone string) (ResourceManager, error) {
+func NewResourceManager(ctx context.Context, cl *proxmoxrest.Client, region, zone string) (ResourceManager, error) {
 	log := log.FromContext(ctx).WithName("ResourceManager").WithValues("node", zone)
 
 	opts := options.FromContext(ctx)
@@ -220,17 +220,17 @@ func (r *resourceManager) Status() string {
 	return r.nodePolicy.Status()
 }
 
-func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone string) (settings.NodeSettings, error) {
+func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone string) (settings.NodeSettings, error) {
 	nodeSettings := settings.NodeSettings{
 		ReservedMemory: 1024 * 1024 * 1024, // 1GiB
 	}
 
-	n, err := cl.Client.Node(ctx, zone)
+	n, err := cl.Nodes(zone).Status(ctx)
 	if err != nil {
 		return nodeSettings, fmt.Errorf("failed to get node %s: %w", zone, err)
 	}
 
-	st, err := nodesettings.GetNodeSettingByNode(n)
+	st, err := nodesettings.GetNodeSettingByStatus(n)
 	if err != nil {
 		return nodeSettings, fmt.Errorf("getting node settings: %w", err)
 	}
@@ -240,23 +240,29 @@ func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone 
 		nodeSettings.ReservedMemory = 1024 * 1024 * 1024 // 1GiB
 	}
 
-	vmr, err := cl.GetVMByFilter(ctx, func(v *proxmox.ClusterResource) (bool, error) {
-		return v.Node == zone && v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
+	vmrs, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+		Type:          cluster.ResourceTypeVM,
+		GuestType:     "qemu",
+		Node:          zone,
+		SkipTemplates: true,
+		Match: func(r *cluster.Resource) (bool, error) {
+			return r.Name == "node-capacity" && slices.Contains(r.Tags, "karpenter"), nil
+		},
 	})
-	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+	if err != nil {
 		return nodeSettings, fmt.Errorf("failed to get VM by filter for node settings: %w", err)
 	}
 
-	if vmr == nil {
+	if len(vmrs) == 0 {
 		return nodeSettings, nil
 	}
 
-	vm, err := cl.GetVMConfig(ctx, int(vmr.VMID))
+	cfg, err := cl.Nodes(vmrs[0].Node).Qemu().Config(ctx, vmrs[0].VMID, nil)
 	if err != nil {
 		return nodeSettings, fmt.Errorf("failed to get VM config for node settings: %w", err)
 	}
 
-	err = nodeSettingsFromVM(vm, &nodeSettings)
+	err = nodeSettingsFromVM(&vmrs[0], cfg, &nodeSettings)
 	if err != nil {
 		return nodeSettings, fmt.Errorf("failed to get node settings from VM: %w", err)
 	}
@@ -264,12 +270,12 @@ func nodeSettingsFromCluster(ctx context.Context, cl *goproxmox.APIClient, zone 
 	return nodeSettings, nil
 }
 
-func nodeSettingsFromVM(vm *proxmox.VirtualMachine, nodeSettings *settings.NodeSettings) error {
-	if vm == nil || nodeSettings == nil {
+func nodeSettingsFromVM(vmr *cluster.Resource, cfg *qemu.Config, nodeSettings *settings.NodeSettings) error {
+	if vmr == nil || cfg == nil || nodeSettings == nil {
 		return fmt.Errorf("invalid input: vm and nodeSettings cannot be nil")
 	}
 
-	opt, err := vmresources.GetResourceFromVM(vm)
+	opt, err := vmresources.GetResourceFromVMConfig(vmr, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to get resources from VM config for node settings: %w", err)
 	}

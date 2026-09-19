@@ -42,7 +42,7 @@ func ParseCIDR(s string) (*IPPool, error) {
 
 	_, ipNet, err := net.ParseCIDR(s)
 	if err != nil {
-		return nil, errors.New("Invalid CIDR format")
+		return nil, errors.New("invalid CIDR format")
 	}
 
 	ones, bits := ipNet.Mask.Size()
@@ -53,7 +53,7 @@ func ParseCIDR(s string) (*IPPool, error) {
 	case 128:
 		maxIPs = 1 << (int(128) - ones)
 	default:
-		return nil, errors.New("Only IPv4 and IPv6 are supported")
+		return nil, errors.New("only IPv4 and IPv6 are supported")
 	}
 
 	maxIPs -= 1 // Exclude network address for IP allocation

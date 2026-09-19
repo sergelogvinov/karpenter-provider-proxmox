@@ -69,16 +69,12 @@ func (p *DefaultProvider) CreateToken(ctx context.Context, nodeClaim *karpv1.Nod
 	tokenExpiredTime := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
 
 	secret := &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Secret",
-			APIVersion: corev1.SchemeGroupVersion.Version,
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      bootstraputil.BootstrapTokenSecretName(tokenID),
-			Namespace: metav1.NamespaceSystem,
-			Labels: map[string]string{
-				v1alpha1.LabelBootstrapToken: "true",
-			},
+		Kind:       "Secret",
+		APIVersion: corev1.SchemeGroupVersion.Version,
+		Name:       bootstraputil.BootstrapTokenSecretName(tokenID),
+		Namespace:  metav1.NamespaceSystem,
+		Labels: map[string]string{
+			v1alpha1.LabelBootstrapToken: "true",
 		},
 		Type: bootstrapapi.SecretTypeBootstrapToken,
 		StringData: map[string]string{

@@ -60,7 +60,7 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 
 	if nodeClass.Spec.Region != "" {
 		zones = lo.Filter(zones, func(zone string, _ int) bool {
-			region := strings.SplitN(zone, "/", 2)[0]
+			region, _, _ := strings.Cut(zone, "/")
 
 			return region == nodeClass.Spec.Region
 		})

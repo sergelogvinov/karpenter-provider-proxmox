@@ -19,52 +19,12 @@ package topology
 import (
 	"fmt"
 
-	"github.com/luthermonson/go-proxmox"
-
 	"github.com/go-logr/logr"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"k8s.io/utils/cpuset"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
-	nodesettings "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 )
-
-// Discover returns Topology based on proxmox node info
-// We do not have access to real information,
-// so, we will predict architecture based on the provided CPUInfo.
-func Discover(n *proxmox.Node) (*Topology, error) {
-	if n == nil {
-		return nil, fmt.Errorf("cannot discover cpu topology from nil node info")
-	}
-
-	machineInfo := n.CPUInfo
-	if machineInfo.CPUs == 0 || machineInfo.Cores == 0 || machineInfo.Sockets == 0 {
-		return nil, fmt.Errorf("could not detect CPU topology from incomplete machine info: %+v", machineInfo)
-	}
-
-	st, err := nodesettings.GetNodeSettingByNode(n)
-	if err != nil {
-		return nil, fmt.Errorf("getting node settings: %w", err)
-	}
-
-	if st == nil {
-		return nil, fmt.Errorf("could not get node settings from machine info: %+v", machineInfo)
-	}
-
-	topology, err := DiscoverFromSettings(st)
-	if err != nil {
-		return nil, fmt.Errorf("discovering topology from settings: %w", err)
-	}
-
-	if len(topology.NUMANodes) == 0 || topology.MemTopology.TotalMemory == 0 {
-		topology.MemTopology.TotalMemory = n.Memory.Total
-		topology.MemTopology.NUMANodes = map[int]uint64{
-			0: n.Memory.Total,
-		}
-	}
-
-	return topology, nil
-}
 
 func DiscoverFromSettings(settings *settings.NodeSettings) (*Topology, error) {
 	if settings == nil || len(settings.NUMANodes) == 0 {

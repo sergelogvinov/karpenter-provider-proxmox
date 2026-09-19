@@ -93,5 +93,5 @@ type ProxmoxUnmanagedTemplateList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ProxmoxUnmanagedTemplate{}, &ProxmoxUnmanagedTemplateList{})
+	registerTypes(&ProxmoxUnmanagedTemplate{}, &ProxmoxUnmanagedTemplateList{})
 }

@@ -19,11 +19,11 @@ package resourcemanager
 import (
 	"testing"
 
-	"github.com/luthermonson/go-proxmox"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
 	topology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
@@ -118,7 +118,7 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(0, 1, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -149,7 +149,7 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(0, 1, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -165,7 +165,7 @@ func TestSimplePolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(2, 3, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -270,7 +270,7 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(0, 1, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -301,7 +301,7 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(0, 1, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -317,7 +317,7 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 					CPUs:   4,
 					Memory: 8192 * 1024 * 1024,
 					CPUSet: cpuset.New(2, 3, 8, 9),
-					NUMANodes: map[int]goproxmox.NUMANodeState{
+					NUMANodes: map[int]resources.NUMANodeState{
 						0: {
 							CPUs:   "0-1",
 							Memory: 4 * 1024,
@@ -357,7 +357,8 @@ func TestStaticPolicyAllocateOrUpdate(t *testing.T) {
 func TestNodeSettingsFromVM(t *testing.T) {
 	testCases := []struct { //nolint:dupl
 		name         string
-		vm           *proxmox.VirtualMachine
+		vmr          *cluster.Resource
+		cfg          *qemu.Config
 		nodeSettings *settings.NodeSettings
 
 		expected *settings.NodeSettings
@@ -365,17 +366,14 @@ func TestNodeSettingsFromVM(t *testing.T) {
 	}{
 		{
 			name: "VM with Affinity and NUMA nodes",
-			vm: &proxmox.VirtualMachine{
-				VMID:   100,
-				CPUs:   96,
-				MaxMem: 124 * 4 * 1024 * 1024,
-				VirtualMachineConfig: &proxmox.VirtualMachineConfig{
-					Affinity: "0-11,48-59,12-23,60-71,24-35,72-83,36-47,84-95",
-					Numa:     1,
-					Numa0:    "cpus=0-23,hostnodes=0,memory=126976",
-					Numa1:    "cpus=24-47,hostnodes=1,memory=126976",
-					Numa2:    "cpus=48-71,hostnodes=2,memory=126976",
-					Numa3:    "cpus=72-95,hostnodes=3,memory=126976",
+			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 96, MaxMem: 124 * 4 * 1024 * 1024},
+			cfg: &qemu.Config{
+				Affinity: "0-11,48-59,12-23,60-71,24-35,72-83,36-47,84-95",
+				NUMA: map[int]qemu.NUMA{
+					0: {CPUIDs: []string{"0-23"}, HostNodes: []string{"0"}, Memory: new(126976)},
+					1: {CPUIDs: []string{"24-47"}, HostNodes: []string{"1"}, Memory: new(126976)},
+					2: {CPUIDs: []string{"48-71"}, HostNodes: []string{"2"}, Memory: new(126976)},
+					3: {CPUIDs: []string{"72-95"}, HostNodes: []string{"3"}, Memory: new(126976)},
 				},
 			},
 			nodeSettings: &settings.NodeSettings{},
@@ -404,7 +402,7 @@ func TestNodeSettingsFromVM(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := nodeSettingsFromVM(tc.vm, tc.nodeSettings)
+			err := nodeSettingsFromVM(tc.vmr, tc.cfg, tc.nodeSettings)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 

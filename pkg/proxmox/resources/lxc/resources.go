@@ -19,24 +19,24 @@ package lxcresources
 import (
 	"fmt"
 
-	"github.com/luthermonson/go-proxmox"
-
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	resources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
 )
 
-// GetResourceFromContainer extracts ContainerResources from a Proxmox Container object.
-func GetResourceFromContainer(container *proxmox.Container) (opt *resources.VMResources, err error) {
-	if container == nil {
-		return nil, fmt.Errorf("container config cannot be nil")
+// GetResourceFromContainer extracts VMResources from a Proxmox cluster
+// resource listing entry for an LXC container.
+func GetResourceFromContainer(vmr *cluster.Resource) (opt *resources.VMResources, err error) {
+	if vmr == nil {
+		return nil, fmt.Errorf("container resource cannot be nil")
 	}
 
 	opt = &resources.VMResources{
-		ID:     int(container.VMID),
-		CPUs:   container.CPUs,
+		ID:     vmr.VMID,
+		CPUs:   vmr.MaxCPU,
 		CPUSet: cpuset.New(),
-		Memory: container.MaxMem,
+		Memory: uint64(vmr.MaxMem),
 	}
 
 	return opt, nil

@@ -320,5 +320,5 @@ type ProxmoxNodeClassList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ProxmoxNodeClass{}, &ProxmoxNodeClassList{})
+	registerTypes(&ProxmoxNodeClass{}, &ProxmoxNodeClassList{})
 }

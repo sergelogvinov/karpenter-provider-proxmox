@@ -21,22 +21,24 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
 	"github.com/samber/lo"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
+	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu/firewall"
+	"github.com/sergelogvinov/go-proxmox-rest/pools"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
-	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -159,18 +161,16 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 		return nil, fmt.Errorf("failed to parse providerID: %v", err)
 	}
 
-	vm, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
+	vm, err := p.cluster.Cluster(region).Get(ctx, pxpool.ResourceKindVM, strconv.Itoa(vmid))
 	if err != nil {
 		return nil, err
 	}
 
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: vm.Name,
-			Labels: map[string]string{
-				corev1.LabelTopologyRegion: region,
-				corev1.LabelTopologyZone:   vm.Node,
-			},
+		Name: vm.Name,
+		Labels: map[string]string{
+			corev1.LabelTopologyRegion: region,
+			corev1.LabelTopologyZone:   vm.Node,
 		},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
@@ -210,9 +210,9 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
 	}
 
-	vmr, err := p.cluster.GetVMByIDInRegion(ctx, region, uint64(vmid))
+	vmr, err := p.cluster.Cluster(region).Get(ctx, pxpool.ResourceKindVM, strconv.Itoa(vmid))
 	if err != nil {
-		if err == goproxmox.ErrVirtualMachineNotFound {
+		if errors.Is(err, pxpool.ErrResourceNotFound) {
 			return cloudprovider.NewNodeClaimNotFoundError(err)
 		}
 
@@ -241,23 +241,92 @@ func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *ka
 
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
 
-	px, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.Get(region)
 	if err != nil {
-		return pxpool.ErrRegionNotFound
+		return pxpool.ErrClusterNotFound
 	}
 
-	rules := make([]*proxmox.FirewallRule, len(nodeClass.Spec.SecurityGroups))
-	for i, sg := range nodeClass.Spec.SecurityGroups {
-		rules[i] = &proxmox.FirewallRule{
-			Enable: 1,
+	return reconcileFirewallRules(ctx, px, zone, vmid, buildFirewallRules(nodeClass.Spec.SecurityGroups))
+}
+
+// buildFirewallRules converts a node class's security groups into the
+// per-position firewall rule list Proxmox expects (one "group" rule per
+// entry, applied in order).
+func buildFirewallRules(securityGroups []v1alpha1.SecurityGroups) []firewall.Rule {
+	rules := make([]firewall.Rule, len(securityGroups))
+	for i, sg := range securityGroups {
+		rules[i] = firewall.Rule{
 			Pos:    i,
-			Type:   "group",
+			Enable: 1,
+			Type:   firewall.RuleTypeGroup,
 			Action: sg.Name,
-			Iface:  sg.Interface,
+			IFace:  sg.Interface,
 		}
 	}
 
-	return px.UpdateVMFirewallRules(ctx, vmid, zone, rules)
+	return rules
+}
+
+// reconcileFirewallRules diffs rules against the guest's current firewall
+// rule list position-by-position: updates a position whose rule changed,
+// creates new positions past the current list's end, and deletes now-extra
+// trailing positions — the same reconcile-by-position approach the old
+// goproxmox.APIClient.UpdateVMFirewallRules used. Deletions run from the
+// highest position down, since Proxmox renumbers remaining rules after
+// each delete (deleting ascending would target the wrong position after
+// the first removal — a latent bug in the old client's identical ascending
+// loop, whenever 2+ trailing rules needed removal at once).
+func reconcileFirewallRules(ctx context.Context, px *proxmoxrest.Client, zone string, vmid int, rules []firewall.Rule) error {
+	rulesClient := px.Nodes(zone).Qemu().Firewall().Rules(vmid)
+
+	oldRules, err := rulesClient.List(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get firewall rules for vm %d: %v", vmid, err)
+	}
+
+	for i := range max(len(oldRules), len(rules)) {
+		switch {
+		case i < len(oldRules) && i < len(rules) && firewallRuleChanged(oldRules[i], rules[i]):
+			if err := rulesClient.Update(ctx, i, firewallRuleOptions(rules[i])); err != nil {
+				return fmt.Errorf("failed to update firewall rule for vm %d: %v", vmid, err)
+			}
+		case i >= len(oldRules) && i < len(rules):
+			if err := rulesClient.Create(ctx, firewallRuleOptions(rules[i])); err != nil {
+				return fmt.Errorf("failed to create new firewall rule for vm %d: %v", vmid, err)
+			}
+		}
+	}
+
+	for i := len(oldRules) - 1; i >= len(rules); i-- {
+		if err := rulesClient.Delete(ctx, i, ""); err != nil {
+			return fmt.Errorf("failed to delete old firewall rule for vm %d: %v", vmid, err)
+		}
+	}
+
+	return nil
+}
+
+// firewallRuleChanged reports whether newRule differs from old in any field
+// buildFirewallRules sets (Pos, Type, Action, Enable, IFace). old, as
+// returned by Proxmox, also carries server-managed fields (Digest,
+// IPVersion, ...) that buildFirewallRules never sets and firewallRuleOptions
+// never sends — comparing the whole struct against those would never match,
+// so every reconcile would rewrite every rule even when nothing changed.
+func firewallRuleChanged(old, newRule firewall.Rule) bool {
+	return old.Pos != newRule.Pos ||
+		old.Type != newRule.Type ||
+		old.Action != newRule.Action ||
+		old.Enable != newRule.Enable ||
+		old.IFace != newRule.IFace
+}
+
+func firewallRuleOptions(r firewall.Rule) *firewall.RuleOptions {
+	return &firewall.RuleOptions{
+		Type:   r.Type,
+		Action: r.Action,
+		Enable: new(r.Enable == 1),
+		IFace:  new(r.IFace),
+	}
 }
 
 func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
@@ -275,33 +344,54 @@ func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.Node
 
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
 
-	px, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.Get(region)
 	if err != nil {
-		return pxpool.ErrRegionNotFound
+		return pxpool.ErrClusterNotFound
 	}
 
-	node, err := px.Node(ctx, zone)
+	cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmid, nil)
 	if err != nil {
-		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
+		return fmt.Errorf("unable to get vm config for vm %d: %w", vmid, err)
 	}
 
-	vm, err := node.VirtualMachine(ctx, vmid)
-	if err != nil {
-		return fmt.Errorf("unable to find vm with id %d: %w", vmid, err)
+	current := []string{}
+	if cfg.Tags != nil {
+		current = *cfg.Tags
 	}
 
-	if vm.HasTag(proxmox.MakeTag(proxmox.TagCloudInit)) {
-		tags = append(tags, proxmox.MakeTag(proxmox.TagCloudInit))
-	}
-
-	if !slices.Equal(strings.Split(vm.Tags, ";"), tags) {
-		vm.Config(ctx, proxmox.VirtualMachineOption{
-			Name:  "tags",
-			Value: strings.Join(tags, ";"),
-		})
+	if !tagsEqual(current, tags) {
+		newTags := qemu.Tags(tags)
+		if err := px.Nodes(zone).Qemu().UpdateConfig(ctx, vmid, &qemu.Config{Tags: &newTags}); err != nil {
+			return fmt.Errorf("failed to update tags for vm %d: %w", vmid, err)
+		}
 	}
 
 	return nil
+}
+
+// tagsEqual reports whether a and b represent the same tag set, ignoring
+// order and case. Proxmox lowercases tags on save by default (the
+// datacenter.cfg tag-style setting's case-sensitive option defaults to
+// off), so comparing case-sensitively against what Proxmox returns would
+// never converge for any declared tag containing an uppercase letter:
+// every reconcile would keep rewriting the same tags. The tags actually
+// sent to Proxmox keep their declared case (see UpdateTags above); only
+// this comparison normalizes case, so a case-sensitive cluster still gets
+// the user's exact casing.
+func tagsEqual(a, b []string) bool {
+	return slices.Equal(normalizeTags(a), normalizeTags(b))
+}
+
+func normalizeTags(tags []string) []string {
+	normalized := make([]string, len(tags))
+	for i, t := range tags {
+		normalized[i] = strings.ToLower(t)
+	}
+
+	normalized = lo.Uniq(normalized)
+	slices.Sort(normalized)
+
+	return normalized
 }
 
 func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
@@ -314,26 +404,26 @@ func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *k
 		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
 	}
 
-	px, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.Get(region)
 	if err != nil {
-		return pxpool.ErrRegionNotFound
+		return pxpool.ErrClusterNotFound
 	}
 
 	poolName := nodeClass.Spec.ResourcePool
 	poolNameOld := nodeClaim.Annotations[v1alpha1.AnnotationProxmoxNodeClassPool]
 
 	if poolName != poolNameOld && poolNameOld != "" {
-		pool, err := px.Client.Pool(ctx, poolNameOld, "qemu")
+		pool, err := px.Pools().Get(ctx, poolNameOld)
 		if err != nil {
 			return fmt.Errorf("failed to get pool %s: %w", poolNameOld, err)
 		}
 
-		if _, ok := lo.Find(pool.Members, func(m proxmox.ClusterResource) bool {
-			return m.VMID == uint64(vmid)
+		if _, ok := lo.Find(pool.Members, func(m pools.PoolMember) bool {
+			return m.VMID == vmid
 		}); ok {
-			err = pool.Update(ctx, &proxmox.PoolUpdateOption{
-				Delete:          true,
-				VirtualMachines: fmt.Sprintf("%d", vmid),
+			err = px.Pools().Update(ctx, poolNameOld, &pools.UpdateOptions{
+				VMIDs:  []int{vmid},
+				Remove: new(true),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to remove vm %d from pool %s: %w", vmid, poolNameOld, err)
@@ -345,19 +435,19 @@ func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *k
 		return nil
 	}
 
-	pool, err := px.Client.Pool(ctx, poolName, "qemu")
+	pool, err := px.Pools().Get(ctx, poolName)
 	if err != nil {
 		return fmt.Errorf("failed to get pool %s: %w", poolName, err)
 	}
 
-	if _, ok := lo.Find(pool.Members, func(m proxmox.ClusterResource) bool {
-		return m.VMID == uint64(vmid)
+	if _, ok := lo.Find(pool.Members, func(m pools.PoolMember) bool {
+		return m.VMID == vmid
 	}); ok {
 		return nil
 	}
 
-	err = pool.Update(ctx, &proxmox.PoolUpdateOption{
-		VirtualMachines: fmt.Sprintf("%d", vmid),
+	err = px.Pools().Update(ctx, poolName, &pools.UpdateOptions{
+		VMIDs: []int{vmid},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to add vm %d to pool %s: %w", vmid, poolName, err)

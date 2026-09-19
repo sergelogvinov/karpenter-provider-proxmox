@@ -81,7 +81,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 			return reconcile.Result{}, err
 		}
 
-		return reconcile.Result{Requeue: true}, nil
+		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 	}
 
 	log.FromContext(ctx).V(1).Info("Syncing Proxmox Templates")
@@ -110,7 +110,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
 		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 			}
 
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))

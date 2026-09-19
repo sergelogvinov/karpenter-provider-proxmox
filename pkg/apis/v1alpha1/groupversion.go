@@ -19,9 +19,8 @@ package v1alpha1
 import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
 var (
@@ -29,8 +28,17 @@ var (
 	SchemeGroupVersion = schema.GroupVersion{Group: apis.Group, Version: "v1alpha1"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
-	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
+	SchemeBuilder = runtime.NewSchemeBuilder()
 
 	// AddToScheme adds the types in this group-version to the given scheme.
 	AddToScheme = SchemeBuilder.AddToScheme
 )
+
+// registerTypes adds the given types to SchemeBuilder for SchemeGroupVersion.
+func registerTypes(objects ...runtime.Object) {
+	SchemeBuilder.Register(func(scheme *runtime.Scheme) error {
+		scheme.AddKnownTypes(SchemeGroupVersion, objects...)
+
+		return nil
+	})
+}

@@ -25,7 +25,6 @@ import (
 
 	"github.com/go-logr/logr"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
@@ -154,7 +153,7 @@ func (p *staticPolicy) Allocate(op *resources.VMResources) error {
 		return fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, p.availableCPUs.Size()-p.assignedCPUs)
 	}
 
-	NUMANodes := make(map[int]goproxmox.NUMANodeState, p.cpuTopology.CPUDetails.NUMANodes().Size())
+	NUMANodes := make(map[int]resources.NUMANodeState, p.cpuTopology.CPUDetails.NUMANodes().Size())
 	availableCPUs := cpuset.New()
 
 	for i, node := range op.NUMANodes {
@@ -187,7 +186,7 @@ func (p *staticPolicy) Allocate(op *resources.VMResources) error {
 	for _, i := range p.cpuTopology.CPUDetails.NUMANodes().List() {
 		numaCPUs := op.CPUSet.Intersection(p.cpuTopology.CPUDetails.CPUsInNUMANodes(i))
 		if numaCPUs.Size() > 0 {
-			NUMANodes[i] = goproxmox.NUMANodeState{
+			NUMANodes[i] = resources.NUMANodeState{
 				CPUs:   fmt.Sprintf("%d-%d", CPUinx, CPUinx+numaCPUs.Size()-1),
 				Memory: op.Memory / 1024 / 1024,
 				Policy: "bind",
@@ -199,7 +198,7 @@ func (p *staticPolicy) Allocate(op *resources.VMResources) error {
 
 	if len(NUMANodes) > 0 {
 		if op.NUMANodes == nil {
-			op.NUMANodes = make(map[int]goproxmox.NUMANodeState, len(NUMANodes))
+			op.NUMANodes = make(map[int]resources.NUMANodeState, len(NUMANodes))
 		}
 
 		maps.Copy(op.NUMANodes, NUMANodes)

@@ -19,7 +19,6 @@ package nodesettings
 import (
 	"testing"
 
-	"github.com/luthermonson/go-proxmox"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
@@ -28,22 +27,18 @@ import (
 func TestNodeSettingsAMDEPYC(t *testing.T) {
 	testCases := []struct {
 		name     string
-		node     *proxmox.Node
+		facts    cpuFacts
 		settings *settings.NodeSettings
 		error    error
 	}{
 		{
 			name: "AMD EPYC 9454P 48-Core Processor",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "96 x AMD EPYC 9454P 48-Core Processor (1 Socket)",
-					Sockets: 1,
-					Cores:   48,
-					CPUs:    96,
-				},
-				Memory: proxmox.Memory{
-					Total: 256 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "96 x AMD EPYC 9454P 48-Core Processor (1 Socket)",
+				Sockets:     1,
+				Cores:       48,
+				CPUs:        96,
+				MemoryTotal: 256 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:        48,
@@ -72,16 +67,12 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 		},
 		{
 			name: "AMD EPYC 9554 64-Core Processor",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "128 x AMD EPYC 9554 64-Core Processor (1 Socket)",
-					Sockets: 1,
-					Cores:   64,
-					CPUs:    128,
-				},
-				Memory: proxmox.Memory{
-					Total: 256 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "128 x AMD EPYC 9554 64-Core Processor (1 Socket)",
+				Sockets:     1,
+				Cores:       64,
+				CPUs:        128,
+				MemoryTotal: 256 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:        64,
@@ -111,16 +102,12 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 		{
 			// https://www.spec.org/cpu2017/results/res2026q1/cpu2017-20251217-50889.pdf
 			name: "AMD EPYC 9355 32-Core Processor",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "128 x AMD EPYC 9355 32-Core Processor (2 Socket)",
-					Sockets: 2,
-					Cores:   64,
-					CPUs:    128,
-				},
-				Memory: proxmox.Memory{
-					Total: 512 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "128 x AMD EPYC 9355 32-Core Processor (2 Socket)",
+				Sockets:     2,
+				Cores:       64,
+				CPUs:        128,
+				MemoryTotal: 512 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:        64,
@@ -169,7 +156,7 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var err error
 
-			settings, err := nodeSettingsAMDEPYC(tc.node)
+			settings, err := nodeSettingsAMDEPYC(tc.facts)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 
@@ -185,22 +172,18 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 func TestNodeSettingsAMD(t *testing.T) {
 	testCases := []struct {
 		name     string
-		node     *proxmox.Node
+		facts    cpuFacts
 		settings *settings.NodeSettings
 		error    error
 	}{
 		{
 			name: "AMD Ryzen 7 PRO 8700GE",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "16 x AMD Ryzen 7 PRO 8700GE w/ Radeon 780M Graphics (1 Socket)",
-					Sockets: 1,
-					Cores:   8,
-					CPUs:    16,
-				},
-				Memory: proxmox.Memory{
-					Total: 32 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "16 x AMD Ryzen 7 PRO 8700GE w/ Radeon 780M Graphics (1 Socket)",
+				Sockets:     1,
+				Cores:       8,
+				CPUs:        16,
+				MemoryTotal: 32 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:   8,
@@ -220,7 +203,7 @@ func TestNodeSettingsAMD(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var err error
 
-			settings, err := nodeSettingsAMD(tc.node)
+			settings, err := nodeSettingsAMD(tc.facts)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 
@@ -236,22 +219,18 @@ func TestNodeSettingsAMD(t *testing.T) {
 func TestNodeSettingsIntel(t *testing.T) {
 	testCases := []struct {
 		name     string
-		node     *proxmox.Node
+		facts    cpuFacts
 		settings *settings.NodeSettings
 		error    error
 	}{
 		{
 			name: "Intel i7-8700",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "12 x Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz (1 Socket)",
-					Sockets: 1,
-					Cores:   6,
-					CPUs:    12,
-				},
-				Memory: proxmox.Memory{
-					Total: 32 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "12 x Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz (1 Socket)",
+				Sockets:     1,
+				Cores:       6,
+				CPUs:        12,
+				MemoryTotal: 32 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:        6,
@@ -268,16 +247,12 @@ func TestNodeSettingsIntel(t *testing.T) {
 		},
 		{
 			name: "Intel Xeon E5-2690 v4 dual socket",
-			node: &proxmox.Node{
-				CPUInfo: proxmox.CPUInfo{
-					Model:   "56 x Intel(R) Xeon(R) CPU E5-2690 v4 @ 2.60GHz (2 Socket)",
-					Sockets: 2,
-					Cores:   28,
-					CPUs:    56,
-				},
-				Memory: proxmox.Memory{
-					Total: 32 * 1024 * 1024 * 1024,
-				},
+			facts: cpuFacts{
+				Model:       "56 x Intel(R) Xeon(R) CPU E5-2690 v4 @ 2.60GHz (2 Socket)",
+				Sockets:     2,
+				Cores:       28,
+				CPUs:        56,
+				MemoryTotal: 32 * 1024 * 1024 * 1024,
 			},
 			settings: &settings.NodeSettings{
 				NumCores:        28,
@@ -302,7 +277,7 @@ func TestNodeSettingsIntel(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var err error
 
-			settings, err := nodeSettingsIntel(tc.node)
+			settings, err := nodeSettingsIntel(tc.facts)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 

@@ -21,11 +21,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
+	"github.com/diskfs/go-diskfs/backend/file"
+	"github.com/diskfs/go-diskfs/filesystem/iso9660"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/storage"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/tasks"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
@@ -39,6 +44,18 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
+// cloudInitDrive is the CD-ROM slot the custom NoCloud cloud-init ISO is
+// attached to.
+const cloudInitDrive = "ide2"
+
+// cloudInitVolumeLabel is the ISO9660 volume label cloud-init's NoCloud
+// datasource looks for.
+const cloudInitVolumeLabel = "cidata"
+
+// cloudInitISOBlockSize is the sector size used when building the
+// cloud-init ISO, matching the old client's default.
+const cloudInitISOBlockSize = 2048
+
 func (p *DefaultProvider) attachCloudInitISO(
 	ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
@@ -49,65 +66,222 @@ func (p *DefaultProvider) attachCloudInitISO(
 	zone string,
 	vmID int,
 ) error {
-	px, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.Get(region)
 	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+		return fmt.Errorf("failed to get proxmox client with region name %s: %v", region, err)
 	}
 
-	node, err := px.Node(ctx, zone)
+	cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmID, nil)
 	if err != nil {
-		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
+		return fmt.Errorf("unable to get vm config for vm %d: %w", vmID, err)
 	}
 
-	vm, err := node.VirtualMachine(ctx, vmID)
-	if err != nil {
-		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
-	}
-
-	userdata, metadata, vendordata, networkconfig, err := p.generateCloudInitVars(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, vm)
+	userdata, metadata, vendordata, networkconfig, err := p.generateCloudInitVars(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, vmID, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to generate cloud-init for vm %d in region %s: %v", vmID, region, err)
 	}
 
-	err = vm.CloudInit(ctx, "ide2", userdata, metadata, vendordata, networkconfig)
+	isoName := fmt.Sprintf("vm-%d-custom-cloudinit.iso", vmID)
+
+	isoPath, cleanup, err := buildCloudInitISO(isoName, userdata, metadata, vendordata, networkconfig)
+	defer cleanup()
+
+	if err != nil {
+		return fmt.Errorf("failed to build cloud-init ISO for vm %d: %v", vmID, err)
+	}
+
+	storageID, err := findISOStorage(ctx, px, zone)
+	if err != nil {
+		return fmt.Errorf("failed to find an iso-capable storage on node %s in region %s: %v", zone, region, err)
+	}
+
+	isoFile, err := os.Open(isoPath)
+	if err != nil {
+		return fmt.Errorf("failed to open cloud-init ISO for vm %d: %v", vmID, err)
+	}
+	defer isoFile.Close()
+
+	uploadUPID, err := px.Nodes(zone).Storage().Upload(ctx, storageID, &storage.UploadOptions{
+		Content:  "iso",
+		Filename: isoName,
+		File:     isoFile,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to upload cloud-init ISO for vm %d: %v", vmID, err)
+	}
+
+	if uploadUPID != "" {
+		if err = px.Nodes(zone).Tasks().Wait(ctx, uploadUPID, &tasks.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
+			return fmt.Errorf("failed to upload cloud-init ISO for vm %d: %v", vmID, err)
+		}
+	}
+
+	attachUPID, err := px.Nodes(zone).Qemu().AttachISO(ctx, vmID, &qemu.AttachISOOptions{
+		Drive:  cloudInitDrive,
+		Volume: fmt.Sprintf("%s:iso/%s", storageID, isoName),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
+	}
+
+	if attachUPID != "" {
+		if err = px.Nodes(zone).Tasks().Wait(ctx, attachUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+			return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
+		}
 	}
 
 	return nil
 }
 
+// detachCloudInitISO ejects and removes the custom cloud-init ISO attached
+// by attachCloudInitISO, if any. Rather than tracking attachment with a
+// marker tag (the old client's approach), it re-reads the guest's current
+// CD-ROM slot and acts only if something is actually mounted there — see
+// docs/migration.md §7.2 for why.
 func (p *DefaultProvider) detachCloudInitISO(
 	ctx context.Context,
 	region string,
 	zone string,
 	vmID int,
 ) error {
-	px, err := p.cluster.GetProxmoxCluster(region)
+	px, err := p.cluster.Get(region)
 	if err != nil {
-		return fmt.Errorf("failed to get proxmox cluster with region name %s: %v", region, err)
+		return fmt.Errorf("failed to get proxmox client with region name %s: %v", region, err)
 	}
 
-	node, err := px.Node(ctx, zone)
+	cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmID, nil)
 	if err != nil {
-		return fmt.Errorf("unable to find node with name %s: %w", zone, err)
+		return fmt.Errorf("unable to get vm config for vm %d: %w", vmID, err)
 	}
 
-	vm, err := node.VirtualMachine(ctx, vmID)
-	if err != nil {
-		return fmt.Errorf("unable to find vm with id %d: %w", vmID, err)
+	drive, ok := cfg.IDE[2]
+	if !ok || drive.File == "" || drive.File == "none" {
+		return nil
 	}
 
-	if vm.HasTag(proxmox.MakeTag(proxmox.TagCloudInit)) {
-		err = vm.UnmountCloudInitISO(ctx, "ide2")
-		if err != nil {
+	storageID, volume, ok := strings.Cut(drive.File, ":")
+	if !ok {
+		return nil
+	}
+
+	detachUPID, err := px.Nodes(zone).Qemu().DetachISO(ctx, vmID, cloudInitDrive)
+	if err != nil {
+		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
+	}
+
+	if detachUPID != "" {
+		if err = px.Nodes(zone).Tasks().Wait(ctx, detachUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
 			return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
 		}
+	}
 
-		vm.RemoveTag(ctx, proxmox.MakeTag(proxmox.TagCloudInit))
+	deleteUPID, err := px.Nodes(zone).Storage().Content(storageID).Delete(ctx, volume, 0)
+	if err != nil {
+		return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
+	}
+
+	if deleteUPID != "" {
+		if err = px.Nodes(zone).Tasks().Wait(ctx, deleteUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+			return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
+		}
 	}
 
 	return nil
+}
+
+// findISOStorage returns the id of the first enabled storage on zone that
+// can hold "iso" content, matching the old client's node.StorageISO
+// (first enabled storage whose content list includes "iso").
+func findISOStorage(ctx context.Context, px *proxmoxrest.Client, zone string) (string, error) {
+	storages, err := px.Nodes(zone).Storage().List(ctx, &storage.ListOptions{Content: []string{"iso"}})
+	if err != nil {
+		return "", err
+	}
+
+	for _, s := range storages {
+		if s.Enabled {
+			return s.Storage, nil
+		}
+	}
+
+	return "", fmt.Errorf("no enabled iso-capable storage found on node %s", zone)
+}
+
+// buildCloudInitISO renders userdata/metadata/vendordata/networkconfig into
+// a NoCloud-layout ISO9660 image at a temp path named filename, returning
+// that path and a cleanup func that removes it. cleanup is always safe to
+// call, even if err != nil.
+func buildCloudInitISO(filename, userdata, metadata, vendordata, networkconfig string) (isopath string, cleanup func(), err error) {
+	isopath = filepath.Join(os.TempDir(), filename)
+	cleanup = func() { os.Remove(isopath) }
+
+	isoFile, err := os.Create(isopath)
+	if err != nil {
+		return "", cleanup, err
+	}
+
+	if err := isoFile.Close(); err != nil {
+		return "", cleanup, err
+	}
+
+	iso, err := file.OpenFromPath(isopath, false)
+	if err != nil {
+		return "", cleanup, err
+	}
+
+	defer func() {
+		if cerr := iso.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	fs, err := iso9660.Create(iso, 0, 0, cloudInitISOBlockSize, "")
+	if err != nil {
+		return "", cleanup, err
+	}
+
+	if err = fs.Mkdir("/"); err != nil {
+		return "", cleanup, err
+	}
+
+	files := map[string]string{
+		"user-data": userdata,
+		"meta-data": metadata,
+	}
+	if vendordata != "" {
+		files["vendor-data"] = vendordata
+	}
+
+	if networkconfig != "" {
+		files["network-config"] = networkconfig
+	}
+
+	for name, content := range files {
+		rw, ferr := fs.OpenFile("/"+name, os.O_CREATE|os.O_RDWR)
+		if ferr != nil {
+			return "", cleanup, ferr
+		}
+
+		if _, ferr = rw.Write([]byte(content)); ferr != nil {
+			return "", cleanup, ferr
+		}
+
+		// The file handle must be closed before Finalize so its size is
+		// recorded correctly (go-diskfs's Joliet finalization reads it back).
+		if ferr = rw.Close(); ferr != nil {
+			return "", cleanup, ferr
+		}
+	}
+
+	if err = fs.Finalize(iso9660.FinalizeOptions{
+		RockRidge:        true,
+		Joliet:           true,
+		VolumeIdentifier: cloudInitVolumeLabel,
+	}); err != nil {
+		return "", cleanup, err
+	}
+
+	return isopath, cleanup, nil
 }
 
 func applyKubernetesConfiguration(
@@ -168,7 +342,8 @@ func (p *DefaultProvider) generateCloudInitVars(
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
-	vm *proxmox.VirtualMachine,
+	vmID int,
+	cfg *qemu.Config,
 ) (string, string, string, string, error) {
 	systemNamespace := strings.TrimSpace(os.Getenv("SYSTEM_NAMESPACE"))
 	if systemNamespace == "" {
@@ -211,12 +386,17 @@ func (p *DefaultProvider) generateCloudInitVars(
 		return "", "", "", "", fmt.Errorf("failed to create bootstrap token: %v", err)
 	}
 
+	uuid := ""
+	if cfg.SMBios1 != nil {
+		uuid = cfg.SMBios1.UUID
+	}
+
 	metadataValues := cloudinit.MetaData{
 		Hostname:     nodeClaim.Name,
-		InstanceID:   fmt.Sprintf("%d", vm.VMID),
+		InstanceID:   fmt.Sprintf("%d", vmID),
 		InstanceType: instanceType.Name,
-		InstanceUUID: goproxmox.GetVMUUID(vm),
-		ProviderID:   provider.GetProviderID(region, int(vm.VMID)),
+		InstanceUUID: uuid,
+		ProviderID:   provider.GetProviderID(region, vmID),
 		Region:       region,
 		Zone:         zone,
 		Tags:         nodeClass.Spec.Tags,
@@ -230,7 +410,7 @@ func (p *DefaultProvider) generateCloudInitVars(
 		ifaces = net.Ifaces
 	}
 
-	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(vm.VirtualMachineConfig, ifaces)
+	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(cfg, ifaces)
 
 	userdataValues := UserDataValues{
 		Metadata: metadataValues,

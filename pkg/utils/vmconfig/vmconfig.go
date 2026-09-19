@@ -20,16 +20,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
-
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	local "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/local"
 
 	"k8s.io/utils/cpuset"
 )
 
 // LoadVMConfig loads the VM configuration for the given VM ID.
-func LoadVMConfig(vmID int) (*proxmox.VirtualMachineConfig, error) {
-	vm, err := goproxmox.GetLocalVMConfig(vmID)
+func LoadVMConfig(vmID int) (*local.Config, error) {
+	vm, err := local.GetVMConfig(vmID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM config for VM %d: %w", vmID, err)
 	}

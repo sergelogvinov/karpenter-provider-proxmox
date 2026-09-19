@@ -341,5 +341,5 @@ type ProxmoxTemplateList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&ProxmoxTemplate{}, &ProxmoxTemplateList{})
+	registerTypes(&ProxmoxTemplate{}, &ProxmoxTemplateList{})
 }

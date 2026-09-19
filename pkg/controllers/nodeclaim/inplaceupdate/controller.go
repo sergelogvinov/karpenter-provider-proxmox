@@ -139,7 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		// Here, we are updating the status condition list
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(nodeClaimCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 			}
 
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))

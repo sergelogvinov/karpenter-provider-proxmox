@@ -86,10 +86,8 @@ func (c *CloudProvider) resolveInstanceTypeFromNode(ctx context.Context, node *c
 
 func (c *CloudProvider) nodeToNodeClaim(_ context.Context, instanceType *cloudprovider.InstanceType, node *corev1.Node) (*karpv1.NodeClaim, error) {
 	nodeClaim := &karpv1.NodeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:              node.Name,
-			CreationTimestamp: metav1.Time{Time: node.CreationTimestamp.Time},
-		},
+		Name:              node.Name,
+		CreationTimestamp: metav1.Time{Time: node.CreationTimestamp.Time},
 		Status: karpv1.NodeClaimStatus{
 			NodeName:   node.Name,
 			ProviderID: node.Spec.ProviderID,
