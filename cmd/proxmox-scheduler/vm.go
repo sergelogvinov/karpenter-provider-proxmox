@@ -20,8 +20,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/luthermonson/go-proxmox"
-
+	local "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/local"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/vmconfig"
 
@@ -171,7 +170,7 @@ func (r *SchedulerHandler) handleVMStop(_ context.Context, vmID int) error {
 }
 
 // updateVMInfo updates the tracker when a VM starts
-func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *proxmox.VirtualMachineConfig) error {
+func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *local.Config) error {
 	r.tracker.mu.Lock()
 	defer r.tracker.mu.Unlock()
 

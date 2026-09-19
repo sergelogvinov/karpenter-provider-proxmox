@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/luthermonson/go-proxmox"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 )
@@ -38,19 +38,23 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		template *proxmox.VirtualMachineConfig
+		template *qemu.Config
 		network  cloudinit.NetworkConfig
 	}{
 		{
 			name:     "empty",
-			template: &proxmox.VirtualMachineConfig{},
+			template: &qemu.Config{},
 			network:  cloudinit.NetworkConfig{},
 		},
 		{
 			name: "1-interface-defaults-with-mtu",
-			template: &proxmox.VirtualMachineConfig{
-				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1,tag=70,trunks=70,100,200",
-				IPConfig0:  "ip=dhcp,ip6=auto",
+			template: &qemu.Config{
+				Net: map[int]qemu.Net{
+					0: {Model: "virtio", MACAddr: "BC:24:11:CD:B9:41", Bridge: "vmbr0", Firewall: new(true), MTU: new(1), Tag: new(70), Trunks: []string{"70", "100", "200"}},
+				},
+				IPConfig: map[int]qemu.IPConfig{
+					0: {IPv4: "dhcp", IPv6: "auto"},
+				},
 				Nameserver: "1.1.1.1 2001:4860:4860::8888",
 			},
 			network: cloudinit.NetworkConfig{
@@ -68,9 +72,13 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 		},
 		{
 			name: "1-interface-defaults",
-			template: &proxmox.VirtualMachineConfig{
-				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,tag=70,trunks=70,100,200",
-				IPConfig0:  "ip=dhcp,ip6=auto",
+			template: &qemu.Config{
+				Net: map[int]qemu.Net{
+					0: {Model: "virtio", MACAddr: "BC:24:11:CD:B9:41", Bridge: "vmbr0", Firewall: new(true), Tag: new(70), Trunks: []string{"70", "100", "200"}},
+				},
+				IPConfig: map[int]qemu.IPConfig{
+					0: {IPv4: "dhcp", IPv6: "auto"},
+				},
 				Nameserver: "1.1.1.1 2001:4860:4860::8888",
 			},
 			network: cloudinit.NetworkConfig{
@@ -88,9 +96,13 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 		},
 		{
 			name: "1-interface-defaults-no-mtu-defined-in-node-iface",
-			template: &proxmox.VirtualMachineConfig{
-				Net0:       "virtio=BC:24:11:CD:B9:41,bridge=vmbr1,firewall=1,tag=70,trunks=70,100,200",
-				IPConfig0:  "ip=dhcp,ip6=auto",
+			template: &qemu.Config{
+				Net: map[int]qemu.Net{
+					0: {Model: "virtio", MACAddr: "BC:24:11:CD:B9:41", Bridge: "vmbr1", Firewall: new(true), Tag: new(70), Trunks: []string{"70", "100", "200"}},
+				},
+				IPConfig: map[int]qemu.IPConfig{
+					0: {IPv4: "dhcp", IPv6: "auto"},
+				},
 				Nameserver: "1.1.1.1 2001:4860:4860::8888",
 			},
 			network: cloudinit.NetworkConfig{
@@ -108,13 +120,17 @@ func TestGetNetworkConfigFromVirtualMachineConfig(t *testing.T) {
 		},
 		{
 			name: "2-interfaces",
-			template: &proxmox.VirtualMachineConfig{
-				Net0:         "virtio=BC:24:11:CD:B9:41,bridge=vmbr0,firewall=1,mtu=1500",
-				Net1:         "virtio=BC:24:11:EE:9A:23,bridge=vmbr1,firewall=0,mtu=1400",
-				IPConfig0:    "ip=dhcp,ip6=auto",
-				IPConfig1:    "ip=1.2.3.4/24",
+			template: &qemu.Config{
+				Net: map[int]qemu.Net{
+					0: {Model: "virtio", MACAddr: "BC:24:11:CD:B9:41", Bridge: "vmbr0", Firewall: new(true), MTU: new(1500)},
+					1: {Model: "virtio", MACAddr: "BC:24:11:EE:9A:23", Bridge: "vmbr1", Firewall: new(false), MTU: new(1400)},
+				},
+				IPConfig: map[int]qemu.IPConfig{
+					0: {IPv4: "dhcp", IPv6: "auto"},
+					1: {IPv4: "1.2.3.4/24"},
+				},
 				Nameserver:   "1.1.1.1 2001:4860:4860::8888",
-				Searchdomain: "example.com",
+				SearchDomain: "example.com",
 			},
 			network: cloudinit.NetworkConfig{
 				Interfaces: []cloudinit.InterfaceConfig{

@@ -14,17 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package proxmoxpool
+package local
 
 import "github.com/pkg/errors"
 
-var (
-	// ErrClustersNotFound is returned when a cluster is not found in the Proxmox
-	ErrClustersNotFound = errors.New("clusters not found")
-	// ErrHAGroupNotFound is returned when a ha-group is not found in the Proxmox
-	ErrHAGroupNotFound = errors.New("ha-group not found")
-	// ErrRegionNotFound is returned when a region is not found in the Proxmox
-	ErrRegionNotFound = errors.New("region not found")
-	// ErrInstanceNotFound is returned when an instance is not found in the Proxmox
-	ErrInstanceNotFound = errors.New("instance not found")
-)
+// ErrVirtualMachineNotFound is returned when no local VM config matches the
+// requested ID or filter.
+var ErrVirtualMachineNotFound = errors.New("VM machine not found")

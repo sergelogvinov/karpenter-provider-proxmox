@@ -18,6 +18,7 @@ package lifecycle
 
 import (
 	"context"
+	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"go.uber.org/multierr"
@@ -97,7 +98,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
 		if err := c.kubeClient.Patch(ctx, nodeClaim, client.MergeFromWithOptions(nodeClaimCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))

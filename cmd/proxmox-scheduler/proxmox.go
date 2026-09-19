@@ -26,10 +26,9 @@ import (
 
 	"github.com/go-logr/logr"
 	info "github.com/google/cadvisor/info/v1"
-	"github.com/luthermonson/go-proxmox"
 
-	goproxmox "github.com/sergelogvinov/go-proxmox"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	local "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/local"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 )
@@ -39,7 +38,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 	defer cancel()
 
 	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 30*time.Second, false, func(ctx context.Context) (bool, error) {
-		ready, err := goproxmox.ClusterReadyLocal(ctx)
+		ready, err := local.ClusterReady(ctx)
 		if err != nil {
 			logger.Error(err, "Failed to check Proxmox cluster quorum status, retrying...")
 
@@ -58,17 +57,17 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 		return fmt.Errorf("failed to wait for Proxmox cluster quorum: %w", err)
 	}
 
-	vmID, vm, err := goproxmox.GetLocalVMConfigByFilter(func(v *proxmox.VirtualMachineConfig) (bool, error) {
+	vmID, vm, err := local.GetVMConfigByFilter(func(v *local.Config) (bool, error) {
 		return v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
 	})
-	if err != nil && !errors.Is(err, goproxmox.ErrVirtualMachineNotFound) {
+	if err != nil && !errors.Is(err, local.ErrVirtualMachineNotFound) {
 		return fmt.Errorf("failed to check existing VMs: %w", err)
 	}
 
 	options := buildVMOptions(serverInfo, tp)
 
 	if vm != nil {
-		err = goproxmox.UpdateLocalVM(ctx, vmID, options)
+		err = local.UpdateVM(ctx, vmID, options)
 		if err != nil {
 			return fmt.Errorf("failed to update existing VM %d: %w", vmID, err)
 		}
@@ -76,7 +75,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 		return nil
 	}
 
-	vmID, err = goproxmox.GetLocalNextID(ctx)
+	vmID, err = local.GetNextID(ctx)
 	if err != nil || vmID == 0 {
 		if err != nil {
 			logger.Error(err, "Failed to get next VM ID")
@@ -87,7 +86,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 
 	logger.Info("Creating Proxmox VM for Karpenter discovery service", "vmID", vmID)
 
-	if err := goproxmox.CreateLocalVM(ctx, vmID, options); err != nil {
+	if err := local.CreateVM(ctx, vmID, options); err != nil {
 		return err
 	}
 

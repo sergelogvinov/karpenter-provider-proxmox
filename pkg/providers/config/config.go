@@ -26,7 +26,7 @@ import (
 
 	yaml "gopkg.in/yaml.v3"
 
-	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 )
 
 // Provider specifies the provider. Can be 'default' or 'capmox'
@@ -43,7 +43,7 @@ type ClustersConfig struct {
 	Features struct {
 		Provider Provider `yaml:"provider,omitempty"`
 	} `yaml:"features,omitempty"`
-	Clusters []*pxpool.ProxmoxCluster `yaml:"clusters,omitempty"`
+	Clusters []*pxpool.ClusterConfig `yaml:"clusters,omitempty"`
 }
 
 // ReadCloudConfig reads cloud config from a reader.

@@ -17,10 +17,16 @@ limitations under the License.
 package resources
 
 import (
-	goproxmox "github.com/sergelogvinov/go-proxmox"
-
 	"k8s.io/utils/cpuset"
 )
+
+// NUMANodeState describes the CPUs, memory, and NUMA policy assigned to a
+// single host NUMA node.
+type NUMANodeState struct {
+	CPUs   string
+	Memory uint64
+	Policy string
+}
 
 type VMResources struct {
 	ID int
@@ -38,5 +44,5 @@ type VMResources struct {
 	// CPUSet represents the specific CPUs on the Host assigned to the VM.
 	CPUSet cpuset.CPUSet
 	// NUMANodes represents the topology on the Host assigned to the VM.
-	NUMANodes map[int]goproxmox.NUMANodeState
+	NUMANodes map[int]NUMANodeState
 }

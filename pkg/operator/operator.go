@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -28,7 +29,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
-	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
@@ -59,7 +59,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
-	pxPool, err := pxpool.NewProxmoxPool(ctx, cfg.Clusters)
+	pxPool, err := pxpool.NewProxmoxPool(cfg.Clusters)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create proxmox cluster client")
 

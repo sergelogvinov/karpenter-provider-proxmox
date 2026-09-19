@@ -21,87 +21,89 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
-
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	resources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
 )
 
-// GetResourceFromVM extracts VMResources from a Proxmox VirtualMachine object.
-func GetResourceFromVM(vm *proxmox.VirtualMachine) (opt *resources.VMResources, err error) {
-	if vm == nil {
-		return nil, fmt.Errorf("virtual machine config cannot be nil")
+// GetResourceFromVMConfig extracts VMResources from a go-proxmox-rest cluster
+// resource listing entry and the guest's qemu Config.
+func GetResourceFromVMConfig(vmr *cluster.Resource, cfg *qemu.Config) (opt *resources.VMResources, err error) {
+	if vmr == nil || cfg == nil {
+		return nil, fmt.Errorf("virtual machine resource and config cannot be nil")
 	}
 
 	opt = &resources.VMResources{
-		ID:     int(vm.VMID),
-		CPUs:   vm.CPUs,
+		ID:     vmr.VMID,
+		CPUs:   vmr.MaxCPU,
 		CPUSet: cpuset.New(),
-		Memory: vm.MaxMem,
+		Memory: uint64(vmr.MaxMem),
 	}
 
-	if vm.VirtualMachineConfig != nil {
-		if vm.VirtualMachineConfig.Affinity != "" {
-			opt.Affinity = vm.VirtualMachineConfig.Affinity
-			opt.CPUSet, err = cpuset.Parse(vm.VirtualMachineConfig.Affinity)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse CPU affinity: %w", err)
-			}
+	if cfg.Affinity != "" {
+		opt.Affinity = cfg.Affinity
+		opt.CPUSet, err = cpuset.Parse(cfg.Affinity)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse CPU affinity: %w", err)
+		}
+	}
+
+	if len(cfg.NUMA) == 0 {
+		return opt, nil
+	}
+
+	opt.NUMANodes = make(map[int]resources.NUMANodeState)
+
+	numaIdx := make([]int, 0, len(cfg.NUMA))
+	for idx := range cfg.NUMA {
+		numaIdx = append(numaIdx, idx)
+	}
+
+	sort.Ints(numaIdx)
+
+	for _, idx := range numaIdx {
+		n := cfg.NUMA[idx]
+
+		if n.Memory == nil || *n.Memory <= 0 || len(n.CPUIDs) == 0 || len(n.HostNodes) == 0 {
+			continue
 		}
 
-		if vm.VirtualMachineConfig.Numa == 1 {
-			numas := vm.VirtualMachineConfig.MergeNumas()
+		cpus, err := cpuset.Parse(strings.Join(n.CPUIDs, ","))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse CPU IDs for NUMA node numa%d: %w", idx, err)
+		}
 
-			opt.NUMANodes = make(map[int]goproxmox.NUMANodeState)
+		hostNuma, err := cpuset.Parse(strings.Join(n.HostNodes, ","))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse Host Node Names for NUMA node numa%d: %w", idx, err)
+		}
 
-			for _, numa := range numas {
-				n := goproxmox.VMNUMA{}
+		cpuList := cpus.List()
 
-				err := n.UnmarshalString(numa)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse NUMA config: %w", err)
-				}
+		numHostNodes := hostNuma.Size()
+		if numHostNodes == 0 {
+			return nil, fmt.Errorf("NUMA host nodes set is empty for NUMA node numa%d", idx)
+		}
+		if numHostNodes > 1 && len(cpuList)%numHostNodes != 0 {
+			return nil, fmt.Errorf("cannot evenly distribute %d CPUs across %d NUMA nodes for NUMA node numa%d", len(cpuList), numHostNodes, idx)
+		}
 
-				if (n.Memory != nil && *n.Memory > 0) && len(n.CPUIDs) > 0 && len(n.HostNodeNames) > 0 {
-					cpus, err := cpuset.Parse(strings.Join(n.CPUIDs, ","))
-					if err != nil {
-						return nil, fmt.Errorf("failed to parse CPU IDs for NUMA node %s: %w", numa, err)
-					}
+		nodeCpus := cpus.Size() / numHostNodes
 
-					hostNuma, err := cpuset.Parse(strings.Join(n.HostNodeNames, ","))
-					if err != nil {
-						return nil, fmt.Errorf("failed to parse Host Node Names for NUMA node %s: %w", numa, err)
-					}
+		for i, nodeID := range hostNuma.List() {
+			old := opt.NUMANodes[nodeID]
 
-					cpuList := cpus.List()
+			oldCPUs, err := cpuset.Parse(old.CPUs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse existing CPUs for NUMA node %d: %w", nodeID, err)
+			}
 
-					numHostNodes := hostNuma.Size()
-					if numHostNodes == 0 {
-						return nil, fmt.Errorf("NUMA host nodes set is empty for NUMA node %s", numa)
-					}
-					if numHostNodes > 1 && len(cpuList)%numHostNodes != 0 {
-						return nil, fmt.Errorf("cannot evenly distribute %d CPUs across %d NUMA nodes for NUMA node %s", len(cpuList), numHostNodes, numa)
-					}
-
-					nodeCpus := cpus.Size() / numHostNodes
-
-					for i, nodeID := range hostNuma.List() {
-						old := opt.NUMANodes[nodeID]
-
-						oldCPUs, err := cpuset.Parse(old.CPUs)
-						if err != nil {
-							return nil, fmt.Errorf("failed to parse existing CPUs for NUMA node %d: %w", nodeID, err)
-						}
-
-						opt.NUMANodes[nodeID] = goproxmox.NUMANodeState{
-							Memory: old.Memory + uint64(*n.Memory)/uint64(numHostNodes),
-							CPUs:   oldCPUs.Union(cpuset.New(cpuList[i*nodeCpus : (i+1)*nodeCpus]...)).String(),
-							Policy: n.Policy,
-						}
-					}
-				}
+			opt.NUMANodes[nodeID] = resources.NUMANodeState{
+				Memory: old.Memory + uint64(*n.Memory)/uint64(numHostNodes),
+				CPUs:   oldCPUs.Union(cpuset.New(cpuList[i*nodeCpus : (i+1)*nodeCpus]...)).String(),
+				Policy: n.Policy,
 			}
 		}
 	}
@@ -143,10 +145,11 @@ func GenerateVMOptionsFromResources(res *resources.VMResources) (opts map[string
 			}
 
 			numaKey := fmt.Sprintf("numa%d", i)
-			numaConfig := goproxmox.VMNUMA{
-				Memory:        new(int(node.Memory)),
-				Policy:        node.Policy,
-				HostNodeNames: []string{fmt.Sprintf("%d", k)},
+			memory := int(node.Memory)
+			numaConfig := qemu.NUMA{
+				Memory:    &memory,
+				Policy:    node.Policy,
+				HostNodes: []string{fmt.Sprintf("%d", k)},
 			}
 
 			cpus, err := cpuset.Parse(node.CPUs)
@@ -157,10 +160,7 @@ func GenerateVMOptionsFromResources(res *resources.VMResources) (opts map[string
 			numaConfig.CPUIDs = []string{fmt.Sprintf("%d-%d", cpuIdx, cpuIdx+cpus.Size()-1)}
 			cpuIdx += cpus.Size()
 
-			opts[numaKey], err = numaConfig.ToString()
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate NUMA config string for NUMA node %d: %w", i, err)
-			}
+			opts[numaKey] = numaConfig.String()
 		}
 	}
 

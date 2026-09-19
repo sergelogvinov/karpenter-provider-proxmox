@@ -111,7 +111,7 @@ func (c *Controller) finalize(ctx context.Context, templateClass *v1alpha1.Proxm
 		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
 		if err := c.kubeClient.Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 			}
 
 			return reconcile.Result{}, client.IgnoreNotFound(fmt.Errorf("removing termination finalizer, %w", err))

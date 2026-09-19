@@ -19,6 +19,7 @@ package status
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"go.uber.org/multierr"
@@ -93,7 +94,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 		// Here, we are updating the status condition list
 		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{Requeue: true}, nil
+				return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))

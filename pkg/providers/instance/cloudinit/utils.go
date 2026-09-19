@@ -19,12 +19,12 @@ package cloudinit
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/luthermonson/go-proxmox"
-
-	goproxmox "github.com/sergelogvinov/go-proxmox"
+	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 )
 
@@ -34,42 +34,43 @@ const (
 	IPv6SLAAC = "auto"
 )
 
-func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig, nodeIfaces map[string]cloudcapacity.NetworkIfaceInfo) NetworkConfig {
+// GetNetworkConfigFromVirtualMachineConfig derives cloud-init network
+// config from a QEMU guest's configuration.
+func GetNetworkConfigFromVirtualMachineConfig(cfg *qemu.Config, nodeIfaces map[string]cloudcapacity.NetworkIfaceInfo) NetworkConfig {
 	network := NetworkConfig{}
 
-	if vmc.Nameserver != "" {
-		network.NameServers = strings.Split(vmc.Nameserver, " ")
+	if cfg.Nameserver != "" {
+		network.NameServers = strings.Split(cfg.Nameserver, " ")
 	}
 
-	if vmc.Searchdomain != "" {
-		network.SearchDomains = strings.Split(vmc.Searchdomain, " ")
+	if cfg.SearchDomain != "" {
+		network.SearchDomains = strings.Split(cfg.SearchDomain, " ")
 	}
 
-	nets := vmc.MergeNets()
-	if len(nets) == 0 {
+	if len(cfg.Net) == 0 {
 		return network
 	}
 
-	ipconfigs := vmc.MergeIPConfigs()
+	netIdx := make([]int, 0, len(cfg.Net))
+	for idx := range cfg.Net {
+		netIdx = append(netIdx, idx)
+	}
 
-	for i, net := range nets {
-		inx, _ := strconv.Atoi(strings.TrimPrefix(i, "net"))
+	sort.Ints(netIdx)
 
-		params := goproxmox.VMNetworkDevice{}
-		if err := params.UnmarshalString(net); err != nil {
-			continue
-		}
+	for _, idx := range netIdx {
+		net := cfg.Net[idx]
 
 		iface := InterfaceConfig{
-			Name:    fmt.Sprintf("eth%d", inx),
-			MacAddr: params.Virtio,
+			Name:    fmt.Sprintf("eth%d", idx),
+			MacAddr: net.MACAddr,
 		}
 
-		if params.MTU != nil {
-			iface.MTU = uint32(*params.MTU)
+		if net.MTU != nil {
+			iface.MTU = uint32(*net.MTU)
 		}
 
-		if i, ok := nodeIfaces[params.Bridge]; ok {
+		if i, ok := nodeIfaces[net.Bridge]; ok {
 			iface.NodeAddress4 = i.Address4
 			iface.NodeAddress6 = i.Address6
 			iface.NodeGateway4 = i.Gateway4
@@ -84,30 +85,25 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 			iface.MTU = 1500
 		}
 
-		ipparams := goproxmox.VMCloudInitIPConfig{}
-		if ipconfig, ok := ipconfigs[fmt.Sprintf("ipconfig%d", inx)]; ok {
-			if err := ipparams.UnmarshalString(ipconfig); err != nil {
-				continue
-			}
-
-			iface.Gateway4 = ipparams.GatewayIPv4
-			if ipparams.IPv4 != "" {
-				if ipparams.IPv4 == IPv4DHCP {
+		if ipconfig, ok := cfg.IPConfig[idx]; ok {
+			iface.Gateway4 = ipconfig.GatewayIPv4
+			if ipconfig.IPv4 != "" {
+				if ipconfig.IPv4 == IPv4DHCP {
 					iface.DHCPv4 = true
 				} else {
-					iface.Address4 = []string{ipparams.IPv4}
+					iface.Address4 = []string{ipconfig.IPv4}
 				}
 			}
 
-			iface.Gateway6 = ipparams.GatewayIPv6
-			if ipparams.IPv6 != "" {
-				switch ipparams.IPv6 {
+			iface.Gateway6 = ipconfig.GatewayIPv6
+			if ipconfig.IPv6 != "" {
+				switch ipconfig.IPv6 {
 				case IPv6DHCP:
 					iface.DHCPv6 = true
 				case IPv6SLAAC:
 					iface.SLAAC = true
 				default:
-					iface.Address6 = []string{ipparams.IPv6}
+					iface.Address6 = []string{ipconfig.IPv6}
 				}
 			}
 		}
@@ -118,25 +114,34 @@ func GetNetworkConfigFromVirtualMachineConfig(vmc *proxmox.VirtualMachineConfig,
 	return network
 }
 
-func SetNetworkConfig(ctx context.Context, vm *proxmox.VirtualMachine, networkConfig NetworkConfig) error {
+// SetNetworkConfig writes networkConfig's nameservers/search domains and
+// per-interface cloud-init IP configuration (ipconfigN) onto the guest,
+// for Proxmox's native cloud-init drive to pick up on its next
+// regeneration (see instanceNetworkSetup).
+func SetNetworkConfig(ctx context.Context, px *proxmoxrest.Client, zone string, vmID int, networkConfig NetworkConfig) error {
 	if len(networkConfig.Interfaces) == 0 {
 		return fmt.Errorf("no network interfaces found")
 	}
 
-	vmOptions := []proxmox.VirtualMachineOption{}
+	cfg := &qemu.Config{
+		IPConfig: make(map[int]qemu.IPConfig, len(networkConfig.Interfaces)),
+	}
 
 	if len(networkConfig.NameServers) > 0 {
-		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "nameserver", Value: strings.Join(networkConfig.NameServers, " ")})
+		cfg.Nameserver = strings.Join(networkConfig.NameServers, " ")
 	}
 
 	if len(networkConfig.SearchDomains) > 0 {
-		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: "searchdomain", Value: strings.Join(networkConfig.SearchDomains, " ")})
+		cfg.SearchDomain = strings.Join(networkConfig.SearchDomains, " ")
 	}
 
 	for _, iface := range networkConfig.Interfaces {
-		key := fmt.Sprintf("ipconfig%s", iface.Name[3:])
+		idx, err := strconv.Atoi(strings.TrimPrefix(iface.Name, "eth"))
+		if err != nil {
+			return fmt.Errorf("failed to parse interface index from name %q: %w", iface.Name, err)
+		}
 
-		ipconfig := goproxmox.VMCloudInitIPConfig{
+		ipconfig := qemu.IPConfig{
 			GatewayIPv4: iface.Gateway4,
 			GatewayIPv6: iface.Gateway6,
 		}
@@ -160,20 +165,8 @@ func SetNetworkConfig(ctx context.Context, vm *proxmox.VirtualMachine, networkCo
 			ipconfig.IPv6 = "auto"
 		}
 
-		val, err := ipconfig.ToString()
-		if err != nil {
-			return fmt.Errorf("failed to marshal ipconfig for interface %s: %v", iface.Name, err)
-		}
-
-		vmOptions = append(vmOptions, proxmox.VirtualMachineOption{Name: key, Value: val})
+		cfg.IPConfig[idx] = ipconfig
 	}
 
-	if len(vmOptions) > 0 {
-		_, err := vm.Config(ctx, vmOptions...)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return px.Nodes(zone).Qemu().UpdateConfig(ctx, vmID, cfg)
 }

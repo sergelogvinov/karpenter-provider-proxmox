@@ -26,14 +26,15 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
-	"github.com/luthermonson/go-proxmox"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/locks"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -114,7 +115,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 	}
 
 	if len(regions) == 0 {
-		regions = p.pool.GetRegions()
+		regions = p.pool.List()
 	}
 
 	installedZones := []string{} // templateClass.Status.InstalledZones
@@ -294,7 +295,7 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*In
 
 	instanceTemplates := []InstanceTemplateInfo{}
 
-	for _, region := range p.pool.GetRegions() {
+	for _, region := range p.pool.List() {
 		for _, info := range p.instanceTemplate[region] {
 			if info.Status == InstanceTemplateStatusAvailable {
 				for _, f := range filter {
@@ -322,21 +323,25 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 	instanceTemplates := 0
 
 	if len(regions) == 0 {
-		regions = p.pool.GetRegions()
+		regions = p.pool.List()
 	}
 
 	for _, region := range regions {
 		log.V(4).Info("Syncing instance template for region", "region", region)
 
-		cl, err := p.pool.GetProxmoxCluster(region)
+		cl, err := p.pool.Get(region)
 		if err != nil {
 			log.Error(err, "Failed to get proxmox cluster", "region", region)
 
 			continue
 		}
 
-		vms, err := cl.GetVMTemplatesByFilter(ctx, func(r *proxmox.ClusterResource) (bool, error) {
-			return r.Type == "qemu", nil
+		vms, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+			Type:      cluster.ResourceTypeVM,
+			GuestType: "qemu",
+			Match: func(r *cluster.Resource) (bool, error) {
+				return r.Template == 1, nil
+			},
 		})
 		if err != nil {
 			log.Error(err, "Failed to list VM resources", "region", region)
@@ -351,46 +356,46 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 				Name:       vm.Name,
 				Region:     region,
 				Zone:       vm.Node,
-				TemplateID: vm.VMID,
+				TemplateID: uint64(vm.VMID),
 				Status:     InstanceTemplateStatusUnknown,
 			}
 
-			vmRes, err := cl.GetVMTemplateConfig(ctx, int(vm.VMID))
+			cfg, err := cl.Nodes(vm.Node).Qemu().Config(ctx, vm.VMID, nil)
 			if err != nil {
 				log.Error(err, "Failed to get VM resource", "region", region, "node", vm.Node, "vmid", vm.VMID)
 
 				continue
 			}
 
-			if vmRes.VirtualMachineConfig != nil {
-				info.TemplateTags = strings.Split(vmRes.VirtualMachineConfig.Tags, ";")
-				info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(vmRes.VirtualMachineConfig.Meta, hashstructure.FormatV2, nil)))
+			if cfg.Tags != nil {
+				info.TemplateTags = *cfg.Tags
+			}
 
-				if strings.Contains(vmRes.VirtualMachineConfig.Description, "Hash: ") {
-					re := regexp.MustCompile(`Hash:\s*(\d+)`)
-					if matches := re.FindStringSubmatch(vmRes.VirtualMachineConfig.Description); len(matches) > 1 {
-						info.TemplateHash = strings.TrimSpace(matches[1])
-					}
+			info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(cfg.Meta, hashstructure.FormatV2, nil)))
+
+			if strings.Contains(cfg.Description, "Hash: ") {
+				re := regexp.MustCompile(`Hash:\s*(\d+)`)
+				if matches := re.FindStringSubmatch(cfg.Description); len(matches) > 1 {
+					info.TemplateHash = strings.TrimSpace(matches[1])
+				}
+			}
+
+			info.Status = InstanceTemplateStatusAvailable
+
+			for _, disk := range mergeDisks(cfg) {
+				storageID, _, _ := strings.Cut(disk, ":")
+
+				if info.TemplateStorageID == "" {
+					info.TemplateStorageID = storageID
 				}
 
-				info.Status = InstanceTemplateStatusAvailable
+				if info.TemplateStorageID != storageID {
+					log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "storageID", storageID)
 
-				disks := vmRes.VirtualMachineConfig.MergeDisks()
-				for _, disk := range disks {
-					storageID := strings.Split(disk, ":")[0]
+					info.TemplateStorageID = ""
+					info.Status = InstanceTemplateStatusMultipleStorageIDs
 
-					if info.TemplateStorageID == "" {
-						info.TemplateStorageID = storageID
-					}
-
-					if info.TemplateStorageID != storageID {
-						log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "storageID", storageID)
-
-						info.TemplateStorageID = ""
-						info.Status = InstanceTemplateStatusMultipleStorageIDs
-
-						break
-					}
+					break
 				}
 			}
 
@@ -404,4 +409,31 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 	log.V(1).Info("Instance templates updated", "instanceTemplates", instanceTemplates)
 
 	return nil
+}
+
+// mergeDisks collects every attached disk's backing volume ("storage:volume")
+// across cfg's SCSI/IDE/SATA/VirtIO drives, skipping entries with no real
+// backing volume (e.g. an empty ide2 cdrom, whose File is "none").
+func mergeDisks(cfg *qemu.Config) []string {
+	disks := make([]string, 0, len(cfg.SCSI)+len(cfg.IDE)+len(cfg.SATA)+len(cfg.VirtIO))
+
+	for _, d := range cfg.SCSI {
+		disks = append(disks, d.File)
+	}
+
+	for _, d := range cfg.IDE {
+		disks = append(disks, d.File)
+	}
+
+	for _, d := range cfg.SATA {
+		disks = append(disks, d.File)
+	}
+
+	for _, d := range cfg.VirtIO {
+		disks = append(disks, d.File)
+	}
+
+	return slices.DeleteFunc(disks, func(d string) bool {
+		return !strings.Contains(d, ":")
+	})
 }

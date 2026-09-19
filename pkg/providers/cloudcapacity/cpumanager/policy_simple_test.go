@@ -45,9 +45,7 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate zero CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-				},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
 			},
 			reserved: []int{},
 
@@ -58,12 +56,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate some CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -75,12 +71,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate some CPUs with specific reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},
@@ -92,12 +86,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate all available CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -109,12 +101,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate more than available CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -126,12 +116,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate more than available memory",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -143,12 +131,10 @@ func TestSimpleAllocate(t *testing.T) {
 			name: "allocate more than available CPUs with reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},
@@ -201,12 +187,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate zero CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -218,12 +202,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate some CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -235,12 +217,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate specific CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -252,12 +232,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate some CPUs with some specific reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},
@@ -269,12 +247,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate specific CPUs with specific reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},
@@ -286,12 +262,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate specific CPUs overlapped with specific reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},
@@ -303,12 +277,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate more CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -320,12 +292,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate more specific CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{},
@@ -337,12 +307,10 @@ func TestSimpleAllocateOrUpdate(t *testing.T) {
 			name: "allocate more specific CPUs with reserved CPUs",
 			topo: &topology.Topology{
 				CPUTopology: *topoDualSocketHT,
-				MemTopology: topology.MemTopology{
-					TotalMemory: 32 * 1024 * 1024 * 1024,
-					NUMANodes: map[int]uint64{
-						0: 16 * 1024 * 1024 * 1024,
-						1: 16 * 1024 * 1024 * 1024,
-					},
+				TotalMemory: 32 * 1024 * 1024 * 1024,
+				NUMANodes: map[int]uint64{
+					0: 16 * 1024 * 1024 * 1024,
+					1: 16 * 1024 * 1024 * 1024,
 				},
 			},
 			reserved: []int{0, 1},

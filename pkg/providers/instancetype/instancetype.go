@@ -162,7 +162,7 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 		case corev1.ResourceCPU:
 			price += 0.025 * v.AsApproximateFloat64()
 		case corev1.ResourceMemory:
-			price += 0.001 * v.AsApproximateFloat64() / (1e9)
+			price += 0.001 * v.AsApproximateFloat64() / 1e9
 		}
 	}
 

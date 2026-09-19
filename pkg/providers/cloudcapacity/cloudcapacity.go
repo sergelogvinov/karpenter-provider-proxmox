@@ -25,9 +25,9 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
-	proxmox "github.com/luthermonson/go-proxmox"
 
-	pxpool "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/proxmoxpool"
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	corev1 "k8s.io/api/core/v1"
@@ -156,18 +156,21 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 	networkIfaceInfo := make(map[string]NodeNetworkIfaceInfo)
 	zoneList := make(map[string][]string)
 
-	for _, region := range p.pool.GetRegions() {
+	for _, region := range p.pool.List() {
 		log.V(1).Info("Syncing capacity for region", "region", region)
 
-		cl, err := p.pool.GetProxmoxCluster(region)
+		cl, err := p.pool.Get(region)
 		if err != nil {
 			log.Error(err, "Failed to get proxmox cluster", "region", region)
 
 			continue
 		}
 
-		ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
-			return n.Status == "online", nil // nolint:goconst
+		ns, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+			Type: cluster.ResourceTypeNode,
+			Match: func(n *cluster.Resource) (bool, error) {
+				return n.Status == "online", nil // nolint:goconst
+			},
 		})
 		if err != nil {
 			log.Error(err, "Failed to get nodes for region", "region", region)
@@ -178,14 +181,16 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 		nodes := make([]string, 0, len(ns))
 
 		// Permission: Sys.Audit
-		for _, item := range ns {
+		for idx := range ns {
+			item := ns[idx]
+
 			log.V(4).Info("Processing node", "node", item.Node, "region", region, "maxCPU", item.MaxCPU, "maxMem", item.MaxMem)
 
 			key := fmt.Sprintf("%s/%s", region, item.Node)
 
 			nodes = append(nodes, item.Node)
 
-			nodeCapacity, err := getNodeCapacity(ctx, cl, region, item)
+			nodeCapacity, err := getNodeCapacity(ctx, cl, region, &item)
 			if err != nil {
 				log.Error(err, "Failed to get capacity for node", "node", item.Node, "region", region)
 
@@ -194,7 +199,7 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 
 			capacityInfo[key] = nodeCapacity
 
-			nodeIfaces, err := getNodeNetwork(ctx, cl, region, item)
+			nodeIfaces, err := getNodeNetwork(ctx, cl, region, &item)
 			if err != nil {
 				log.Error(err, "Failed to get network interfaces for node", "node", item.Node, "region", region)
 			}
@@ -235,15 +240,18 @@ func (p *DefaultProvider) UpdateNodeLoad(ctx context.Context) error {
 	for region := range p.zoneList {
 		log.V(4).Info("Syncing capacity for region", "region", region)
 
-		cl, err := p.pool.GetProxmoxCluster(region)
+		cl, err := p.pool.Get(region)
 		if err != nil {
 			log.Error(err, "Failed to get proxmox cluster", "region", region)
 
 			continue
 		}
 
-		ns, err := cl.GetNodeListByFilter(ctx, func(n *proxmox.ClusterResource) (bool, error) {
-			return n.Status == "online", nil // nolint:goconst
+		ns, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+			Type: cluster.ResourceTypeNode,
+			Match: func(n *cluster.Resource) (bool, error) {
+				return n.Status == "online", nil // nolint:goconst
+			},
 		})
 		if err != nil {
 			log.Error(err, "Failed to get nodes for region", "region", region)
@@ -274,22 +282,25 @@ func (p *DefaultProvider) SyncNodeStorageCapacity(ctx context.Context) error {
 
 	capacityInfo := map[string]NodeStorageCapacityInfo{}
 
-	for _, region := range p.pool.GetRegions() {
+	for _, region := range p.pool.List() {
 		log.V(1).Info("Syncing capacity for region", "region", region)
 
-		cl, err := p.pool.GetProxmoxCluster(region)
+		cl, err := p.pool.Get(region)
 		if err != nil {
 			log.Error(err, "Failed to get proxmox cluster", "region", region)
 
 			continue
 		}
 
-		storageResources, err := cl.GetClusterStoragesByFilter(ctx, func(r *proxmox.ClusterResource) (bool, error) {
-			capabilitys := strings.Split(r.Content, ",")
+		storageResources, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
+			Type: cluster.ResourceTypeStorage,
+			Match: func(r *cluster.Resource) (bool, error) {
+				capabilitys := strings.Split(r.StorageContent, ",")
 
-			return r.Status == "available" && slices.ContainsFunc(capabilitys, func(c string) bool {
-				return c == "images" || c == "iso" || c == "import"
-			}), nil
+				return r.Status == "available" && slices.ContainsFunc(capabilitys, func(c string) bool {
+					return c == "images" || c == "iso" || c == "import"
+				}), nil
+			},
 		})
 		if err != nil {
 			log.Error(err, "Failed to get storages for region", "region", region)
@@ -308,7 +319,7 @@ func (p *DefaultProvider) SyncNodeStorageCapacity(ctx context.Context) error {
 				Zones:        []string{item.Node},
 				Shared:       item.Shared == 1,
 				Type:         item.PluginType,
-				Capabilities: strings.Split(item.Content, ","),
+				Capabilities: strings.Split(item.StorageContent, ","),
 			}
 
 			capacityInfo[key] = info
