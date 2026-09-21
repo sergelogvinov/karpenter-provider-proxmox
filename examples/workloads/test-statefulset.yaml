@@ -29,6 +29,9 @@ spec:
                     values:
                       - alpine
               topologyKey: kubernetes.io/hostname
+      nodeSelector:
+        # node-role.kubernetes.io/worker: ""
+        project.io/node-pool: worker
       enableServiceLinks: false
       containers:
         - name: alpine

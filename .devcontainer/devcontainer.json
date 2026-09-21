@@ -22,7 +22,7 @@
         },
         "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
         "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
-            "version": "v1.33.4"
+            "version": "v1.36.4"
         }
     },
     "customizations": {
