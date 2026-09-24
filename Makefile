@@ -56,7 +56,7 @@ To build this project, you must have the following installed:
 
 - git
 - make
-- golang 1.20+
+- golang 1.27+
 - golangci-lint
 
 endef
@@ -136,6 +136,14 @@ lint: ## Lint Code
 .PHONY: unit
 unit: ## Unit Tests
 	go test -tags=unit $(shell go list ./...) $(TESTARGS)
+
+.PHONY: e2e
+e2e: ## Run all e2e tests against the cluster
+	go test -tags=e2e -count=1 -timeout=90m -v ./test/e2e/... $(TESTARGS)
+
+.PHONY: e2e-%
+e2e-%: ## Run one e2e scenario
+	go test -tags=e2e -count=1 -timeout=90m -v ./test/e2e/$*/... $(TESTARGS)
 
 .PHONY: licenses
 licenses:
