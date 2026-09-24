@@ -139,6 +139,8 @@ func TestProxmoxTemplateReady(t *testing.T) {
 
 	cancel()
 	done()
+
+	f.DescribeOnFailure(err == nil, ready)
 	require.NoError(err, "proxmoxtemplate %s never became ready", name)
 
 	f.Logf("proxmoxtemplate %s ready, waiting %s before checking status.zones", name, zoneSettleDelay)
@@ -148,10 +150,13 @@ func TestProxmoxTemplateReady(t *testing.T) {
 	err = f.Client.Objects.Get(ctx, client.ObjectKeyFromObject(ready), ready)
 
 	cancel()
+
+	f.DescribeOnFailure(err == nil, ready)
 	require.NoError(err, "failed to refresh proxmoxtemplate %s after settle delay", name)
 
 	f.Logf("proxmoxtemplate %s status.zones=%v", name, ready.Status.Zones)
 
+	f.DescribeOnFailure(len(ready.Status.Zones) == len(expectedZones), ready)
 	require.Len(ready.Status.Zones, len(expectedZones),
 		"proxmoxtemplate %s reports %d zone(s) (%v), region %s currently has %d matching zone(s) (%v)",
 		name, len(ready.Status.Zones), ready.Status.Zones, region, len(expectedZones), expectedZones)
@@ -205,6 +210,8 @@ func TestProxmoxTemplateReady(t *testing.T) {
 
 	cancel()
 	done()
+
+	f.DescribeOnFailure(err == nil, unmanagedReady)
 	require.NoError(err, "proxmoxunmanagedtemplate %s never became ready", unmanagedName)
 
 	f.Logf("proxmoxunmanagedtemplate %s ready, waiting %s before checking status.zones", unmanagedName, zoneSettleDelay)
@@ -214,11 +221,41 @@ func TestProxmoxTemplateReady(t *testing.T) {
 	err = f.Client.Objects.Get(ctx, client.ObjectKeyFromObject(unmanagedReady), unmanagedReady)
 
 	cancel()
+
+	f.DescribeOnFailure(err == nil, unmanagedReady)
 	require.NoError(err, "failed to refresh proxmoxunmanagedtemplate %s after settle delay", unmanagedName)
 
 	f.Logf("proxmoxunmanagedtemplate %s status.zones=%v", unmanagedName, unmanagedReady.Status.Zones)
 
+	f.DescribeOnFailure(sameElements(ready.Status.Zones, unmanagedReady.Status.Zones), ready, unmanagedReady)
 	require.ElementsMatch(ready.Status.Zones, unmanagedReady.Status.Zones,
 		"proxmoxunmanagedtemplate %s zones %v do not match proxmoxtemplate %s zones %v - tags %v should have matched exactly the templates it created",
 		unmanagedName, unmanagedReady.Status.Zones, name, ready.Status.Zones, tags)
+}
+
+// sameElements reports whether a and b contain the same elements
+// regardless of order - the same semantics require.ElementsMatch checks -
+// so DescribeOnFailure can decide whether that assertion is about to fail
+// without duplicating testify's own comparison and failure reporting.
+func sameElements(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	counts := make(map[string]int, len(a))
+	for _, v := range a {
+		counts[v]++
+	}
+
+	for _, v := range b {
+		counts[v]--
+	}
+
+	for _, c := range counts {
+		if c != 0 {
+			return false
+		}
+	}
+
+	return true
 }

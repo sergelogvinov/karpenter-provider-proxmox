@@ -113,6 +113,46 @@ func NewProxmoxUnmanagedTemplate(opts ProxmoxUnmanagedTemplateOptions) *v1alpha1
 // ProxmoxNodeClass - see docs/deploy/nodepool.yaml.
 const nodeClassKind = "ProxmoxNodeClass"
 
+// unmanagedTemplateKind is the Kind a ProxmoxNodeClass's instanceTemplateRef
+// uses to point at a ProxmoxUnmanagedTemplate - see docs/nodeclass.md.
+const unmanagedTemplateKind = "ProxmoxUnmanagedTemplate"
+
+// ProxmoxNodeClassOptions parameterizes NewProxmoxNodeClass.
+type ProxmoxNodeClassOptions struct {
+	Name string
+
+	// UnmanagedTemplateName is the name of the (pre-existing)
+	// ProxmoxUnmanagedTemplate this NodeClass's spec.instanceTemplateRef
+	// points at.
+	UnmanagedTemplateName string
+
+	// BootDeviceSize/BootDeviceStorage are spec.bootDevice's fields - e.g.
+	// "30Gi" and "local".
+	BootDeviceSize    string
+	BootDeviceStorage string
+}
+
+// NewProxmoxNodeClass builds a minimal, valid ProxmoxNodeClass referencing
+// an existing ProxmoxUnmanagedTemplate by name, mirroring
+// docs/nodeclass.md's example.
+func NewProxmoxNodeClass(opts ProxmoxNodeClassOptions) *v1alpha1.ProxmoxNodeClass {
+	size := resource.MustParse(opts.BootDeviceSize)
+
+	return &v1alpha1.ProxmoxNodeClass{
+		Name: opts.Name,
+		Spec: v1alpha1.ProxmoxNodeClassSpec{
+			InstanceTemplateRef: &v1alpha1.InstanceTemplateClassReference{
+				Kind: unmanagedTemplateKind,
+				Name: opts.UnmanagedTemplateName,
+			},
+			BootDevice: &v1alpha1.BlockDevice{
+				Size:    &size,
+				Storage: opts.BootDeviceStorage,
+			},
+		},
+	}
+}
+
 // NodePoolTestLabelKey is the label the e2e suite's NodePool template
 // applies to every node it launches (see NewNodePool), value set to the
 // NodePool's own name.
