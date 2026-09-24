@@ -8,7 +8,7 @@ go 1.27.1
 require (
 	github.com/apparentlymart/go-cidr v1.1.1
 	github.com/awslabs/operatorpkg v0.0.0-20260708223819-4da4c353c5fa
-	github.com/diskfs/go-diskfs v1.9.3
+	github.com/diskfs/go-diskfs v1.9.4
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-logr/logr v1.4.3
 	github.com/google/cadvisor v0.57.0
