@@ -69,6 +69,23 @@ type Config struct {
 	TemplateImageName      string
 	TemplateStorageIDs     []string
 	TemplateBridge         string
+
+	// Namespace is where the lifecycle scenario's workloads are created.
+	Namespace string
+
+	// NodeClassName/UnmanagedTemplateName name the ProxmoxNodeClass and
+	// ProxmoxUnmanagedTemplate the lifecycle scenario expects to already
+	// exist in the target cluster (see docs/deploy/nodepool.yaml) - the
+	// suite never creates either itself, only the NodePool referencing
+	// them.
+	NodeClassName         string
+	UnmanagedTemplateName string
+
+	// NodeTimeout is the per-wait timeout for anything that needs a new
+	// Proxmox VM to boot, join the cluster and go Ready (a NodePool
+	// launching a node, a StatefulSet replica scheduling onto one) -
+	// separate from, and typically much longer than, Timeout.
+	NodeTimeout time.Duration
 }
 
 // LoadConfig builds a Config from environment variables.
@@ -82,6 +99,10 @@ func LoadConfig() Config {
 		TemplateSourceImageURL: getEnvDefault("E2E_TEMPLATE_IMAGE_URL", "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"),
 		TemplateImageName:      getEnvDefault("E2E_TEMPLATE_IMAGE_NAME", "e2e-ubuntu-amd64.qcow2"),
 		TemplateBridge:         getEnvDefault("E2E_TEMPLATE_BRIDGE", "vmbr0"),
+		Namespace:              getEnvDefault("E2E_NAMESPACE", "default"),
+		NodeClassName:          getEnvDefault("E2E_NODE_CLASS", "default"),
+		UnmanagedTemplateName:  getEnvDefault("E2E_UNMANAGED_TEMPLATE", "default"),
+		NodeTimeout:            getEnvDurationDefault("E2E_NODE_TIMEOUT", 10*time.Minute),
 	}
 
 	for id := range strings.SplitSeq(getEnvDefault("E2E_TEMPLATE_STORAGE_IDS", "local"), ",") {
