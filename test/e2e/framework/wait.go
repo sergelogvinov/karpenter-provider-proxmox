@@ -60,6 +60,20 @@ func WaitForProxmoxTemplateReady(ctx context.Context, cli client.Client, name st
 	return tmpl, err
 }
 
+// WaitForProxmoxTemplateNotReady polls the named ProxmoxTemplate until its
+// aggregate "Ready" condition reports anything other than True - e.g. when
+// none of spec.storageIDs resolve to real Proxmox storage, in which case
+// the controller never sets status.imageID/zones at all and leaves Ready
+// Unknown rather than False (see
+// pkg/controllers/nodetemplateclass/status/instancetemplate.go).
+func WaitForProxmoxTemplateNotReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxTemplate, error) {
+	tmpl := &v1alpha1.ProxmoxTemplate{}
+
+	err := waitForReadyState(ctx, cli, tmpl, "proxmoxtemplate", name, false, timeout)
+
+	return tmpl, err
+}
+
 // WaitForProxmoxTemplateGone polls until the named ProxmoxTemplate no
 // longer exists - i.e. its termination finalizer (see
 // pkg/controllers/nodetemplateclass/termination) has finished tearing down
@@ -80,6 +94,20 @@ func WaitForProxmoxUnmanagedTemplateReady(ctx context.Context, cli client.Client
 	return tmpl, err
 }
 
+// WaitForProxmoxUnmanagedTemplateNotReady polls the named
+// ProxmoxUnmanagedTemplate until its aggregate "Ready" condition reports
+// anything other than True - e.g. when spec.tags/templateName match no
+// Proxmox VM template at all, which the controller reports as an explicit
+// False condition with reason "TemplatesNotFound" (see
+// pkg/controllers/nodetemplateunmanagedclass/status/instancetemplate.go).
+func WaitForProxmoxUnmanagedTemplateNotReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxUnmanagedTemplate, error) {
+	tmpl := &v1alpha1.ProxmoxUnmanagedTemplate{}
+
+	err := waitForReadyState(ctx, cli, tmpl, "proxmoxunmanagedtemplate", name, false, timeout)
+
+	return tmpl, err
+}
+
 // WaitForProxmoxUnmanagedTemplateGone polls until the named
 // ProxmoxUnmanagedTemplate no longer exists. Unlike ProxmoxTemplate, it
 // carries no termination finalizer - it never owns the Proxmox VM
@@ -95,6 +123,19 @@ func WaitForProxmoxNodeClassReady(ctx context.Context, cli client.Client, name s
 	nodeClass := &v1alpha1.ProxmoxNodeClass{}
 
 	err := waitForReady(ctx, cli, nodeClass, "proxmoxnodeclass", name, timeout)
+
+	return nodeClass, err
+}
+
+// WaitForProxmoxNodeClassNotReady polls the named ProxmoxNodeClass until
+// its aggregate "Ready" condition reports anything other than True - e.g.
+// after spec.metadataOptions.type is switched to "cdrom" but the
+// referenced templatesRef secret doesn't exist yet (see
+// pkg/controllers/nodeclass/status/metadataoptions.go).
+func WaitForProxmoxNodeClassNotReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxNodeClass, error) {
+	nodeClass := &v1alpha1.ProxmoxNodeClass{}
+
+	err := waitForReadyState(ctx, cli, nodeClass, "proxmoxnodeclass", name, false, timeout)
 
 	return nodeClass, err
 }
@@ -156,6 +197,14 @@ func WaitForStatefulSetReplicasReady(ctx context.Context, cli client.Client, nam
 // waitForReady polls obj (a zero-value pointer the caller wants filled in)
 // by name until its aggregate "Ready" condition reports True.
 func waitForReady[T readyObject](ctx context.Context, cli client.Client, obj T, kind, name string, timeout time.Duration) error {
+	return waitForReadyState(ctx, cli, obj, kind, name, true, timeout)
+}
+
+// waitForReadyState polls obj (a zero-value pointer the caller wants
+// filled in) by name until its aggregate "Ready" condition reports True
+// (want=true) or anything other than True (want=false). An object with no
+// Ready condition yet is treated as not-ready.
+func waitForReadyState[T readyObject](ctx context.Context, cli client.Client, obj T, kind, name string, want bool, timeout time.Duration) error {
 	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
 		err := cli.Get(ctx, client.ObjectKey{Name: name}, obj)
 
@@ -168,14 +217,21 @@ func waitForReady[T readyObject](ctx context.Context, cli client.Client, obj T, 
 
 		for _, cond := range obj.GetConditions() {
 			if cond.Type == status.ConditionReady {
-				return cond.Status == metav1.ConditionTrue, nil
+				return (cond.Status == metav1.ConditionTrue) == want, nil
 			}
 		}
 
+		// No Ready condition yet: the controller has not reconciled the
+		// object, so neither state has been reported.
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%s %s did not become ready: %w", kind, name, err)
+		verb := "did not become ready"
+		if !want {
+			verb = "did not become unready"
+		}
+
+		return fmt.Errorf("%s %s %s: %w", kind, name, verb, err)
 	}
 
 	return nil

@@ -86,6 +86,10 @@ type Config struct {
 	// launching a node, a StatefulSet replica scheduling onto one) -
 	// separate from, and typically much longer than, Timeout.
 	NodeTimeout time.Duration
+
+	// NodeClassBootStorage is the Proxmox storage-id the nodeclass
+	// scenario's ProxmoxNodeClass uses for spec.bootDevice.storage.
+	NodeClassBootStorage string
 }
 
 // LoadConfig builds a Config from environment variables.
@@ -103,6 +107,7 @@ func LoadConfig() Config {
 		NodeClassName:          getEnvDefault("E2E_NODE_CLASS", "default"),
 		UnmanagedTemplateName:  getEnvDefault("E2E_UNMANAGED_TEMPLATE", "default"),
 		NodeTimeout:            getEnvDurationDefault("E2E_NODE_TIMEOUT", 10*time.Minute),
+		NodeClassBootStorage:   getEnvDefault("E2E_NODECLASS_STORAGE", "system"),
 	}
 
 	for id := range strings.SplitSeq(getEnvDefault("E2E_TEMPLATE_STORAGE_IDS", "local"), ",") {
