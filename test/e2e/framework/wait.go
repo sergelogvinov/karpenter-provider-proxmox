@@ -27,21 +27,24 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // pollInterval is how often waiters re-check cluster state.
 const pollInterval = 2 * time.Second
 
-// templateObject is implemented by both *v1alpha1.ProxmoxTemplate and
-// *v1alpha1.ProxmoxUnmanagedTemplate - both report their provisioning
-// state through the same aggregate "Ready" condition (see
-// pkg/apis/v1alpha1/nodetemplate_status.go).
-type templateObject interface {
+// readyObject is implemented by every CRD the suite waits on - both
+// v1alpha1 template/nodeclass types and karpv1.NodePool - which all report
+// their provisioning state through the same aggregate "Ready" condition
+// (see pkg/apis/v1alpha1/nodetemplate_status.go, nodeclass_status.go, and
+// vendor/sigs.k8s.io/karpenter/pkg/apis/v1/nodepool_status.go).
+type readyObject interface {
 	client.Object
 	GetConditions() []status.Condition
 }
@@ -85,9 +88,74 @@ func WaitForProxmoxUnmanagedTemplateGone(ctx context.Context, cli client.Client,
 	return waitForGone(ctx, cli, &v1alpha1.ProxmoxUnmanagedTemplate{}, "proxmoxunmanagedtemplate", name, timeout)
 }
 
+// WaitForProxmoxNodeClassReady polls the named (pre-existing)
+// ProxmoxNodeClass until its aggregate "Ready" condition reports True -
+// see pkg/apis/v1alpha1/nodeclass_status.go.
+func WaitForProxmoxNodeClassReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxNodeClass, error) {
+	nodeClass := &v1alpha1.ProxmoxNodeClass{}
+
+	err := waitForReady(ctx, cli, nodeClass, "proxmoxnodeclass", name, timeout)
+
+	return nodeClass, err
+}
+
+// WaitForNodePoolReady polls the named NodePool until its aggregate
+// "Ready" condition reports True - i.e. Karpenter validated its spec and
+// resolved its nodeClassRef to a Ready ProxmoxNodeClass (see
+// ConditionTypeValidationSucceeded/ConditionTypeNodeClassReady in
+// vendor/sigs.k8s.io/karpenter/pkg/apis/v1/nodepool_status.go). This is
+// about the NodePool object itself being usable, not about any node it
+// has launched yet.
+func WaitForNodePoolReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*karpv1.NodePool, error) {
+	nodePool := &karpv1.NodePool{}
+
+	err := waitForReady(ctx, cli, nodePool, "nodepool", name, timeout)
+
+	return nodePool, err
+}
+
+// WaitForNodePoolGone deletes the named NodePool - with foreground
+// propagation, so the API server blocks its actual removal until every
+// NodeClaim it owns has finished terminating, rather than just marking it
+// for deletion and returning immediately - and polls until it's gone,
+// i.e. Karpenter's own termination finalizer (karpv1.TerminationFinalizer)
+// has finished deprovisioning every NodeClaim/node it owns.
+func WaitForNodePoolGone(ctx context.Context, cli client.Client, name string, timeout time.Duration) error {
+	err := cli.Delete(ctx, &karpv1.NodePool{Name: name}, client.PropagationPolicy(metav1.DeletePropagationForeground))
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete nodepool %s: %w", name, err)
+	}
+
+	return waitForGone(ctx, cli, &karpv1.NodePool{}, "nodepool", name, timeout)
+}
+
+// WaitForStatefulSetReplicasReady polls until the named StatefulSet
+// reports the given number of ready replicas.
+func WaitForStatefulSetReplicasReady(ctx context.Context, cli client.Client, namespace, name string, replicas int32, timeout time.Duration) (*appsv1.StatefulSet, error) {
+	sts := &appsv1.StatefulSet{}
+
+	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		err := cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, sts)
+
+		switch {
+		case apierrors.IsNotFound(err) || isTransientError(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+
+		return sts.Status.ReadyReplicas == replicas, nil
+	})
+	if err != nil {
+		return sts, fmt.Errorf("statefulset %s/%s did not reach %d ready replica(s): %w", namespace, name, replicas, err)
+	}
+
+	return sts, nil
+}
+
 // waitForReady polls obj (a zero-value pointer the caller wants filled in)
 // by name until its aggregate "Ready" condition reports True.
-func waitForReady[T templateObject](ctx context.Context, cli client.Client, obj T, kind, name string, timeout time.Duration) error {
+func waitForReady[T readyObject](ctx context.Context, cli client.Client, obj T, kind, name string, timeout time.Duration) error {
 	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
 		err := cli.Get(ctx, client.ObjectKey{Name: name}, obj)
 

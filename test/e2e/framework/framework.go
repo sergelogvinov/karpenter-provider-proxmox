@@ -62,7 +62,15 @@ func (f *Framework) Name() string {
 
 // Context returns a context bound to the Framework's configured timeout.
 func (f *Framework) Context() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), f.Config.Timeout)
+	return f.ContextTimeout(f.Config.Timeout)
+}
+
+// ContextTimeout returns a context bound to timeout, for waits that need a
+// duration other than the Framework's default Config.Timeout - e.g.
+// Config.NodeTimeout, for anything that needs a new Proxmox VM to boot and
+// join the cluster.
+func (f *Framework) ContextTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 // Logf narrates what the test is doing right now: prefixed with a
