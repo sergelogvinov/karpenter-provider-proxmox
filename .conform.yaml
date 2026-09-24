@@ -34,6 +34,7 @@ policies:
         - .git/
         - vendor/
         - pkg/utils/systeminfo/
+        - test/e2e/
       includeSuffixes:
         - .go
       excludeSuffixes:
