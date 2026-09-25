@@ -26,6 +26,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/pflag"
 
+	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
@@ -100,15 +101,21 @@ func main() {
 
 	showServerInfo(logger, serverInfo, tp)
 
+	client, err := local.New()
+	if err != nil {
+		logger.Error(err, "Failed to create Proxmox local client")
+		os.Exit(1)
+	}
+
 	if featureFlags.IsEnabled(FeatureKarpenter) {
 		if tp != nil && serverInfo != nil {
-			if err := createProxmoxTopologyDiscoveryVM(logger, serverInfo, tp); err != nil {
+			if err := createProxmoxTopologyDiscoveryVM(logger, client, serverInfo, tp); err != nil {
 				logger.Error(err, "Failed to create Proxmox VM")
 			}
 		}
 	}
 
-	if err := scheduler(NewHandler(tp, logger), logger); err != nil {
+	if err := scheduler(NewHandler(client, tp, logger), logger); err != nil {
 		logger.Error(err, "Reconciler encountered an error")
 		os.Exit(1)
 	}

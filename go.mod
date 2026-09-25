@@ -4,6 +4,7 @@ go 1.27.1
 
 // replace github.com/sergelogvinov/go-proxmox-rest => ../../proxmox/go-proxmox-rest
 // replace github.com/sergelogvinov/go-proxmox-pool => ../../proxmox/go-proxmox-pool
+// replace github.com/sergelogvinov/go-proxmox-local => ../go-proxmox-local
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.1
@@ -15,6 +16,7 @@ require (
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.53.0
+	github.com/sergelogvinov/go-proxmox-local v0.1.0
 	github.com/sergelogvinov/go-proxmox-pool v0.0.0-20260923184613-15f4d4b9f2a4
 	github.com/sergelogvinov/go-proxmox-rest v0.0.0-20260924110310-ba544056d7ef
 	github.com/spf13/cobra v1.10.2

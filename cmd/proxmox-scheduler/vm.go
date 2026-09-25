@@ -19,13 +19,45 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	local "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/local"
+	"github.com/samber/lo"
+
+	local "github.com/sergelogvinov/go-proxmox-local"
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/vmconfig"
 
 	"k8s.io/utils/cpuset"
 )
+
+// loadVMConfig reads vmID's config and applies the affinity-fallback
+// convention: when the guest has no explicit affinity option set, look
+// for an "affinity=<cpuset>" token in its description.
+func loadVMConfig(ctx context.Context, client *local.Client, vmID int) (*qemu.Config, error) {
+	cfg, err := client.Qemu().Get(ctx, vmID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VM config for VM %d: %w", vmID, err)
+	}
+
+	if cfg.Affinity == "" {
+		for part := range strings.SplitSeq(cfg.Description, ",") {
+			affinity, ok := strings.CutPrefix(strings.TrimSpace(part), "affinity=")
+			if !ok {
+				continue
+			}
+
+			if _, err := cpuset.Parse(affinity); err != nil {
+				break
+			}
+
+			cfg.Affinity = affinity
+
+			break
+		}
+	}
+
+	return cfg, nil
+}
 
 func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int) error {
 	if !utilsys.ProcessExists(pid) {
@@ -47,13 +79,15 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 		return fmt.Errorf("VM %d has no CPU threads yet", vmID)
 	}
 
-	vmConfig, err := vmconfig.LoadVMConfig(vmID)
+	vmConfig, err := loadVMConfig(ctx, r.client, vmID)
 	if err != nil {
 		return err
 	}
 
+	cores := lo.FromPtr(vmConfig.Cores)
+
 	r.logger.Info("VM config loaded", "vmID", vmID, "name", vmConfig.Name,
-		"memoryMB", vmConfig.Memory, "cores", vmConfig.Cores)
+		"memoryMB", memoryMB(vmConfig), "cores", cores)
 
 	if vmConfig.Affinity != "" {
 		cpus, err := cpuset.Parse(vmConfig.Affinity)
@@ -63,7 +97,7 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 			return fmt.Errorf("failed to parse CPU affinity: %w", err)
 		}
 
-		if vmConfig.Cores == cpus.Size() {
+		if cores == cpus.Size() {
 			r.logger.Info("VM pinning CPU threads to cores", "vmID", vmID, "threadCount", len(threads), "cores", cpus.String())
 
 			if r.topology != nil && r.topology.CPUDetails.CPUs().Intersection(cpus).Size() != cpus.Size() {
@@ -93,33 +127,24 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 			}
 		}
 
-		pci := vmConfig.MergeHostPCIs()
-		if len(pci) > 0 {
-			cmdlineArgs, err := utilsys.GetProcessCmdline(pid)
+		for _, device := range vmConfig.HostPCI {
+			if device.Host == "" {
+				continue
+			}
+
+			irqs, err := utilsys.GetPciDeviceIRQs(device.Host)
 			if err != nil {
-				r.logger.Error(err, "Failed to get VM process cmdline", "vmID", vmID, "pid", pid)
-			} else {
-				vfioPciDevices := vmconfig.ParseVfioPciDevices(cmdlineArgs)
-				if len(vfioPciDevices) > 0 {
-					r.logger.Info("VM has PCI devices found", "vmID", vmID, "devices", vfioPciDevices)
+				r.logger.Error(err, "Failed to find IRQs for PCI device", "vmID", vmID, "device", device.Host)
 
-					for _, device := range vfioPciDevices {
-						irqs, err := utilsys.GetPciDeviceIRQs(device.HostAddress)
-						if err != nil {
-							r.logger.Error(err, "Failed to find IRQs for PCI device", "vmID", vmID, "device", device.HostAddress)
+				continue
+			}
 
-							continue
-						}
+			if len(irqs) > 0 {
+				r.logger.Info("VM setting IRQ affinity", "vmID", vmID, "device", device.Host, "irqs", irqs, "cpus", cpus.String())
 
-						if len(irqs) > 0 {
-							r.logger.Info("VM setting IRQ affinity", "vmID", vmID, "device", device.HostAddress, "irqs", irqs, "cpus", cpus.String())
-
-							err = utilsys.SetPciIRQAffinity(vmID, device.HostAddress, irqs, cpus)
-							if err != nil {
-								r.logger.Error(err, "Failed to set IRQ affinity for PCI device", "vmID", vmID, "device", device.HostAddress)
-							}
-						}
-					}
+				err = utilsys.SetPciIRQAffinity(vmID, device.Host, irqs, cpus)
+				if err != nil {
+					r.logger.Error(err, "Failed to set IRQ affinity for PCI device", "vmID", vmID, "device", device.Host)
 				}
 			}
 		}
@@ -170,14 +195,14 @@ func (r *SchedulerHandler) handleVMStop(_ context.Context, vmID int) error {
 }
 
 // updateVMInfo updates the tracker when a VM starts
-func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *local.Config) error {
+func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *qemu.Config) error {
 	r.tracker.mu.Lock()
 	defer r.tracker.mu.Unlock()
 
 	vmInfo := &VMInfo{
 		VMID:  vmID,
 		PID:   pid,
-		Cores: vmConfig.Cores,
+		Cores: lo.FromPtr(vmConfig.Cores),
 		Name:  vmConfig.Name,
 	}
 
@@ -200,4 +225,15 @@ func (r *SchedulerHandler) updateVMInfo(vmID int, pid int, vmConfig *local.Confi
 	}
 
 	return nil
+}
+
+// memoryMB returns cfg's configured memory in MiB, or 0 if unset —
+// cfg.Memory and cfg.Memory.Current are both pointers (docs/design.md
+// §6.5).
+func memoryMB(cfg *qemu.Config) int {
+	if cfg.Memory == nil {
+		return 0
+	}
+
+	return lo.FromPtr(cfg.Memory.Current)
 }

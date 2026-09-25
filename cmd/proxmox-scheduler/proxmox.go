@@ -18,27 +18,27 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	info "github.com/google/cadvisor/info/v1"
 
+	local "github.com/sergelogvinov/go-proxmox-local"
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
-	local "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/local"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) error {
+func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, serverInfo *info.MachineInfo, tp *topology.Topology) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 30*time.Second, false, func(ctx context.Context) (bool, error) {
-		ready, err := local.ClusterReady(ctx)
+		ready, err := client.Cluster().Quorate(ctx)
 		if err != nil {
 			logger.Error(err, "Failed to check Proxmox cluster quorum status, retrying...")
 
@@ -57,25 +57,26 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 		return fmt.Errorf("failed to wait for Proxmox cluster quorum: %w", err)
 	}
 
-	vmID, vm, err := local.GetVMConfigByFilter(func(v *local.Config) (bool, error) {
-		return v.Name == "node-capacity" && slices.Contains(strings.Split(v.Tags, ";"), "karpenter"), nil
-	})
-	if err != nil && !errors.Is(err, local.ErrVirtualMachineNotFound) {
+	// List never errors just because nothing matches (empty slice, no
+	// error)
+	guests, err := client.Qemu().List(ctx, qemu.ListFilter{Name: "node-capacity"})
+	if err != nil {
 		return fmt.Errorf("failed to check existing VMs: %w", err)
 	}
 
-	options := buildVMOptions(serverInfo, tp)
+	cfg := buildVMConfig(serverInfo, tp)
 
-	if vm != nil {
-		err = local.UpdateVM(ctx, vmID, options)
-		if err != nil {
+	if len(guests) > 0 {
+		vmID := guests[0].VMID
+
+		if err := client.Qemu().Update(ctx, vmID, cfg); err != nil {
 			return fmt.Errorf("failed to update existing VM %d: %w", vmID, err)
 		}
 
 		return nil
 	}
 
-	vmID, err = local.GetNextID(ctx)
+	vmID, err := client.Cluster().NextID(ctx)
 	if err != nil || vmID == 0 {
 		if err != nil {
 			logger.Error(err, "Failed to get next VM ID")
@@ -86,30 +87,38 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, serverInfo *info.Machi
 
 	logger.Info("Creating Proxmox VM for Karpenter discovery service", "vmID", vmID)
 
-	if err := local.CreateVM(ctx, vmID, options); err != nil {
+	if err := client.Qemu().Create(ctx, vmID, cfg); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func buildVMOptions(serverInfo *info.MachineInfo, tp *topology.Topology) map[string]any {
+// buildVMConfig builds the node-capacity guest's desired configuration
+// as a typed *qemu.Config — replacing the old map[string]any built with
+// fmt.Sprintf, which is how docs/design.md §2.4's idempotency bug
+// (comparing a uint64 memory value against the int YAML decoded)
+// originated in the first place: there is no second, differently-typed
+// representation to drift from here. Update encodes this exact struct
+// through the same encoder used to decode the on-disk config.
+func buildVMConfig(serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
 	totalCores := serverInfo.NumCores
-	totalMemoryMB := serverInfo.MemoryCapacity / (1024 * 1024)
+	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))
 
-	options := map[string]any{
-		"name":        "node-capacity",
-		"description": "Karpenter discovery service",
-		"cores":       totalCores,
-		"sockets":     1,
-		"cpu":         "host",
-		"numa":        1,
-		"ostype":      "l26",
-		"tags":        "karpenter",
+	cfg := &qemu.Config{
+		Name:        "node-capacity",
+		Description: "Karpenter discovery service",
+		Cores:       &totalCores,
+		Sockets:     new(1),
+		CPU:         &qemu.CPU{Type: "host"},
+		NUMAEnabled: new(true),
+		OSType:      new("l26"),
+		Tags:        &qemu.Tags{"karpenter"},
 	}
 
 	if len(serverInfo.Topology) > 0 {
-		affinity := []string{}
+		affinity := make([]string, 0, len(serverInfo.Topology))
+		numa := make(map[int]qemu.NUMA, len(serverInfo.Topology))
 
 		cpush := 0
 		totalMemoryMB = 0
@@ -123,25 +132,29 @@ func buildVMOptions(serverInfo *info.MachineInfo, tp *topology.Topology) map[str
 
 			affinity = append(affinity, cpus.String())
 
-			memoryInNode := nodeInfo.Memory / (1024 * 1024 * 1024)
+			memoryInNode := int(nodeInfo.Memory / (1024 * 1024 * 1024))
 			if memoryInNode > 1 {
-				memoryInNode -= 1
+				memoryInNode--
 			}
 
 			memoryInNode *= 1024
 			totalMemoryMB += memoryInNode
 
-			numaArg := fmt.Sprintf("cpus=%d-%d,hostnodes=%d,memory=%d", cpush, cpush+cpus.Size()-1, nodeInfo.Id, memoryInNode)
-			cpush += cpus.Size()
+			numa[idx] = qemu.NUMA{
+				CPUIDs:    []string{fmt.Sprintf("%d-%d", cpush, cpush+cpus.Size()-1)},
+				HostNodes: []string{strconv.Itoa(nodeInfo.Id)},
+				Memory:    &memoryInNode,
+			}
 
-			options[fmt.Sprintf("numa%d", idx)] = numaArg
+			cpush += cpus.Size()
 			idx++
 		}
 
-		options["affinity"] = strings.Join(affinity, ",")
+		cfg.Affinity = strings.Join(affinity, ",")
+		cfg.NUMA = numa
 	}
 
-	options["memory"] = totalMemoryMB
+	cfg.Memory = &qemu.Memory{Current: &totalMemoryMB}
 
-	return options
+	return cfg
 }
