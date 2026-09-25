@@ -95,12 +95,7 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 }
 
 // buildVMConfig builds the node-capacity guest's desired configuration
-// as a typed *qemu.Config — replacing the old map[string]any built with
-// fmt.Sprintf, which is how docs/design.md §2.4's idempotency bug
-// (comparing a uint64 memory value against the int YAML decoded)
-// originated in the first place: there is no second, differently-typed
-// representation to drift from here. Update encodes this exact struct
-// through the same encoder used to decode the on-disk config.
+// as a typed *qemu.Config
 func buildVMConfig(serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
 	totalCores := serverInfo.NumCores
 	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))

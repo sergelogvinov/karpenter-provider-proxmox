@@ -67,6 +67,84 @@ func PinThreadsToCores(ctx context.Context, vmID int, pid int, threads []int, co
 	}()
 }
 
+// GetThreadAffinity returns the CPU affinity mask currently applied to
+// thread tid of process pid, read directly from /proc rather than by
+// shelling out to taskset — this is what makes SetThreadsAffinity and
+// SetProcessAffinity idempotent: a thread whose mask already matches is
+// left untouched, so a resync over an unchanged host issues no taskset
+// calls at all.
+func GetThreadAffinity(pid, tid int) (cpuset.CPUSet, error) {
+	statusFile := fmt.Sprintf("/proc/%d/task/%d/status", pid, tid)
+
+	data, err := os.ReadFile(statusFile)
+	if err != nil {
+		return cpuset.New(), fmt.Errorf("failed to read %s: %w", statusFile, err)
+	}
+
+	for line := range strings.SplitSeq(string(data), "\n") {
+		list, ok := strings.CutPrefix(line, "Cpus_allowed_list:")
+		if !ok {
+			continue
+		}
+
+		return cpuset.Parse(strings.TrimSpace(list))
+	}
+
+	return cpuset.New(), fmt.Errorf("cpus_allowed_list not found in %s", statusFile)
+}
+
+// SetThreadsAffinity masks every thread in threads to cpus. Unlike
+// PinThreadsToCores, which pins each thread 1:1 to its own dedicated
+// core, every thread here shares the same mask — the shape a shared
+// (unpinned) VM's confinement takes, since it owns a slice of the pool
+// rather than one core per vCPU. A thread
+// that already carries the right mask is left alone.
+func SetThreadsAffinity(ctx context.Context, vmID, pid int, threads []int, cpus cpuset.CPUSet) error {
+	if len(threads) == 0 || cpus.IsEmpty() || pid <= 0 {
+		return nil
+	}
+
+	cpuList := cpus.String()
+
+	for _, threadID := range threads {
+		if current, err := GetThreadAffinity(pid, threadID); err == nil && current.Equals(cpus) {
+			continue
+		}
+
+		cmd := exec.CommandContext(ctx, "taskset", "--cpu-list", "--pid", cpuList, strconv.Itoa(threadID))
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("VM %d: failed to set thread %d CPU affinity to %s: %w, output: %s", vmID, threadID, cpuList, err, output)
+		}
+	}
+
+	return nil
+}
+
+// SetProcessAffinity masks the process pid itself — its thread-group
+// leader — so any thread QEMU spawns afterwards (a hotplugged vCPU, an
+// IO or migration thread) inherits cpus instead of starting out
+// unconfined on the whole host. A no-op if
+// the mask already matches.
+func SetProcessAffinity(ctx context.Context, vmID, pid int, cpus cpuset.CPUSet) error {
+	if pid <= 0 || cpus.IsEmpty() {
+		return nil
+	}
+
+	if current, err := GetThreadAffinity(pid, pid); err == nil && current.Equals(cpus) {
+		return nil
+	}
+
+	cpuList := cpus.String()
+
+	cmd := exec.CommandContext(ctx, "taskset", "--cpu-list", "--pid", cpuList, strconv.Itoa(pid))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("VM %d: failed to set process %d CPU affinity to %s: %w, output: %s", vmID, pid, cpuList, err, output)
+	}
+
+	return nil
+}
+
+// SetPciIRQAffinity masks IRQs to VM cores.
 func SetPciIRQAffinity(vmID int, pciAddress string, irqs []int, cpus cpuset.CPUSet) error {
 	if len(irqs) == 0 || cpus.IsEmpty() {
 		return nil

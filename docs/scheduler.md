@@ -2,12 +2,14 @@
 
 The Proxmox Scheduler is a server component that monitors the Proxmox VE environment and makes scheduling decisions for virtual machines based on CPU and memory affinity rules defined in each VM configuration.
 
-Currently the scheduler focuses on VMs which have specific CPU affinity requirements defined in their configuration.
-All other VMs are left unaffined and can be scheduled on any available CPU cores by the default Proxmox scheduler.
+The scheduler acts on VMs which have specific CPU affinity requirements defined in their configuration, and,
+when `--shared-policy=partition` is set, on every other VM too.
 
 ## Features
 
 - Pins VM vCPUs to specific physical CPU cores.
+- Confines VMs without CPU affinity to disjoint slices of the host's remaining CPUs, so they no longer
+  compete for cores with pinned VMs or with each other.
 - Adjusts CPU governor settings to improve performance.
 - Assigns IRQ or SR-IOV devices to the same CPU cores used by the VM.
 - Optionally provides node topology information for Karpenter.
@@ -26,6 +28,10 @@ All command-line flags can be configured using environment variables. This is pa
 | `--resync-interval` | `RESYNC_INTERVAL` | `60m` |
 | `--cpu-governor-busy` | `CPU_GOVERNOR_BUSY` | `performance` |
 | `--cpu-governor-free` | `CPU_GOVERNOR_FREE` | `powersave` |
+| `--shared-policy` | `SHARED_POLICY` | `none` |
+| `--reserved-cpus` | `RESERVED_CPUS` | `""` |
+| `--shared-min-width` | `SHARED_MIN_WIDTH` | `0` |
+| `--rebalance-debounce` | `REBALANCE_DEBOUNCE` | `2s` |
 
 ### Verbosity
 
