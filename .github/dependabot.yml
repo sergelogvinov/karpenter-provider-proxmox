@@ -43,6 +43,9 @@ updates:
       k8s.io:
         patterns:
           - "k8s.io/*"
+      karpenter:
+        patterns:
+          - "sigs.k8s.io/*"
 
   - package-ecosystem: "docker"
     directory: "/"
