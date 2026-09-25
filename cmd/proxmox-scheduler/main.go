@@ -31,6 +31,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
 
+	"k8s.io/utils/cpuset"
+
 	"sigs.k8s.io/karpenter/pkg/utils/env"
 )
 
@@ -52,6 +54,18 @@ const (
 
 	cpuGovernorFreeEnvVarName = "CPU_GOVERNOR_FREE"
 	cpuGovernorFreeFlagName   = "cpu-governor-free"
+
+	sharedPolicyEnvVarName = "SHARED_POLICY"
+	sharedPolicyFlagName   = "shared-policy"
+
+	reservedCPUsEnvVarName = "RESERVED_CPUS"
+	reservedCPUsFlagName   = "reserved-cpus"
+
+	sharedMinWidthEnvVarName = "SHARED_MIN_WIDTH"
+	sharedMinWidthFlagName   = "shared-min-width"
+
+	rebalanceDebounceEnvVarName = "REBALANCE_DEBOUNCE"
+	rebalanceDebounceFlagName   = "rebalance-debounce"
 )
 
 var (
@@ -67,6 +81,11 @@ var (
 
 	cpuGovernorBusy = pflag.String(cpuGovernorBusyFlagName, env.WithDefaultString(cpuGovernorBusyEnvVarName, "performance"), "CPU governor to set when CPU is busy")
 	cpuGovernorFree = pflag.String(cpuGovernorFreeFlagName, env.WithDefaultString(cpuGovernorFreeEnvVarName, "powersave"), "CPU governor to set when CPU is free")
+
+	sharedPolicy      = pflag.String(sharedPolicyFlagName, env.WithDefaultString(sharedPolicyEnvVarName, "none"), "Shared CPU pool placement policy for VMs without affinity: none, partition")
+	reservedCPUs      = pflag.String(reservedCPUsFlagName, env.WithDefaultString(reservedCPUsEnvVarName, ""), "Host-only CPUs excluded from every pool, e.g. 0,32")
+	sharedMinWidth    = pflag.Int(sharedMinWidthFlagName, env.WithDefaultInt(sharedMinWidthEnvVarName, 0), "Minimum CPUs per shared VM in oversubscribed mode (0 = one physical core)")
+	rebalanceDebounce = pflag.Duration(rebalanceDebounceFlagName, env.WithDefaultDuration(rebalanceDebounceEnvVarName, 2*time.Second), "Event coalescing window before a shared CPU pool rebalance")
 )
 
 func main() {
@@ -115,7 +134,24 @@ func main() {
 		}
 	}
 
-	if err := scheduler(NewHandler(client, tp, logger), logger); err != nil {
+	reservedCPUSet := cpuset.New()
+
+	if *reservedCPUs != "" {
+		reservedCPUSet, err = cpuset.Parse(*reservedCPUs)
+		if err != nil {
+			logger.Error(err, "Failed to parse reserved CPUs", "reservedCPUs", *reservedCPUs)
+			os.Exit(1)
+		}
+	}
+
+	handler := NewHandler(client, tp, logger,
+		WithReservedCPUs(reservedCPUSet),
+		WithSharedPolicy(*sharedPolicy),
+		WithSharedMinWidth(*sharedMinWidth),
+		WithRebalanceDebounce(*rebalanceDebounce),
+	)
+
+	if err := scheduler(handler, logger); err != nil {
 		logger.Error(err, "Reconciler encountered an error")
 		os.Exit(1)
 	}
