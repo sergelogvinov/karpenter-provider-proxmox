@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.12.0...v0.13.0) (2026-09-25)
+
+
+### Features
+
+* add proxmoxNodeClass and related tests ([022007b](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/022007bbb14ade6625f10e4e7529ae1c4990e251))
+* e2e test template ([17d1f75](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/17d1f75a11a05379774c27ff6bb179d20c820764))
+* enhance e2e lifecycle tests ([16508f2](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/16508f2c304eb062fd584f279bfb0fcc7deba71f))
+* enhance VM scheduling with shared CPU policies ([283d31f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/283d31fd6e0ab9eef63eddd621e4e3dbc34ba7d3))
+* refactor Proxmox scheduler to use go-proxmox-local ([e2faff8](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e2faff85a4d72ab572e9e4d0f77d676d517fce25))
+
 ## [0.12.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.11.1...v0.12.0) (2026-07-19)
 
 
