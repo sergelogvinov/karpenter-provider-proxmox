@@ -28,10 +28,10 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 
+	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/vmconfig"
 
 	"k8s.io/utils/cpuset"
 )
@@ -61,6 +61,7 @@ type VMTracker struct {
 }
 
 type SchedulerHandler struct {
+	client   *local.Client
 	topology *topology.Topology
 	tracker  *VMTracker
 
@@ -72,8 +73,9 @@ const (
 	pidFileExtension = ".pid"
 )
 
-func NewHandler(topology *topology.Topology, logger logr.Logger) *SchedulerHandler {
+func NewHandler(client *local.Client, topology *topology.Topology, logger logr.Logger) *SchedulerHandler {
 	return &SchedulerHandler{
+		client:   client,
 		topology: topology,
 		tracker: &VMTracker{
 			vms: make(map[int]*VMInfo),
@@ -138,7 +140,7 @@ func (r *SchedulerHandler) Reconcile(ctx context.Context, sender reconciler.Even
 }
 
 // handleSyncEvent processes sync events to track VM information
-func (r *SchedulerHandler) handleSyncEvent(_ context.Context) error {
+func (r *SchedulerHandler) handleSyncEvent(ctx context.Context) error {
 	r.logger.V(1).Info("Starting VM tracking")
 
 	runningVMs, err := r.getRunningVMs()
@@ -152,7 +154,7 @@ func (r *SchedulerHandler) handleSyncEvent(_ context.Context) error {
 	r.tracker.mu.Unlock()
 
 	for vmID, pid := range runningVMs {
-		vmConfig, err := vmconfig.LoadVMConfig(vmID)
+		vmConfig, err := loadVMConfig(ctx, r.client, vmID)
 		if err != nil {
 			r.logger.Error(err, "Failed to load VM config for running VM", "vmID", vmID)
 
