@@ -56,9 +56,49 @@ nfpms:
       preremove: hack/deb/preremove.sh
       postremove: hack/deb/postremove.sh
 
+snapshot:
+  version_template: edge
+
+changelog:
+  disable: true
+
+dockers_v2:
+  - id: proxmox-scheduler
+    ids:
+      - proxmox-scheduler
+    flags:
+      - --target=goreleaser
+    images:
+      - "ghcr.io/sergelogvinov/{{ .ProjectName }}"
+    tags:
+      - "{{ if not .IsSnapshot }}v{{.Version}}{{ else }}edge{{ end }}"
+      - edge
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    annotations:
+      org.opencontainers.image.name: "karpenter-provider-proxmox"
+      org.opencontainers.image.description: "Karpenter provider for Proxmox VE"
+      org.opencontainers.image.licenses: "Apache-2.0"
+      org.opencontainers.image.source: "https://github.com/sergelogvinov/karpenter-provider-proxmox"
+      org.opencontainers.image.url: "{{ .GitURL }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      io.artifacthub.package.readme-url: "https://raw.githubusercontent.com/sergelogvinov/karpenter-provider-proxmox/main/README.md"
+      io.artifacthub.package.license: "Apache-2.0"
+
 checksum:
   name_template: checksums.txt
   algorithm: sha256
 
-snapshot:
-  version_template: 0.0.0-snapshot
+signs:
+  - artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    cmd: cosign
+    args:
+      - sign-blob
+      - "--yes"
+      - "--bundle=${signature}"
+      - "${artifact}"
+    output: true

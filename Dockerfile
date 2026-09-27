@@ -34,3 +34,13 @@ ARG TARGETARCH
 COPY --from=builder /src/bin/karpenter-provider-proxmox-${TARGETARCH} /bin/karpenter-provider-proxmox
 
 ENTRYPOINT ["/bin/karpenter-provider-proxmox"]
+
+########################################
+
+FROM --platform=${TARGETARCH} scratch AS goreleaser
+
+COPY --from=gcr.io/distroless/static-debian13:nonroot . .
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/proxmox-scheduler /bin/karpenter-provider-proxmox
+
+ENTRYPOINT ["/bin/karpenter-provider-proxmox"]
