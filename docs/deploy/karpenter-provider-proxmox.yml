@@ -2442,12 +2442,13 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole-core.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2455,10 +2456,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2499,6 +2500,7 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["delete"]
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2506,10 +2508,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2530,6 +2532,7 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["list", "watch"]
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole-core.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2537,10 +2540,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2550,6 +2553,7 @@ subjects:
   - kind: ServiceAccount
     name: karpenter-provider-proxmox
     namespace: kube-system
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2557,10 +2561,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2570,6 +2574,7 @@ subjects:
   - kind: ServiceAccount
     name: karpenter-provider-proxmox
     namespace: kube-system
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2577,10 +2582,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2590,6 +2595,7 @@ subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
   name: system:bootstrappers:karpenter:proxmox
+
 ---
 # Source: karpenter-provider-proxmox/templates/clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2597,10 +2603,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2610,6 +2616,7 @@ subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: Group
   name: system:bootstrappers:karpenter:proxmox
+
 ---
 # Source: karpenter-provider-proxmox/templates/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2618,10 +2625,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2660,6 +2667,7 @@ rules:
   - get
   - list
   - watch
+
 ---
 # Source: karpenter-provider-proxmox/templates/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2668,10 +2676,10 @@ metadata:
   name: karpenter-provider-proxmox:bootstrap
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2686,6 +2694,7 @@ rules:
   - update
   - patch
   - delete
+
 ---
 # Source: karpenter-provider-proxmox/templates/rolebinding.yaml
 kind: RoleBinding
@@ -2701,6 +2710,7 @@ subjects:
 - kind: ServiceAccount
   name: karpenter-provider-proxmox
   namespace: kube-system
+
 ---
 # Source: karpenter-provider-proxmox/templates/rolebinding.yaml
 kind: RoleBinding
@@ -2716,6 +2726,7 @@ subjects:
 - kind: ServiceAccount
   name: karpenter-provider-proxmox
   namespace: kube-system
+
 ---
 # Source: karpenter-provider-proxmox/templates/deployment.yaml
 apiVersion: apps/v1
@@ -2724,10 +2735,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.9
+    helm.sh/chart: karpenter-provider-proxmox-0.4.10
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.12.0"
+    app.kubernetes.io/version: "v0.13.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1
@@ -2766,7 +2777,7 @@ spec:
             readOnlyRootFilesystem: true
             seccompProfile:
               type: RuntimeDefault
-          image: "ghcr.io/sergelogvinov/karpenter-provider-proxmox:v0.12.0"
+          image: "ghcr.io/sergelogvinov/karpenter-provider-proxmox:v0.13.0"
           imagePullPolicy: Always
           args:
             - -cloud-config=/etc/proxmox/config.yaml
