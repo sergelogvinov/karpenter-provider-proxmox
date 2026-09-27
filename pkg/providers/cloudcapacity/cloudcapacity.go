@@ -178,11 +178,22 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 			continue
 		}
 
+		haMaintenanceNodes, err := getHAMaintenanceNodes(ctx, cl)
+		if err != nil {
+			log.Error(err, "Failed to get HA status for region", "region", region)
+		}
+
 		nodes := make([]string, 0, len(ns))
 
 		// Permission: Sys.Audit
 		for idx := range ns {
 			item := ns[idx]
+
+			if haMaintenanceNodes[item.Node] {
+				log.V(1).Info("Skipping node in HA maintenance mode", "node", item.Node, "region", region)
+
+				continue
+			}
 
 			log.V(4).Info("Processing node", "node", item.Node, "region", region, "maxCPU", item.MaxCPU, "maxMem", item.MaxMem)
 

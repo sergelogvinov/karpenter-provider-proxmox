@@ -89,6 +89,28 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 	return nil
 }
 
+// getHAMaintenanceNodes returns the set of nodes currently in HA maintenance
+// mode, as reported by the elected CRM master via
+// GET /cluster/ha/status/manager_status.
+func getHAMaintenanceNodes(ctx context.Context, cl *proxmoxrest.Client) (map[string]bool, error) {
+	status, err := cl.Cluster().HA().Status().ManagerStatus(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get HA manager status: %w", err)
+	}
+
+	nodes := map[string]bool{}
+
+	if status.Manager != nil {
+		for node, state := range status.Manager.NodeStatus {
+			if state == "maintenance" {
+				nodes[node] = true
+			}
+		}
+	}
+
+	return nodes, nil
+}
+
 func getNodeNetwork(ctx context.Context, cl *proxmoxrest.Client, region string, r *cluster.Resource) (NodeNetworkIfaceInfo, error) {
 	networks, err := cl.Nodes(r.Node).Network().List(ctx, network.TypeAnyBridge)
 	if err != nil {
