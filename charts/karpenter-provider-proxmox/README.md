@@ -75,6 +75,7 @@ helm upgrade -i --namespace=kube-system -f karpenter-provider-proxmox.yaml \
 | existingConfigSecretKey | string | `"config.yaml"` | Proxmox cluster config stored in secrets key. |
 | configFile | string | `"/etc/proxmox/config.yaml"` | Proxmox cluster config path. |
 | config | object | `{"clusters":[]}` | Proxmox cluster config. ref: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/install.md |
+| settings.cpuOvercommitRatio | float | `1` | CPU overcommit ratio for the simple-with-cpu-overcommit node policy. Reserved/affinity CPUs and memory are not overcommitted. |
 | settings.batchMaxDuration | string | `"10s"` | The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes. |
 | settings.batchIdleDuration | string | `"1s"` | The maximum amount of time with no new ending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately. |
 | settings.preferencePolicy | string | `"Respect"` | How the Karpenter scheduler should treat preferences. Preferences include preferredDuringSchedulingIgnoreDuringExecution node and pod affinities/anti-affinities and ScheduleAnyways topologySpreadConstraints. Can be one of 'Ignore' and 'Respect' |

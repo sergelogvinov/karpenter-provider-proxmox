@@ -53,6 +53,9 @@ config:
   #     region: cluster-1
 
 settings:
+  # -- (float) CPU overcommit ratio for the simple-with-cpu-overcommit node policy. Reserved/affinity CPUs and memory are not overcommitted.
+  cpuOvercommitRatio: 1
+
   # -- The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one
   # time which usually results in fewer but larger nodes.
   batchMaxDuration: 10s
