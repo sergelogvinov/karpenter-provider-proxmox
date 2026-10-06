@@ -62,6 +62,7 @@ type resourceManager struct {
 
 var _ ResourceManager = &resourceManager{}
 
+// NewResourceManager discovers host topology and constructs the selected CPU policy.
 func NewResourceManager(ctx context.Context, cl *proxmoxrest.Client, region, zone string) (ResourceManager, error) {
 	log := log.FromContext(ctx).WithName("ResourceManager").WithValues("node", zone)
 
@@ -126,11 +127,16 @@ func NewResourceManager(ctx context.Context, cl *proxmoxrest.Client, region, zon
 		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", manager.zone, err)
 	}
 
-	switch opts.NodePolicy { //nolint:gocritic
+	switch opts.NodePolicy {
 	case string(cpumanager.PolicyStatic):
 		manager.nodePolicy, err = cpumanager.NewStaticPolicy(log, sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create static policy for node %s: %w", manager.zone, err)
+		}
+	case string(cpumanager.PolicySimpleWithCPUOvercommit):
+		manager.nodePolicy, err = cpumanager.NewSimplePolicyWithCPUOvercommit(sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory, opts.CPUOvercommitRatio)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create CPU overcommit policy for node %s: %w", manager.zone, err)
 		}
 	default:
 		manager.nodePolicy, err = cpumanager.NewSimplePolicy(sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)

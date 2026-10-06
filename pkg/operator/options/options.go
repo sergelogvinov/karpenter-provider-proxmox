@@ -40,6 +40,9 @@ const (
 	nodePolicyEnvVarName = "NODE_POLICY"
 	nodePolicyFlagName   = "node-policy"
 
+	cpuOvercommitRatioEnvVarName = "CPU_OVERCOMMIT_RATIO"
+	cpuOvercommitRatioFlagName   = "cpu-overcommit-ratio"
+
 	proxmoxVMIDEnvVarName = "PROXMOX_VMID"
 	proxmoxVMIDFlagName   = "proxmox-vmid"
 )
@@ -55,14 +58,19 @@ type Options struct {
 	InstanceTypesFilePath string
 	NodeSettingFilePath   string
 	NodePolicy            string
+	CPUOvercommitRatio    float64
+	cpuOvercommitRatioRaw string
 	ProxmoxVMID           int
 }
 
+// AddFlags registers provider configuration from flags and environment variables.
 func (o *Options) AddFlags(fs *coreoptions.FlagSet) {
 	fs.StringVar(&o.CloudConfigPath, cloudConfigFlagName, env.WithDefaultString(cloudConfigEnvVarName, ""), "Path to the cloud config file.")
 	fs.StringVar(&o.InstanceTypesFilePath, instanceTypesFileFlagName, env.WithDefaultString(instanceTypesFileEnvVarName, ""), "Path to a custom instance-types file.")
 	fs.StringVar(&o.NodeSettingFilePath, nodeSettingFileFlagName, env.WithDefaultString(nodeSettingFileEnvVarName, ""), "Path to the node setting file.")
-	fs.StringVar(&o.NodePolicy, nodePolicyFlagName, env.WithDefaultString(nodePolicyEnvVarName, "simple"), "Node CPU policy to use.")
+	fs.StringVar(&o.NodePolicy, nodePolicyFlagName, env.WithDefaultString(nodePolicyEnvVarName, "simple"), "Node CPU policy to use: simple, static, or simple-with-cpu-overcommit.")
+	fs.StringVar(&o.cpuOvercommitRatioRaw, cpuOvercommitRatioFlagName, env.WithDefaultString(cpuOvercommitRatioEnvVarName, "1"),
+		"CPU overcommit ratio for the simple-with-cpu-overcommit node policy (finite number >= 1). Memory is not overcommitted.")
 	fs.IntVar(&o.ProxmoxVMID, proxmoxVMIDFlagName, env.WithDefaultInt(proxmoxVMIDEnvVarName, 20000), "This value is used as the minimum ID when creating a VM.")
 }
 

@@ -1,8 +1,8 @@
 # Node resource allocation and optimization
 
-The Karpenter Proxmox provider supports two types of resource allocation and optimization modes: `simple` (default) and `static`.
+The Karpenter Proxmox provider supports three resource allocation modes: `simple` (default), `static`, and `simple-with-cpu-overcommit`.
 
-To change allocation mode, set flag `-node-policy` or env `NODE_POLICY` to either `simple` or `static`.
+To change allocation mode, set flag `-node-policy` or env `NODE_POLICY` to `simple`, `static`, or `simple-with-cpu-overcommit`.
 
 ## Simple allocation mode
 
@@ -11,7 +11,7 @@ In this mode, the plugin periodically observes the Proxmox cluster resources and
 When scheduling new VMs, the plugin checks the available resources on each node to ensure that the requested resources can be allocated.
 
 If two or more VMs are using the same vCPUs on a Proxmox node (CPU affinity), the plugin merges their vCPUs to calculate the total vCPUs on that node.
-A new VM is scheduled only if the total vCPUs (including the new VM) does not exceed the total vCPUs capacity of the node.
+By default, a new VM is scheduled only if the total vCPUs (including the new VM) does not exceed the available logical CPU capacity of the node.
 
 Memory overcommitment is not supported.
 
@@ -28,6 +28,43 @@ Two running VMs are using:
 The available resources are calculated as:
 * vCPUs `0–4` are used (merged), so 11 vCPUs are available
 * 32 GB of memory is used, so 32 GB is available
+
+## Simple allocation with CPU overcommit
+
+Select the separate `simple-with-cpu-overcommit` policy with
+`--node-policy=simple-with-cpu-overcommit` or `NODE_POLICY=simple-with-cpu-overcommit`.
+The existing `simple` policy remains unchanged. Configure the CPU allocation ratio via
+`--cpu-overcommit-ratio` or `CPU_OVERCOMMIT_RATIO`; its default is `1`.
+The value must be finite and at least `1`; fractional ratios such as `1.5` are supported.
+A ratio greater than `1` is rejected with the `simple` and `static` policies.
+
+Helm configuration:
+
+```yaml
+extraArgs:
+  - --node-policy=simple-with-cpu-overcommit
+settings:
+  cpuOvercommitRatio: 2
+```
+
+The shared vCPU budget is `floor(remaining logical CPUs * ratio)`, where remaining
+logical CPUs exclude reserved CPUs and the union of affinity-assigned CPUs. Existing
+VMs without CPU affinity and new shared allocations consume this same budget.
+Existing usage is tracked by VM ID even when CPU or memory usage exceeds the current
+budget. Reducing the ratio while keeping this policy blocks further CPU admission
+until usage fits again, without dropping existing VM memory from accounting.
+Affinity CPU IDs remain unavailable until the last VM using them is released.
+Hyperthreading is already included in the discovered logical CPU count; the ratio is
+an additional allocation multiplier, not a change to CPU topology or VM CPU IDs.
+
+For example, a host with 32 logical CPUs and 48 allocated shared vCPUs has no remaining
+CPU allocation capacity at ratio `1`. With ratio `2` and no reservations or affinity
+assignments, it has a budget of 64 vCPUs and can admit another 16 vCPUs.
+
+This changes allocation accounting only. It does not create physical CPU capacity or
+limit actual VM CPU use. Choose the ratio based on sustained workload demand and monitor
+host contention. Memory accounting and reservations remain unchanged, and all visible
+running VMs continue to be included in resource discovery. NodePool limits still apply.
 
 ## Static allocation mode
 

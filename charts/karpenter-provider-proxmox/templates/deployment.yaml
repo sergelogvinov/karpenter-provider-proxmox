@@ -65,6 +65,8 @@ spec:
             - name: METRICS_PORT
               value: "{{ .Values.metrics.port }}"
           {{- end }}
+            - name: CPU_OVERCOMMIT_RATIO
+              value: {{ .Values.settings.cpuOvercommitRatio | toString | quote }}
             - name: SYSTEM_NAMESPACE
               valueFrom:
                 fieldRef:
