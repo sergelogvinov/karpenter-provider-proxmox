@@ -298,20 +298,29 @@ func (c CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeClai
 }
 
 // RepairPolicies is for CloudProviders to define a set Unhealthy condition for Karpenter
-// to monitor on the node.
+// to monitor on the node. Karpenter requires exactly one default fallback policy
+// (empty ReasonRegex), so the Unknown status is matched by an explicit catch-all regex.
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	return []cloudprovider.RepairPolicy{
 		{
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionFalse,
 			TolerationDuration: 15 * time.Minute,
+			Action:             cloudprovider.ReplaceNode,
 		},
 		{
 			ConditionType:      corev1.NodeReady,
 			ConditionStatus:    corev1.ConditionUnknown,
+			ReasonRegex:        ".*",
 			TolerationDuration: 15 * time.Minute,
+			Action:             cloudprovider.ReplaceNode,
 		},
 	}
+}
+
+// Reboot restarts the instance backing the NodeClaim in place without terminating it.
+func (c CloudProvider) Reboot(_ context.Context, _ *karpv1.NodeClaim, _ string) error {
+	return cloudprovider.NewNodeRebootNotImplementedError()
 }
 
 // Name returns the CloudProvider implementation name.
