@@ -7,5 +7,8 @@ VERBOSITY=0
 # Feature flags - enable karpenter integration by default
 PROXMOX_FEATURE_FLAGS=karpenter
 
+# Shared policy for the VMs partition or none
+SHARED_POLICY=none
+
 # Additional command line arguments
 EXTRA_ARGS=""
