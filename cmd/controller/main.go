@@ -57,6 +57,7 @@ func main() {
 			proxmoxCloudProvider,
 			clusterState,
 			op.InstanceTypeStore,
+			op.PredictionStore,
 		)...).
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
