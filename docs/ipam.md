@@ -11,7 +11,13 @@ In the cloud-init section of the template, specify the `IP Config` fields with t
 * If the ip addresses is given subnet definition format (e.g., `192.168.0.0/24`), Karpenter Proxmox will use that subnet to allocate IP addresses.
 * Before assigning an address, it checks the existing IPs already in use on Proxmox and Kubernetes nodes to avoid conflicts.
 * If no gateway is specified, it defaults to using the IP address of the Proxmox node’s bridge as the gateway.
-* For IPv6, it uses SLAAC mechanism to assign addresses from the specified IPv6 subnet, the subnet can be less than /64.
+* Some IPv4 addresses are reserved and never assigned to VMs:
+  * the network address (e.g., `192.168.0.0`),
+  * the first host address (e.g., `192.168.0.1`), even if the gateway is another address,
+  * the broadcast address (e.g., `192.168.0.255`),
+  * the gateway configured on the Proxmox node’s bridge.
+* The subnet must leave at least one address to assign, so `/31` and `/32` IPv4 subnets are not supported.
+* For IPv6, it uses SLAAC mechanism to assign addresses from the specified IPv6 subnet, the subnet can be less than /64. IPv6 addresses are derived from the VM MAC address, so the reservation rules above do not apply to them.
 
 Example proxmox virtual machine configuration:
 

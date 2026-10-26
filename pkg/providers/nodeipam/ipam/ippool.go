@@ -20,26 +20,31 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"math/bits"
 	"net"
 	"sync"
 
 	gocidr "github.com/apparentlymart/go-cidr/cidr"
 )
 
+// ErrPoolExhausted is returned when the pool has no free addresses left.
+var ErrPoolExhausted = errors.New("no available IPs in the pool")
+
 type IPPool struct {
 	sync.RWMutex
 
 	// IPNet is the IP network for the pool.
 	IPNet *net.IPNet
-	// maxIPs is the maximum number of IPs that can be allocated in the pool.
-	maxIPs int
-	// pool holds the allocated IPs bits in the pool.
-	pool big.Int
+	// size is the number of addresses in the network, including reserved ones.
+	size int
+	// reserved holds the bits of addresses that are never allocated.
+	reserved big.Int
+	// occupied holds the bits of addresses currently in use.
+	occupied big.Int
 }
 
-func ParseCIDR(s string) (*IPPool, error) {
-	var maxIPs int
-
+// NewIPPool creates an IP pool for the CIDR with its reserved addresses already set.
+func NewIPPool(s string) (*IPPool, error) {
 	_, ipNet, err := net.ParseCIDR(s)
 	if err != nil {
 		return nil, errors.New("invalid CIDR format")
@@ -47,48 +52,50 @@ func ParseCIDR(s string) (*IPPool, error) {
 
 	ones, bits := ipNet.Mask.Size()
 
-	switch bits {
-	case 32:
-		maxIPs = 1 << (int(32) - ones)
-	case 128:
-		maxIPs = 1 << (int(128) - ones)
-	default:
-		return nil, errors.New("only IPv4 and IPv6 are supported")
+	switch {
+	case bits == 32 && ones > 30:
+		return nil, fmt.Errorf("CIDR %s has no allocatable addresses", ipNet.String())
+	case bits == 128 && ones > 127:
+		return nil, fmt.Errorf("CIDR %s has no allocatable addresses", ipNet.String())
+	case bits == 128 && ones < 96:
+		return nil, fmt.Errorf("CIDR %s is too large, the minimum IPv6 prefix is /96", ipNet.String())
 	}
 
-	maxIPs -= 1 // Exclude network address for IP allocation
+	p := &IPPool{IPNet: ipNet, size: 1 << (bits - ones)}
 
-	return &IPPool{IPNet: ipNet, maxIPs: maxIPs}, nil
+	// Network address
+	p.reserved.SetBit(&p.reserved, 0, 1)
+
+	if bits == 32 {
+		// First host address, reserved for technical needs
+		p.reserved.SetBit(&p.reserved, 1, 1)
+		// Broadcast address
+		p.reserved.SetBit(&p.reserved, p.size-1, 1)
+	}
+
+	return p, nil
 }
 
-func (p *IPPool) IsEmpty() bool {
-	p.RLock()
-	defer p.RUnlock()
-
-	return p.pool.BitLen() == 0
-}
-
+// Size returns the number of occupied addresses.
 func (p *IPPool) Size() int {
 	p.RLock()
 	defer p.RUnlock()
 
-	size := 0
+	return countBits(&p.occupied)
+}
 
-	for i := 0; i <= p.maxIPs; i++ {
-		if p.pool.Bit(i) == 1 {
-			size++
-		}
-	}
+func (p *IPPool) String() string {
+	p.RLock()
+	defer p.RUnlock()
 
-	return size
+	occupied := countBits(&p.occupied)
+	reserved := countBits(&p.reserved)
+
+	return fmt.Sprintf("CIDR: %s occupied: %d, reserved: %d, free: %d", p.IPNet.String(), occupied, reserved, p.size-occupied-reserved)
 }
 
 func (p *IPPool) EqualCIDR(other *net.IPNet) bool {
 	return p.IPNet.IP.Equal(other.IP) && (p.IPNet.Mask.String() == other.Mask.String())
-}
-
-func (p *IPPool) String() string {
-	return fmt.Sprintf("CIDR: %s used-map: %s, total: %d", p.IPNet.String(), p.pool.Text(2), p.maxIPs)
 }
 
 func (p *IPPool) Contains(ip net.IP) bool {
@@ -99,83 +106,85 @@ func (p *IPPool) ContainsCIDR(ip *net.IPNet) bool {
 	return p.IPNet.Contains(ip.IP)
 }
 
+// Occupy marks the IP as in use. It returns false if the IP is reserved, already occupied or outside the pool.
 func (p *IPPool) Occupy(ip net.IP) bool {
 	p.Lock()
 	defer p.Unlock()
 
-	if p.IPNet.IP.Equal(ip) {
-		return false
-	}
-
-	inx, err := p.HostIndex(ip)
+	inx, err := p.hostIndex(ip)
 	if err != nil {
 		return false
 	}
 
-	if p.pool.Bit(inx) == 0 {
-		p.pool.SetBit(&p.pool, inx, 1)
-
-		return true
+	if p.reserved.Bit(inx) == 1 || p.occupied.Bit(inx) == 1 {
+		return false
 	}
 
-	return false
+	p.occupied.SetBit(&p.occupied, inx, 1)
+
+	return true
 }
 
-func (p *IPPool) Next(cidr ...*net.IPNet) net.IP {
+// Reserve excludes the IP from allocation, even if it is currently occupied.
+// It returns false if the IP is outside the pool.
+func (p *IPPool) Reserve(ip net.IP) bool {
 	p.Lock()
 	defer p.Unlock()
 
-	var (
-		candidate int
-		err       error
-	)
-
-	if len(cidr) > 0 && !p.IPNet.IP.Equal(cidr[0].IP) {
-		candidate, err = p.HostIndex(cidr[0].IP)
-		if err != nil {
-			candidate = 0
-		}
-	}
-
-	for range p.maxIPs {
-		if p.pool.Bit(candidate) == 0 {
-			break
-		}
-
-		candidate = (candidate + 1) % p.maxIPs
-	}
-
-	p.pool.SetBit(&p.pool, candidate, 1)
-
-	ip, err := gocidr.Host(p.IPNet, candidate+1)
+	inx, err := p.hostIndex(ip)
 	if err != nil {
-		return nil
+		return false
 	}
 
-	return ip
+	p.occupied.SetBit(&p.occupied, inx, 0)
+	p.reserved.SetBit(&p.reserved, inx, 1)
+
+	return true
 }
 
+// Allocate occupies the next free address after the hint, or from the start of the pool if hint is nil.
+func (p *IPPool) Allocate(hint net.IP) (net.IP, error) {
+	p.Lock()
+	defer p.Unlock()
+
+	candidate := 0
+
+	if hint != nil {
+		if inx, err := p.hostIndex(hint); err == nil {
+			candidate = (inx + 1) % p.size
+		}
+	}
+
+	for range p.size {
+		if p.reserved.Bit(candidate) == 0 && p.occupied.Bit(candidate) == 0 {
+			p.occupied.SetBit(&p.occupied, candidate, 1)
+
+			return gocidr.Host(p.IPNet, candidate)
+		}
+
+		candidate = (candidate + 1) % p.size
+	}
+
+	return nil, ErrPoolExhausted
+}
+
+// Release returns the IP to the pool. Releasing a reserved IP is a no-op.
 func (p *IPPool) Release(ip net.IP) error {
 	p.Lock()
 	defer p.Unlock()
 
-	if p.IPNet.IP.Equal(ip) {
-		return nil
-	}
-
-	inx, err := p.HostIndex(ip)
+	inx, err := p.hostIndex(ip)
 	if err != nil {
 		return err
 	}
 
-	if p.pool.Bit(inx) == 1 {
-		p.pool.SetBit(&p.pool, inx, 0)
-	}
+	p.occupied.SetBit(&p.occupied, inx, 0)
 
 	return nil
 }
 
-func (p *IPPool) HostIndex(ip net.IP) (int, error) {
+// hostIndex returns the offset of the IP from the network address.
+func (p *IPPool) hostIndex(ip net.IP) (int, error) {
 	if !p.IPNet.Contains(ip) {
 		return -1, fmt.Errorf("IP %s is not in the CIDR %s", ip.String(), p.IPNet.String())
 	}
@@ -183,10 +192,14 @@ func (p *IPPool) HostIndex(ip net.IP) (int, error) {
 	c := big.NewInt(0).SetBytes(ip.To16())
 	b := big.NewInt(0).SetBytes(p.IPNet.IP.To16())
 
-	index := big.NewInt(0).Sub(c, b)
-	if index.Int64() > int64(p.maxIPs) {
-		return -1, fmt.Errorf("IP %s index %d is out of range for CIDR %s", ip.String(), index.Int64(), p.IPNet.String())
+	return int(big.NewInt(0).Sub(c, b).Int64()), nil
+}
+
+func countBits(b *big.Int) int {
+	n := 0
+	for _, w := range b.Bits() {
+		n += bits.OnesCount(uint(w))
 	}
 
-	return int(index.Int64() - 1), nil
+	return n
 }

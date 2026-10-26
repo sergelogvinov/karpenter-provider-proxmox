@@ -81,7 +81,7 @@ func (p *DefaultProvider) UpdateNodeCIDR(ctx context.Context) error {
 
 						ip := net.ParseIP(iface.Gateway4)
 						if p.subnets[i].Contains(ip) {
-							p.subnets[i].Occupy(ip)
+							p.subnets[i].Reserve(ip)
 						}
 					}
 				}
@@ -117,7 +117,7 @@ func (p *DefaultProvider) AllocateOrOccupyCIDR(subnet string) error {
 	}
 
 	if ipPool == nil {
-		ipPool, err = ipam.ParseCIDR(subnet)
+		ipPool, err = ipam.NewIPPool(subnet)
 		if err != nil {
 			return err
 		}
@@ -179,9 +179,9 @@ func (p *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
 		}
 
 		if p.subnets[i].ContainsCIDR(cidr) {
-			ip := p.subnets[i].Next(cidr)
-			if ip == nil {
-				return nil, fmt.Errorf("no available IPs in subnet %s", cidr.String())
+			ip, err := p.subnets[i].Allocate(cidr.IP)
+			if err != nil {
+				return nil, fmt.Errorf("subnet %s: %w", cidr.String(), err)
 			}
 
 			return ip, nil
