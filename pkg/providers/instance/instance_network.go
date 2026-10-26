@@ -106,7 +106,7 @@ func (p *DefaultProvider) generateNetworkIPs(networkConfig *cloudinit.NetworkCon
 				}
 
 				if ipv4.Equal(ipnet.IP) {
-					err = p.nodeIpamProvider.AllocateOrOccupyCIDR(addr)
+					err = p.nodeIpamProvider.RegisterSubnet(addr)
 					if err != nil {
 						return err
 					}
@@ -129,7 +129,7 @@ func (p *DefaultProvider) generateNetworkIPs(networkConfig *cloudinit.NetworkCon
 						}
 					}
 
-					ip, err := p.nodeIpamProvider.OccupyIP(subnet)
+					ip, err := p.nodeIpamProvider.AllocateIP(subnet)
 					if err != nil {
 						return err
 					}

@@ -94,16 +94,8 @@ func (p *IPPool) String() string {
 	return fmt.Sprintf("CIDR: %s occupied: %d, reserved: %d, free: %d", p.IPNet.String(), occupied, reserved, p.size-occupied-reserved)
 }
 
-func (p *IPPool) EqualCIDR(other *net.IPNet) bool {
-	return p.IPNet.IP.Equal(other.IP) && (p.IPNet.Mask.String() == other.Mask.String())
-}
-
 func (p *IPPool) Contains(ip net.IP) bool {
 	return p.IPNet.Contains(ip)
-}
-
-func (p *IPPool) ContainsCIDR(ip *net.IPNet) bool {
-	return p.IPNet.Contains(ip.IP)
 }
 
 // Occupy marks the IP as in use. It returns false if the IP is reserved, already occupied or outside the pool.

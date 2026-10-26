@@ -135,7 +135,7 @@ lint: ## Lint Code
 
 .PHONY: unit
 unit: ## Unit Tests
-	go test -tags=unit $(shell go list ./...) $(TESTARGS)
+	go test -race -tags=unit $(shell go list ./...) $(TESTARGS)
 
 .PHONY: e2e
 e2e: ## Run all e2e tests against the cluster

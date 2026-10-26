@@ -20,42 +20,42 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	ipam "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam/ipam"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 type Provider interface {
+	// UpdateNodeCIDR registers the subnets of the Proxmox nodes, occupies the node addresses and reserves their gateways.
 	UpdateNodeCIDR(ctx context.Context) error
-	AllocateOrOccupyCIDR(subnet string) error
-	ReleaseCIDR(subnet string) error
+	// RegisterSubnet creates the IP pool for the CIDR unless a pool already contains its network address,
+	// and occupies the address if the CIDR names a host in that pool.
+	RegisterSubnet(cidr string) error
+	// AllocateIP allocates the next free address in the subnet, starting after the address of the CIDR.
+	AllocateIP(cidr string) (net.IP, error)
 
 	OccupyNodeIPs(node *corev1.Node) error
-	OccupyIP(subnet string) (net.IP, error)
-	ReleaseNodeIPs(node *corev1.Node) error
-	ReleaseIP(subnet string) error
+	ReleaseIP(cidr string) error
 
 	String() string
 }
 
 // DefaultProvider is the provider that manages node ipam state.
 type DefaultProvider struct {
-	kubeClient            kubernetes.Interface
 	cloudCapacityProvider cloudcapacity.Provider
 
+	mu      sync.RWMutex
 	subnets []*ipam.IPPool
 }
 
 func NewDefaultProvider(
 	ctx context.Context,
-	kubeClient kubernetes.Interface,
 	cloudCapacityProvider cloudcapacity.Provider,
 ) *DefaultProvider {
 	return &DefaultProvider{
-		kubeClient:            kubeClient,
 		cloudCapacityProvider: cloudCapacityProvider,
 	}
 }
@@ -70,19 +70,13 @@ func (p *DefaultProvider) UpdateNodeCIDR(ctx context.Context) error {
 
 			for _, iface := range n.Ifaces {
 				if iface.Address4 != "" {
-					p.AllocateOrOccupyCIDR(iface.Address4)
+					p.RegisterSubnet(iface.Address4)
 				}
 
 				if iface.Gateway4 != "" {
-					for i := range p.subnets {
-						if p.subnets[i] == nil {
-							continue
-						}
-
-						ip := net.ParseIP(iface.Gateway4)
-						if p.subnets[i].Contains(ip) {
-							p.subnets[i].Reserve(ip)
-						}
+					ip := net.ParseIP(iface.Gateway4)
+					if pool := p.poolFor(ip); pool != nil {
+						pool.Reserve(ip)
 					}
 				}
 			}
@@ -92,152 +86,61 @@ func (p *DefaultProvider) UpdateNodeCIDR(ctx context.Context) error {
 	return nil
 }
 
-func (p *DefaultProvider) AllocateOrOccupyCIDR(subnet string) error {
-	ip, cidr, err := net.ParseCIDR(subnet)
+func (p *DefaultProvider) RegisterSubnet(cidr string) error {
+	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return err
 	}
 
-	if cidr.IP.To4() == nil {
+	if ipNet.IP.To4() == nil {
 		return fmt.Errorf("only IPv4 is supported")
 	}
 
-	var ipPool *ipam.IPPool
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-	for i := range p.subnets {
-		if p.subnets[i] == nil {
-			continue
-		}
-
-		if p.subnets[i].ContainsCIDR(cidr) {
-			ipPool = p.subnets[i]
-
-			break
-		}
-	}
-
-	if ipPool == nil {
-		ipPool, err = ipam.NewIPPool(subnet)
+	pool := p.lookup(ipNet.IP)
+	if pool == nil {
+		pool, err = ipam.NewIPPool(cidr)
 		if err != nil {
 			return err
 		}
 
-		p.subnets = append(p.subnets, ipPool)
+		p.subnets = append(p.subnets, pool)
 	}
 
-	if !ip.Equal(cidr.IP) {
-		ipPool.Occupy(ip)
-	}
+	pool.Occupy(ip)
 
 	return nil
 }
 
-func (p *DefaultProvider) ReleaseCIDR(subnet string) error {
-	_, cidr, err := net.ParseCIDR(subnet)
-	if err != nil {
-		return err
-	}
-
-	for i := range p.subnets {
-		if p.subnets[i] == nil {
-			continue
-		}
-
-		if p.subnets[i].EqualCIDR(cidr) {
-			p.subnets = append(p.subnets[:i], p.subnets[i+1:]...)
-
-			return nil
-		}
-	}
-
-	return nil
-}
-
-func (p *DefaultProvider) OccupyNodeIPs(node *corev1.Node) error {
-	if len(p.subnets) == 0 {
-		return ErrNoSubnetFound
-	}
-
-	return p.updateNodeIPs(node, func(subnet *ipam.IPPool, ip net.IP) error {
-		subnet.Occupy(ip)
-
-		return nil
-	})
-}
-
-func (p *DefaultProvider) OccupyIP(subnet string) (net.IP, error) {
-	ip, cidr, err := net.ParseCIDR(subnet)
+func (p *DefaultProvider) AllocateIP(cidr string) (net.IP, error) {
+	hint, _, err := net.ParseCIDR(cidr)
 	if err != nil {
 		return nil, err
 	}
 
-	cidr.IP = ip
-
-	for i := range p.subnets {
-		if p.subnets[i] == nil {
-			continue
-		}
-
-		if p.subnets[i].ContainsCIDR(cidr) {
-			ip, err := p.subnets[i].Allocate(cidr.IP)
-			if err != nil {
-				return nil, fmt.Errorf("subnet %s: %w", cidr.String(), err)
-			}
-
-			return ip, nil
-		}
+	pool := p.poolFor(hint)
+	if pool == nil {
+		return nil, fmt.Errorf("no subnet found for cidr %s", cidr)
 	}
 
-	return nil, fmt.Errorf("no subnet found for cidr %s", cidr.String())
-}
-
-func (p *DefaultProvider) ReleaseNodeIPs(node *corev1.Node) error {
-	if len(p.subnets) == 0 {
-		return ErrNoSubnetFound
-	}
-
-	return p.updateNodeIPs(node, func(subnet *ipam.IPPool, ip net.IP) error {
-		return subnet.Release(ip)
-	})
-}
-
-func (p *DefaultProvider) ReleaseIP(subnet string) error {
-	if len(p.subnets) == 0 {
-		return ErrNoSubnetFound
-	}
-
-	ip, cidr, err := net.ParseCIDR(subnet)
+	ip, err := pool.Allocate(hint)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("subnet %s: %w", pool.IPNet.String(), err)
 	}
 
-	cidr.IP = ip
-
-	for i := range p.subnets {
-		if p.subnets[i] == nil {
-			continue
-		}
-
-		if p.subnets[i].ContainsCIDR(cidr) {
-			return p.subnets[i].Release(ip)
-		}
-	}
-
-	return ErrNoSubnetFound
+	return ip, nil
 }
 
-func (p *DefaultProvider) String() string {
-	capacity := make([]string, len(p.subnets))
-	for i := range p.subnets {
-		if p.subnets[i] != nil {
-			capacity[i] = p.subnets[i].String()
-		}
+func (p *DefaultProvider) OccupyNodeIPs(node *corev1.Node) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if len(p.subnets) == 0 {
+		return ErrNoSubnetFound
 	}
 
-	return fmt.Sprintf("NodeIpamProvider{subnets: %d, capacity: %v}", len(p.subnets), capacity)
-}
-
-func (p *DefaultProvider) updateNodeIPs(node *corev1.Node, f func(subnet *ipam.IPPool, ip net.IP) error) error {
 	for _, addr := range node.Status.Addresses {
 		if addr.Type != corev1.NodeInternalIP && addr.Type != corev1.NodeExternalIP {
 			continue
@@ -248,16 +151,53 @@ func (p *DefaultProvider) updateNodeIPs(node *corev1.Node, f func(subnet *ipam.I
 			continue
 		}
 
-		for i := range p.subnets {
-			if p.subnets[i] == nil {
-				continue
-			}
+		if pool := p.lookup(ip); pool != nil {
+			pool.Occupy(ip)
+		}
+	}
 
-			if p.subnets[i].Contains(ip) {
-				if err := f(p.subnets[i], ip); err != nil {
-					return err
-				}
-			}
+	return nil
+}
+
+func (p *DefaultProvider) ReleaseIP(cidr string) error {
+	ip, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return err
+	}
+
+	pool := p.poolFor(ip)
+	if pool == nil {
+		return ErrNoSubnetFound
+	}
+
+	return pool.Release(ip)
+}
+
+func (p *DefaultProvider) String() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	capacity := make([]string, len(p.subnets))
+	for i := range p.subnets {
+		capacity[i] = p.subnets[i].String()
+	}
+
+	return fmt.Sprintf("NodeIpamProvider{subnets: %d, capacity: %v}", len(p.subnets), capacity)
+}
+
+// poolFor returns the IP pool that contains the IP, or nil.
+func (p *DefaultProvider) poolFor(ip net.IP) *ipam.IPPool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.lookup(ip)
+}
+
+// lookup is poolFor for callers that already hold the lock.
+func (p *DefaultProvider) lookup(ip net.IP) *ipam.IPPool {
+	for _, pool := range p.subnets {
+		if pool.Contains(ip) {
+			return pool
 		}
 	}
 
