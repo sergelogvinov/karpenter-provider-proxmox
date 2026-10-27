@@ -66,19 +66,18 @@ func TestNodePolicySelection(t *testing.T) {
 			t.Parallel()
 
 			ctx := options.ToContext(context.Background(), &options.Options{NodePolicy: tc.policy, CPUOvercommitRatio: tc.ratio})
-			manager, err := NewResourceManager(ctx, client, "test", "test")
+			capacity, err := ZoneCapacityFromCluster(ctx, client, "test", "test")
 			require.NoError(t, err)
-			require.Equal(t, tc.capacity, manager.AvailableCPUs())
+			require.Equal(t, tc.capacity, capacity.Available().CPUs)
 
 			request := &resources.VMResources{ID: 1, CPUs: 16, Memory: 8 << 30}
-			err = manager.Allocate(request)
+			err = capacity.Reserve(request)
 			if tc.admit {
 				require.NoError(t, err)
-				require.NoError(t, manager.AllocateOrUpdate(request))
-				require.Equal(t, 2, manager.AvailableCPUs())
-				require.Equal(t, uint64(23<<30), manager.AvailableMemory())
-				require.NoError(t, manager.Release(request))
-				require.Equal(t, 18, manager.AvailableCPUs())
+				require.NoError(t, capacity.Track(request))
+				require.Equal(t, Capacity{CPUs: 2, Memory: 23 << 30}, capacity.Available())
+				capacity.Release(request.ID)
+				require.Equal(t, 18, capacity.Available().CPUs)
 			} else {
 				require.ErrorContains(t, err, "not enough CPUs")
 			}

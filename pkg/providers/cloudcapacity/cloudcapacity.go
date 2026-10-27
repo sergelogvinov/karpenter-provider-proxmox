@@ -102,13 +102,13 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 	defer p.muCapacityInfo.Unlock()
 
 	key := fmt.Sprintf("%s/%s", region, zone)
-	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
-		err := info.ResourceManager.Allocate(op)
+	if info, ok := p.capacityInfo[key]; ok && info.Capacity != nil {
+		err := info.Capacity.Reserve(op)
 		if err != nil {
 			return fmt.Errorf("failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
 		}
 
-		log.V(1).Info("Capacity allocated successfully", "resourceStatus", info.ResourceManager.Status())
+		log.V(1).Info("Capacity allocated successfully", "resourceStatus", info.Capacity.String())
 
 		return nil
 	}
@@ -129,13 +129,10 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 	defer p.muCapacityInfo.Unlock()
 
 	key := fmt.Sprintf("%s/%s", region, zone)
-	if info, ok := p.capacityInfo[key]; ok && info.ResourceManager != nil {
-		err := info.ResourceManager.Release(op)
-		if err != nil {
-			return fmt.Errorf("failed to release CPU capacity in zone %s/%s: %w", region, zone, err)
-		}
+	if info, ok := p.capacityInfo[key]; ok && info.Capacity != nil {
+		info.Capacity.Release(id)
 
-		log.V(1).Info("Capacity released successfully", "resourceStatus", info.ResourceManager.Status())
+		log.V(1).Info("Capacity released successfully", "resourceStatus", info.Capacity.String())
 
 		return nil
 	}
@@ -230,8 +227,8 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 	}
 
 	for key, info := range capacityInfo {
-		if info.ResourceManager != nil {
-			log.V(1).Info("Node capacity available", "node", key, "resourceStatus", info.ResourceManager.Status())
+		if info.Capacity != nil {
+			log.V(1).Info("Node capacity available", "node", key, "resourceStatus", info.Capacity.String())
 		}
 	}
 
@@ -443,16 +440,15 @@ func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.Re
 	zones := []string{}
 
 	for _, info := range p.capacityInfo {
-		if info.Region != region || info.ResourceManager == nil {
+		if info.Region != region || info.Capacity == nil {
 			continue
 		}
 
-		cpu := info.ResourceManager.AvailableCPUs()
-		mem := info.ResourceManager.AvailableMemory()
+		free := info.Capacity.Available()
 
 		allocatable := corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", free.CPUs)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", free.Memory)),
 		}
 
 		if allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0 {
@@ -469,16 +465,15 @@ func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok {
-		if info.ResourceManager == nil {
+		if info.Capacity == nil {
 			return false
 		}
 
-		cpu := info.ResourceManager.AvailableCPUs()
-		mem := info.ResourceManager.AvailableMemory()
+		free := info.Capacity.Available()
 
 		allocatable := corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem)),
+			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", free.CPUs)),
+			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", free.Memory)),
 		}
 
 		return allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0

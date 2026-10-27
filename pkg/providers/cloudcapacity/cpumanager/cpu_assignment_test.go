@@ -516,10 +516,16 @@ func TestCPUAccumulatorTake(t *testing.T) {
 	}
 }
 
+// takeOptions selects the takeByTopologyNUMAPacked arguments a test case runs with.
+type takeOptions struct {
+	DistributeCPUsAcrossCores      bool
+	PreferAlignByUncoreCacheOption bool
+}
+
 type takeByTopologyTestCase struct {
 	description   string
 	topo          *topology.CPUTopology
-	opts          StaticPolicyOptions
+	opts          takeOptions
 	availableCPUs cpuset.CPUSet
 	numCPUs       int
 	expErr        string
@@ -531,7 +537,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take more cpus than are available from single socket with HT",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 2, 4, 6),
 			5,
 			"not enough cpus available to satisfy request: requested=5, available=4",
@@ -540,7 +546,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take zero cpus from single socket with HT",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			0,
 			"",
@@ -549,7 +555,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take one cpu from single socket with HT",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			1,
 			"",
@@ -558,7 +564,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take one cpu from single socket with HT, some cpus are taken",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(1, 3, 5, 6, 7),
 			1,
 			"",
@@ -567,7 +573,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take two cpus from single socket with HT",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			2,
 			"",
@@ -576,7 +582,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take all cpus from single socket with HT",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			8,
 			"",
@@ -585,7 +591,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take two cpus from single socket with HT, only one core totally free",
 			topoSingleSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 6),
 			2,
 			"",
@@ -594,7 +600,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a socket of cpus from dual socket with HT",
 			topoDualSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			6,
 			"",
@@ -603,7 +609,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a socket of cpus from dual socket with multi-numa-per-socket with HT",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "0-79"),
 			40,
 			"",
@@ -612,7 +618,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a NUMA node of cpus from dual socket with multi-numa-per-socket with HT",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "0-79"),
 			20,
 			"",
@@ -621,7 +627,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a NUMA node of cpus from dual socket with multi-numa-per-socket with HT, with 1 NUMA node already taken",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "10-39,50-79"),
 			20,
 			"",
@@ -630,7 +636,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a socket and a NUMA node of cpus from dual socket with multi-numa-per-socket with HT",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "0-79"),
 			60,
 			"",
@@ -639,7 +645,7 @@ func commonTakeByTopologyTestCases(t *testing.T) []takeByTopologyTestCase {
 		{
 			"take a socket and a NUMA node of cpus from dual socket with multi-numa-per-socket with HT, a core taken",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "1-39,41-79"), // reserve the first (phys) core (0,40)
 			60,
 			"",
@@ -655,7 +661,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take one cpu from dual socket with HT - core from Socket 0",
 			topoDualSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			cpuset.New(1, 2, 3, 4, 5, 7, 8, 9, 10, 11),
 			1,
 			"",
@@ -664,7 +670,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"allocate 4 full cores with 3 coming from the first NUMA node (filling it up) and 1 coming from the second NUMA node",
 			topoDualSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "0-11"),
 			8,
 			"",
@@ -673,7 +679,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"allocate 32 full cores with 30 coming from the first 3 NUMA nodes (filling them up) and 2 coming from the fourth NUMA node",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{},
+			takeOptions{},
 			mustParseCPUSet(t, "0-79"),
 			64,
 			"",
@@ -683,7 +689,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take cpus from two full UncoreCaches and partial from a single UncoreCache",
 			topoUncoreSingleSocketNoSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "1-15"),
 			10,
 			"",
@@ -692,7 +698,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take one cpu from dual socket with HT - core from Socket 0",
 			topoDualSocketHT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			cpuset.New(1, 2, 3, 4, 5, 7, 8, 9, 10, 11),
 			1,
 			"",
@@ -701,7 +707,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take first available UncoreCache from first socket",
 			topoUncoreDualSocketNoSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "0-15"),
 			4,
 			"",
@@ -710,7 +716,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take all available UncoreCache from first socket",
 			topoUncoreDualSocketNoSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "2-15"),
 			6,
 			"",
@@ -719,7 +725,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take first available UncoreCache from second socket",
 			topoUncoreDualSocketNoSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "8-15"),
 			4,
 			"",
@@ -728,7 +734,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take first available UncoreCache from available NUMA",
 			topoUncoreSingleSocketMultiNuma,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "3,4-8,12"),
 			2,
 			"",
@@ -737,7 +743,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take cpus from best available UncoreCache group of multi uncore cache single socket - SMT enabled",
 			topoUncoreSingleSocketSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "2-3,10-11,4-7,12-15"),
 			6,
 			"",
@@ -746,7 +752,7 @@ func TestTakeByTopologyNUMAPacked(t *testing.T) {
 		{
 			"take cpus from multiple UncoreCache of single socket - SMT enabled",
 			topoUncoreSingleSocketSMT,
-			StaticPolicyOptions{PreferAlignByUncoreCacheOption: true},
+			takeOptions{PreferAlignByUncoreCacheOption: true},
 			mustParseCPUSet(t, "1-7,9-15"),
 			10,
 			"",
@@ -777,7 +783,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 	testCases := []struct {
 		description   string
 		topo          *topology.CPUTopology
-		opts          StaticPolicyOptions
+		opts          takeOptions
 		availableCPUs cpuset.CPUSet
 		numCPUs       int
 		expErr        string
@@ -786,7 +792,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from single socket with HT, 3 cpus",
 			topoSingleSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			3,
 			"",
@@ -795,7 +801,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from dual socket with HT, 2 cpus",
 			topoDualSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			2,
 			"",
@@ -804,7 +810,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from dual socket with HT, 3 cpus",
 			topoDualSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			3,
 			"",
@@ -813,7 +819,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from dual socket with HT, 6 cpus",
 			topoDualSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			6,
 			"",
@@ -822,7 +828,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take cpus from dual socket with HT, 8 cpus",
 			topoDualSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
 			8,
 			"",
@@ -831,7 +837,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from dual socket without HT, 2 cpus",
 			topoDualSocketNoHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 			2,
 			"",
@@ -841,7 +847,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 			// DistributeCPUsAcrossCores doesn't care socket and numa ranking. such setting in test is transparent.
 			"take a socket of cpus from dual socket with multi numa per socket and HT, 12 cpus",
 			topoDualSocketMultiNumaPerSocketHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			mustParseCPUSet(t, "0-79"),
 			8,
 			"",
@@ -850,7 +856,7 @@ func TestTakeByTopologyWithSpreadPhysicalCPUsPreferredOption(t *testing.T) {
 		{
 			"take a socket of cpus from quad socket four way with HT, 12 cpus",
 			topoQuadSocketFourWayHT,
-			StaticPolicyOptions{DistributeCPUsAcrossCores: true},
+			takeOptions{DistributeCPUsAcrossCores: true},
 			mustParseCPUSet(t, "0-287"),
 			12,
 			"",

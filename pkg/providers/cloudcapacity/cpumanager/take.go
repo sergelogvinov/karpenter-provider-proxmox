@@ -16,18 +16,16 @@ limitations under the License.
 
 package cpumanager
 
-import "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+import (
+	"github.com/go-logr/logr"
 
-type policyName string
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 
-type Policy interface {
-	Name() string
-	Status() string
+	"k8s.io/utils/cpuset"
+)
 
-	AvailableCPUs() int
-	AvailableMemory() uint64
-
-	Allocate(op *resources.VMResources) error
-	AllocateOrUpdate(op *resources.VMResources) error
-	Release(op *resources.VMResources) error
+// TakeByTopology picks numCPUs from availableCPUs, packed into as few NUMA nodes
+// as possible and aligned to uncore caches where it can.
+func TakeByTopology(logger logr.Logger, topo *topology.CPUTopology, availableCPUs cpuset.CPUSet, numCPUs int) (cpuset.CPUSet, error) {
+	return takeByTopologyNUMAPacked(logger, topo, availableCPUs, numCPUs, CPUSortingStrategyPacked, true)
 }

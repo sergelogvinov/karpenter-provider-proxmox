@@ -53,3 +53,36 @@ _Avoid_: template reconcile, template sync
 **Template placement**:
 One VM template on one zone of one region, stored in status fields as `region/zone/vmid` (`ProxmoxTemplate.status.zones`, `ProxmoxUnmanagedTemplate.status.zones`, `ProxmoxNodeClass.status.selectedZones`). Region and zone are required and vmid is positive; entries that don't parse are skipped.
 _Avoid_: zone (for the whole triple), template location
+
+## Cloud capacity
+
+**Zone**:
+One Proxmox node, as Karpenter sees it for placement.
+_Avoid_: host (for this)
+
+**Zone capacity**:
+The CPU and memory one zone can give to virtual machines, plus a record for each virtual machine of what it holds there.
+_Avoid_: resource manager, ledger, node capacity
+
+**Reserve**:
+To admit a new virtual machine into a zone's capacity, but only if the zone has enough room left for it.
+_Avoid_: allocate (for this)
+
+**Track**:
+To record a virtual machine that already runs in a zone, even if the zone is then over its limits.
+_Avoid_: allocate-or-update, observe, adopt
+
+**Release**:
+To forget a virtual machine's record and return what it held to the zone's capacity. Releasing a virtual machine that has no record changes nothing.
+
+**Shared placement**:
+A virtual machine's vCPUs run on any of the zone's unpinned CPUs, together with other virtual machines.
+_Avoid_: simple policy
+
+**Pinned placement**:
+A virtual machine gets its own set of host CPUs aligned to the NUMA layout, and its memory is split across the NUMA nodes those CPUs belong to.
+_Avoid_: static policy
+
+**CPU overcommit ratio**:
+How many shared vCPUs a zone offers for each unpinned host CPU; 1.0 means no overcommit.
+_Avoid_: oversubscription factor
