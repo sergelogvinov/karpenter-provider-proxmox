@@ -1,0 +1,128 @@
+/*
+Copyright 2025 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package instancetemplate_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	pxpool "github.com/sergelogvinov/go-proxmox-pool"
+	"github.com/sergelogvinov/go-proxmox-rest/fakeapi"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/storage"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+)
+
+const region = "region-1"
+
+// fakeCloudCapacity serves storages by name.
+type fakeCloudCapacity struct {
+	cloudcapacity.Provider
+
+	storages map[string]*cloudcapacity.NodeStorageCapacityInfo
+}
+
+func (f *fakeCloudCapacity) GetStorage(_ string, name string, filter ...func(*cloudcapacity.NodeStorageCapacityInfo) bool) *cloudcapacity.NodeStorageCapacityInfo {
+	info, ok := f.storages[name]
+	if !ok {
+		return nil
+	}
+
+	for _, fn := range filter {
+		if !fn(info) {
+			return nil
+		}
+	}
+
+	return info
+}
+
+// newProvider returns a provider for one region backed by an in-memory
+// Proxmox cluster.
+func newProvider(t *testing.T, cluster *fakeapi.Cluster, capacity cloudcapacity.Provider) *instancetemplate.DefaultProvider {
+	t.Helper()
+
+	pool, err := pxpool.NewProxmoxPool([]*pxpool.ClusterConfig{{
+		Region:      region,
+		URL:         "https://127.0.0.1:8006/api2/json",
+		TokenID:     "user@pve!token",
+		TokenSecret: "secret",
+	}})
+	require.NoError(t, err)
+
+	pool.Set(region, cluster.Client(t))
+
+	return instancetemplate.NewDefaultProvider(context.Background(), pool, capacity)
+}
+
+// TestDeleteTwoImageStoragesInOneZone deletes two templates of one zone whose
+// image sits on two import storages there. Delete used to lock the zone once
+// per storage and hold every lock until it returned, so the second lock never
+// succeeded.
+func TestDeleteTwoImageStoragesInOneZone(t *testing.T) {
+	t.Parallel()
+
+	const (
+		zone    = "pve-1"
+		imageID = "noble-123.raw"
+	)
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes(zone))
+	for _, name := range []string{"local", "nfs"} {
+		cluster.Node(zone).AddStorage(name, "dir", fakeapi.WithVolume(storage.Volume{VolID: name + ":import/" + imageID}))
+	}
+
+	capacity := &fakeCloudCapacity{storages: map[string]*cloudcapacity.NodeStorageCapacityInfo{
+		"local": {Name: "local", Region: region, Capabilities: []string{"import", "images"}, Zones: []string{zone}},
+		"nfs":   {Name: "nfs", Region: region, Capabilities: []string{"import", "images"}, Zones: []string{zone}},
+	}}
+
+	p := newProvider(t, cluster, capacity)
+
+	templateClass := &v1alpha1.ProxmoxTemplate{}
+	templateClass.Spec.StorageIDs = []string{"local", "nfs"}
+	templateClass.Status.ImageID = imageID
+	templateClass.SetTemplatePlacements([]v1alpha1.TemplatePlacement{
+		{Region: region, Zone: zone, TemplateID: 1000},
+		{Region: region, Zone: zone, TemplateID: 1001},
+	})
+
+	done := make(chan error, 1)
+
+	go func() { done <- p.Delete(context.Background(), templateClass) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Delete deadlocked on the zone lock")
+	}
+
+	assert.Empty(t, templateClass.Status.Zones)
+
+	client := cluster.Client(t)
+	for _, name := range []string{"local", "nfs"} {
+		content, err := client.Nodes(zone).Storage().Content(name).List(context.Background(), nil)
+		require.NoError(t, err)
+		assert.Empty(t, content, "image left on %s", name)
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/samber/lo"
@@ -247,6 +248,40 @@ func (p *DefaultProvider) deleteTemplate(
 	}
 
 	return deleteQemuVM(ctx, cl, zone, vmID)
+}
+
+// deletePlacement deletes the template at placement and its image from every
+// import storage of the zone, holding the zone lock throughout.
+func (p *DefaultProvider) deletePlacement(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, placement v1alpha1.TemplatePlacement) error {
+	log := log.FromContext(ctx).WithName("instancetemplate.Delete()")
+
+	region := placement.Region
+	zone := placement.Zone
+	vmid := int(placement.TemplateID)
+
+	p.zoneLocks.Lock(zone)
+	defer p.zoneLocks.Unlock(zone)
+
+	if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
+		log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
+
+		return fmt.Errorf("failed to delete template %d: %w", vmid, err)
+	}
+
+	for _, storageID := range templateClass.Spec.StorageIDs {
+		storage := p.cloudCapacityProvider.GetStorage(region, storageID, func(info *cloudcapacity.NodeStorageCapacityInfo) bool {
+			return slices.Contains(info.Capabilities, importContent) && slices.Contains(info.Zones, zone)
+		})
+		if storage == nil {
+			continue
+		}
+
+		if err := p.deleteImage(ctx, templateClass, region, zone, storage); err != nil {
+			return fmt.Errorf("failed to delete image: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (p *DefaultProvider) updateTemplate(
