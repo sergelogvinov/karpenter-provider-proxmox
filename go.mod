@@ -1,6 +1,6 @@
 module github.com/sergelogvinov/karpenter-provider-proxmox
 
-go 1.27.1
+go 1.27.2
 
 // replace github.com/sergelogvinov/go-proxmox-rest => ../../proxmox/go-proxmox-rest
 // replace github.com/sergelogvinov/go-proxmox-pool => ../../proxmox/go-proxmox-pool
@@ -32,7 +32,7 @@ require (
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/utils v0.0.0-20260707023825-cf1189d6abe3
 	sigs.k8s.io/controller-runtime v0.24.1
-	sigs.k8s.io/karpenter v1.15.0
+	sigs.k8s.io/karpenter v1.15.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
