@@ -22,16 +22,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/go-logr/logr"
-
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 
@@ -40,49 +36,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type ResourceManager interface {
-	Allocate(*resources.VMResources) error
-	AllocateOrUpdate(*resources.VMResources) error
-	Release(*resources.VMResources) error
+// Node CPU policies, as named by the --node-policy option.
+const (
+	policyStatic                  = "static"
+	policySimpleWithCPUOvercommit = "simple-with-cpu-overcommit"
+)
 
-	AvailableCPUs() int
-	AvailableMemory() uint64
-
-	Status() string
-}
-
-type resourceManager struct {
-	cl   *proxmoxrest.Client
-	zone string
-	log  logr.Logger
-
-	nodeSettings settings.NodeSettings
-	nodePolicy   cpumanager.Policy
-}
-
-var _ ResourceManager = &resourceManager{}
-
-// NewResourceManager discovers host topology and constructs the selected CPU policy.
-func NewResourceManager(ctx context.Context, cl *proxmoxrest.Client, region, zone string) (ResourceManager, error) {
-	log := log.FromContext(ctx).WithName("ResourceManager").WithValues("node", zone)
+// ZoneCapacityFromCluster discovers a zone's host topology and settings and returns
+// its empty capacity, placing new VMs as the node policy option says.
+func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region, zone string) (*ZoneCapacity, error) {
+	log := log.FromContext(ctx).WithName("ZoneCapacity").WithValues("node", zone)
 
 	opts := options.FromContext(ctx)
 	if opts == nil {
 		return nil, fmt.Errorf("missing options in context")
 	}
 
-	var (
-		sysTopology *topology.Topology
-		err         error
-	)
-
-	manager := &resourceManager{
-		cl:   cl,
-		zone: zone,
-		log:  log,
-	}
-
-	manager.nodeSettings, err = nodeSettingsFromCluster(ctx, cl, zone)
+	nodeSettings, err := nodeSettingsFromCluster(ctx, cl, zone)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node settings from VM: %w", err)
 	}
@@ -95,135 +65,61 @@ func NewResourceManager(ctx context.Context, cl *proxmoxrest.Client, region, zon
 
 		if setting != nil {
 			if setting.NumSockets != 0 {
-				manager.nodeSettings.NumSockets = setting.NumSockets
+				nodeSettings.NumSockets = setting.NumSockets
 			}
 
 			if setting.NumThreads != 0 {
-				manager.nodeSettings.NumThreads = setting.NumThreads
+				nodeSettings.NumThreads = setting.NumThreads
 			}
 
 			if setting.NumUncoreCaches != 0 {
-				manager.nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
+				nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
 			}
 
 			if len(setting.ReservedCPUs) != 0 {
-				manager.nodeSettings.ReservedCPUs = setting.ReservedCPUs
+				nodeSettings.ReservedCPUs = setting.ReservedCPUs
 			}
 
 			if setting.ReservedMemory != 0 {
-				manager.nodeSettings.ReservedMemory = setting.ReservedMemory
+				nodeSettings.ReservedMemory = setting.ReservedMemory
 			}
 
 			if len(setting.NUMANodes) != 0 {
-				manager.nodeSettings.NUMANodes = setting.NUMANodes
+				nodeSettings.NUMANodes = setting.NUMANodes
 			}
 
-			log.V(1).Info("Loaded node settings from file", "file", name, "settings", manager.nodeSettings)
+			log.V(1).Info("Loaded node settings from file", "file", name, "settings", nodeSettings)
 		}
 	}
 
-	sysTopology, err = topology.DiscoverFromSettings(&manager.nodeSettings)
+	sysTopology, err := topology.DiscoverFromSettings(&nodeSettings)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", manager.zone, err)
+		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", zone, err)
 	}
+
+	var placement Placement
 
 	switch opts.NodePolicy {
-	case string(cpumanager.PolicyStatic):
-		manager.nodePolicy, err = cpumanager.NewStaticPolicy(log, sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create static policy for node %s: %w", manager.zone, err)
-		}
-	case string(cpumanager.PolicySimpleWithCPUOvercommit):
-		manager.nodePolicy, err = cpumanager.NewSimplePolicyWithCPUOvercommit(sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory, opts.CPUOvercommitRatio)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create CPU overcommit policy for node %s: %w", manager.zone, err)
-		}
+	case policyStatic:
+		placement = Pinned(log)
+	case policySimpleWithCPUOvercommit:
+		placement = Shared(opts.CPUOvercommitRatio)
 	default:
-		manager.nodePolicy, err = cpumanager.NewSimplePolicy(sysTopology, manager.nodeSettings.ReservedCPUs, manager.nodeSettings.ReservedMemory)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create simple policy for node %s: %w", manager.zone, err)
-		}
+		placement = Shared(1)
 	}
 
-	log.V(1).Info("Created resource manager",
-		"capacity", manager.nodePolicy.Status(),
-		"settings", manager.nodeSettings,
+	capacity, err := NewZoneCapacity(sysTopology, nodeSettings.ReservedCPUs, nodeSettings.ReservedMemory, placement)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create %s zone capacity for node %s: %w", opts.NodePolicy, zone, err)
+	}
+
+	log.V(1).Info("Created zone capacity",
+		"capacity", capacity.String(),
+		"settings", nodeSettings,
 		"policy", opts.NodePolicy,
 	)
 
-	return manager, nil
-}
-
-// Allocate implements ResourceManager.
-func (r *resourceManager) Allocate(op *resources.VMResources) (err error) {
-	if op == nil || op.CPUs <= 0 || op.Memory == 0 {
-		return fmt.Errorf("cannot allocate resources, invalid resources request")
-	}
-
-	err = r.nodePolicy.Allocate(op)
-	if err != nil {
-		return err
-	}
-
-	r.log.V(1).Info("Allocated resources", "id", op.ID,
-		"availableCapacity", r.Status(),
-		"CPUs", op.CPUs,
-		"CPUSet", op.CPUSet.String(),
-		"memory", op.Memory/1024/1024,
-		"numaNodes", op.NUMANodes,
-	)
-
-	return nil
-}
-
-// AllocateOrUpdate implements ResourceManager.
-func (r *resourceManager) AllocateOrUpdate(op *resources.VMResources) error {
-	if op == nil || op.CPUs <= 0 || op.Memory == 0 || op.ID == 0 {
-		return fmt.Errorf("cannot allocate resources, invalid resources request")
-	}
-
-	err := r.nodePolicy.AllocateOrUpdate(op)
-	if err != nil {
-		return err
-	}
-
-	r.log.V(4).Info("Allocated or updated resources", "id", op.ID,
-		"availableCapacity", r.Status(),
-		"CPUs", op.CPUs,
-		"CPUSet", op.CPUSet.String(),
-		"memory", op.Memory/1024/1024)
-
-	return nil
-}
-
-// Release implements ResourceManager.
-func (r *resourceManager) Release(op *resources.VMResources) (err error) {
-	if op == nil || op.CPUs <= 0 || op.Memory == 0 || op.ID == 0 {
-		return nil
-	}
-
-	if err := r.nodePolicy.Release(op); err != nil {
-		return err
-	}
-
-	r.log.V(4).Info("Released resources", "id", op.ID, "availableCapacity", r.Status(), "CPUs", op.CPUs, "CPUSet", op.CPUSet.String())
-
-	return nil
-}
-
-// AvailableCPUs implements ResourceManager.
-func (r *resourceManager) AvailableCPUs() int {
-	return r.nodePolicy.AvailableCPUs()
-}
-
-// AvailableMemory implements ResourceManager.
-func (r *resourceManager) AvailableMemory() uint64 {
-	return r.nodePolicy.AvailableMemory()
-}
-
-// Status implements ResourceManager.
-func (r *resourceManager) Status() string {
-	return r.nodePolicy.Status()
+	return capacity, nil
 }
 
 func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone string) (settings.NodeSettings, error) {

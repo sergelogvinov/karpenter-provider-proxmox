@@ -32,16 +32,16 @@ import (
 )
 
 func getNodeCapacity(ctx context.Context, cl *proxmoxrest.Client, region string, r *cluster.Resource) (NodeCapacityInfo, error) {
-	resourceManager, err := resourcemanager.NewResourceManager(ctx, cl, region, r.Node)
+	capacity, err := resourcemanager.ZoneCapacityFromCluster(ctx, cl, region, r.Node)
 	if err != nil {
-		return NodeCapacityInfo{}, fmt.Errorf("failed to create resource manager for node %s in region %s: %w", r.Node, region, err)
+		return NodeCapacityInfo{}, fmt.Errorf("failed to create zone capacity for node %s in region %s: %w", r.Node, region, err)
 	}
 
 	info := NodeCapacityInfo{
-		Name:            r.Node,
-		Region:          region,
-		CPULoad:         int(r.CPU * 100),
-		ResourceManager: resourceManager,
+		Name:     r.Node,
+		Region:   region,
+		CPULoad:  int(r.CPU * 100),
+		Capacity: capacity,
 	}
 
 	err = info.updateNodeCapacity(ctx, cl)
@@ -80,9 +80,9 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
 		}
 
-		err = i.ResourceManager.AllocateOrUpdate(opt)
+		err = i.Capacity.Track(opt)
 		if err != nil {
-			log.Error(err, "Failed to allocate resources for VM", "vmID", vmr.VMID)
+			log.Error(err, "Failed to track resources for VM", "vmID", vmr.VMID)
 		}
 	}
 

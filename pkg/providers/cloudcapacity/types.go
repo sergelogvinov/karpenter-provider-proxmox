@@ -28,8 +28,8 @@ type NodeCapacityInfo struct {
 	// CPULoad is the CPU load of the node in percentage.
 	CPULoad int `json:"cpu_load"`
 
-	// ResourceManager manages the CPU and memory and other resources of the node.
-	ResourceManager resourcemanager.ResourceManager `json:"-"`
+	// Capacity tracks the CPU and memory the node gives to VMs.
+	Capacity *resourcemanager.ZoneCapacity `json:"-"`
 }
 
 type NodeStorageCapacityInfo struct {
