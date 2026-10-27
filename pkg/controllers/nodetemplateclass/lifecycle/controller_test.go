@@ -40,49 +40,62 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-var placement = v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-1", TemplateID: 1000}
+var (
+	placement  = v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-1", TemplateID: 1000}
+	placement2 = v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-2", TemplateID: 1001}
+)
 
-// fakeProvider mimics DefaultProvider's status writes: Create records the
-// image and its placements, Delete clears the placements.
+// fakeProvider returns canned results and records what it was asked to do.
 type fakeProvider struct {
 	instancetemplate.Provider
 
-	installed []v1alpha1.TemplatePlacement
+	result    instancetemplate.CreateResult
+	createErr error
+	remaining []v1alpha1.TemplatePlacement
 	deleteErr error
 	onCreate  func()
 
-	calls []string
+	calls   []string
+	deleted []v1alpha1.TemplatePlacement
+	images  []string
+	updated []v1alpha1.TemplatePlacement
 }
 
-func (p *fakeProvider) Create(_ context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+// created is a CreateResult whose placements were all rendered by the call.
+func created(placements ...v1alpha1.TemplatePlacement) instancetemplate.CreateResult {
+	return instancetemplate.CreateResult{Placements: placements, Created: placements}
+}
+
+// reused is a CreateResult whose placements all existed before the call.
+func reused(placements ...v1alpha1.TemplatePlacement) instancetemplate.CreateResult {
+	return instancetemplate.CreateResult{Placements: placements}
+}
+
+func (p *fakeProvider) Create(_ context.Context, _ *v1alpha1.ProxmoxTemplate) (instancetemplate.CreateResult, error) {
 	p.calls = append(p.calls, "create")
 
 	if p.onCreate != nil {
 		p.onCreate()
 	}
 
-	if len(p.installed) > 0 {
-		templateClass.Status.ImageID = templateClass.GetImageID()
-		templateClass.SetTemplatePlacements(p.installed)
-	}
-
-	return nil
+	return p.result, p.createErr
 }
 
-func (p *fakeProvider) Delete(_ context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+func (p *fakeProvider) Delete(_ context.Context, _ *v1alpha1.ProxmoxTemplate, imageID string, placements []v1alpha1.TemplatePlacement) ([]v1alpha1.TemplatePlacement, error) {
 	p.calls = append(p.calls, "delete")
+	p.images = append(p.images, imageID)
+	p.deleted = append(p.deleted, placements...)
 
 	if p.deleteErr != nil {
-		return p.deleteErr
+		return p.remaining, p.deleteErr
 	}
 
-	templateClass.SetTemplatePlacements(nil)
-
-	return nil
+	return nil, nil
 }
 
-func (p *fakeProvider) Update(_ context.Context, _ *v1alpha1.ProxmoxTemplate) error {
+func (p *fakeProvider) Update(_ context.Context, _ *v1alpha1.ProxmoxTemplate, placements []v1alpha1.TemplatePlacement) error {
 	p.calls = append(p.calls, "update")
+	p.updated = append(p.updated, placements...)
 
 	return nil
 }
@@ -146,7 +159,7 @@ func get(t *testing.T, kubeClient client.Client) *v1alpha1.ProxmoxTemplate {
 
 func TestNewTemplateIsCreatedInOnePass(t *testing.T) {
 	kubeClient := newKubeClient(t, newTemplate(), interceptor.Funcs{})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: created(placement)}
 
 	requeue, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
@@ -183,13 +196,15 @@ func TestSourceImageChangeReplacesTemplates(t *testing.T) {
 	tpl.Status.ImageID = "talos-1.raw"
 
 	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: created(placement)}
 
 	_, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
 
 	tpl = get(t, kubeClient)
 	assert.Equal(t, []string{"delete", "create"}, provider.calls)
+	assert.Equal(t, []string{"talos-1.raw"}, provider.images)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, provider.deleted)
 	assert.Equal(t, tpl.GetImageID(), tpl.Status.ImageID)
 	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
 }
@@ -199,13 +214,14 @@ func TestInPlaceChangeUpdatesOnce(t *testing.T) {
 	tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] = "stale"
 
 	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: reused(placement)}
 
 	_, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
 
 	tpl = get(t, kubeClient)
 	assert.Equal(t, []string{"create", "update"}, provider.calls)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, provider.updated)
 	assert.Equal(t, tpl.InPlaceHash(), tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
 
 	_, err = reconcile(t, kubeClient, provider)
@@ -219,7 +235,7 @@ func TestMissingInPlaceHashIsAdoptedWithoutUpdate(t *testing.T) {
 	tpl.Annotations = nil
 
 	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: reused(placement)}
 
 	_, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
@@ -267,7 +283,7 @@ func TestFinalizerConflictRequeuesBeforeCreate(t *testing.T) {
 			return apierrors.NewConflict(schema.GroupResource{Resource: "proxmoxtemplates"}, obj.GetName(), errors.New("modified"))
 		},
 	})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: created(placement)}
 
 	requeue, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
@@ -281,7 +297,7 @@ func TestDeletionDuringCreateKeepsPlacements(t *testing.T) {
 	tpl.Finalizers = []string{v1alpha1.TerminationFinalizer}
 
 	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
-	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider := &fakeProvider{result: created(placement)}
 	provider.onCreate = func() {
 		require.NoError(t, kubeClient.Delete(t.Context(), newTemplate()))
 	}
@@ -299,4 +315,96 @@ func TestDeletionDuringCreateKeepsPlacements(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"create", "delete"}, provider.calls)
+}
+
+func TestReplacementSkipsUpdate(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] = "stale"
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{result: created(placement)}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []string{"create"}, provider.calls)
+	assert.Equal(t, tpl.InPlaceHash(), tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
+}
+
+func TestInPlaceUpdateSkipsCreatedPlacements(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] = "stale"
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{result: instancetemplate.CreateResult{
+		Placements: []v1alpha1.TemplatePlacement{placement, placement2},
+		Created:    []v1alpha1.TemplatePlacement{placement2},
+	}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, provider.updated)
+}
+
+func TestPartialCreateKeepsPlacements(t *testing.T) {
+	tpl := newTemplate()
+	tpl.Finalizers = []string{v1alpha1.TerminationFinalizer}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{result: created(placement), createErr: errors.New("zone-2: download failed")}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, tpl.TemplatePlacements())
+	assert.Equal(t, tpl.GetImageID(), tpl.Status.ImageID)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
+	assert.Equal(t, 10*time.Second, requeue)
+}
+
+func TestPartialImageReplacementKeepsOldImage(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Status.ImageID = "talos-1.raw"
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    created(placement, placement2),
+		remaining: []v1alpha1.TemplatePlacement{placement2},
+		deleteErr: errors.New("zone-2: proxmox unavailable"),
+	}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []string{"delete"}, provider.calls)
+	assert.Equal(t, "talos-1.raw", tpl.Status.ImageID)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement2}, tpl.TemplatePlacements())
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsFalse())
+	assert.Equal(t, 10*time.Second, requeue)
+}
+
+func TestPartialFinalizeKeepsRemainingPlacements(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+	tpl.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		remaining: []v1alpha1.TemplatePlacement{placement2},
+		deleteErr: errors.New("zone-2: proxmox unavailable"),
+	}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []string{tpl.GetImageID()}, provider.images)
+	assert.True(t, controllerutil.ContainsFinalizer(tpl, v1alpha1.TerminationFinalizer))
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement2}, tpl.TemplatePlacements())
+	assert.Equal(t, 10*time.Second, requeue)
 }

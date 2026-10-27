@@ -96,14 +96,13 @@ func (p *DefaultProvider) downloadImage(
 
 func (p *DefaultProvider) deleteImage(
 	ctx context.Context,
-	templateClass *v1alpha1.ProxmoxTemplate,
+	imageID string,
 	region string,
 	zone string,
 	storageInfo *cloudcapacity.NodeStorageCapacityInfo,
 ) error {
 	log := log.FromContext(ctx).WithName("instancetemplate.deleteImage").WithValues("region", region, "zone", zone, "storage", storageInfo.Name)
 
-	imageID := templateClass.Status.ImageID
 	log = log.WithValues("image", imageID)
 
 	cl, err := p.pool.Get(region)
@@ -149,7 +148,7 @@ func (p *DefaultProvider) createTemplate(
 	zone string,
 	storageImage *cloudcapacity.NodeStorageCapacityInfo,
 	storageTemplate *cloudcapacity.NodeStorageCapacityInfo,
-) (int, error) {
+) (int, bool, error) {
 	log := log.FromContext(ctx).WithName("instancetemplate.createTemplate").WithValues("region", region, "zone", zone, "storage", storageTemplate.Name)
 
 	imageID := templateClass.GetImageID()
@@ -162,13 +161,13 @@ func (p *DefaultProvider) createTemplate(
 	})
 	for _, t := range templates {
 		if t.TemplateHash == templateClass.Hash() {
-			return int(t.TemplateID), nil
+			return int(t.TemplateID), false, nil
 		}
 
 		log.V(1).Info("Deleting outdated template", "templateID", t.TemplateID, "templateHash", t.TemplateHash)
 
 		if err := p.deleteTemplate(ctx, region, zone, int(t.TemplateID)); err != nil {
-			return 0, fmt.Errorf("failed to delete outdated template: %w", err)
+			return 0, false, fmt.Errorf("failed to delete outdated template: %w", err)
 		}
 
 		vmid = int(t.TemplateID)
@@ -180,13 +179,13 @@ func (p *DefaultProvider) createTemplate(
 	if err != nil {
 		log.Error(err, "Failed to get proxmox cluster", "region", region)
 
-		return 0, err
+		return 0, false, err
 	}
 
 	if vmid == 0 {
 		vmid, err = p.pool.Cluster(region).GetNextID(ctx, 1000)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get next id: %v", err)
+			return 0, false, fmt.Errorf("failed to get next id: %v", err)
 		}
 	}
 
@@ -210,14 +209,14 @@ func (p *DefaultProvider) createTemplate(
 	if err != nil {
 		log.Error(err, "Failed to create virtual machine")
 
-		return 0, fmt.Errorf("unable to create virtual machine: %w", err)
+		return 0, false, fmt.Errorf("unable to create virtual machine: %w", err)
 	}
 
 	if err = t.Wait(ctx, &task.WaitOptions{Timeout: taskTimeout}); err != nil {
-		return 0, fmt.Errorf("unable to create virtual machine: %w", err)
+		return 0, false, fmt.Errorf("unable to create virtual machine: %w", err)
 	}
 
-	return vmid, nil
+	return vmid, true, nil
 }
 
 func (p *DefaultProvider) deleteTemplate(
@@ -252,7 +251,7 @@ func (p *DefaultProvider) deleteTemplate(
 
 // deletePlacement deletes the template at placement and its image from every
 // import storage of the zone, holding the zone lock throughout.
-func (p *DefaultProvider) deletePlacement(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, placement v1alpha1.TemplatePlacement) error {
+func (p *DefaultProvider) deletePlacement(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, imageID string, placement v1alpha1.TemplatePlacement) error {
 	log := log.FromContext(ctx).WithName("instancetemplate.Delete()")
 
 	region := placement.Region
@@ -276,7 +275,7 @@ func (p *DefaultProvider) deletePlacement(ctx context.Context, templateClass *v1
 			continue
 		}
 
-		if err := p.deleteImage(ctx, templateClass, region, zone, storage); err != nil {
+		if err := p.deleteImage(ctx, imageID, region, zone, storage); err != nil {
 			return fmt.Errorf("failed to delete image: %w", err)
 		}
 	}

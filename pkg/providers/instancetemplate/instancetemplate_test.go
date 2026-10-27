@@ -100,24 +100,33 @@ func TestDeleteTwoImageStoragesInOneZone(t *testing.T) {
 
 	templateClass := &v1alpha1.ProxmoxTemplate{}
 	templateClass.Spec.StorageIDs = []string{"local", "nfs"}
-	templateClass.Status.ImageID = imageID
-	templateClass.SetTemplatePlacements([]v1alpha1.TemplatePlacement{
+
+	placements := []v1alpha1.TemplatePlacement{
 		{Region: region, Zone: zone, TemplateID: 1000},
 		{Region: region, Zone: zone, TemplateID: 1001},
-	})
+	}
 
-	done := make(chan error, 1)
+	type deleted struct {
+		remaining []v1alpha1.TemplatePlacement
+		err       error
+	}
 
-	go func() { done <- p.Delete(context.Background(), templateClass) }()
+	done := make(chan deleted, 1)
+
+	go func() {
+		remaining, err := p.Delete(context.Background(), templateClass, imageID, placements)
+		done <- deleted{remaining, err}
+	}()
 
 	select {
-	case err := <-done:
-		require.NoError(t, err)
+	case res := <-done:
+		require.NoError(t, res.err)
+		assert.Empty(t, res.remaining)
 	case <-time.After(10 * time.Second):
 		t.Fatal("Delete deadlocked on the zone lock")
 	}
 
-	assert.Empty(t, templateClass.Status.Zones)
+	assert.Equal(t, v1alpha1.ProxmoxTemplateStatus{}, templateClass.Status, "Delete must not touch status")
 
 	client := cluster.Client(t)
 	for _, name := range []string{"local", "nfs"} {

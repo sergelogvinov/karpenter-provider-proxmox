@@ -40,9 +40,15 @@ import (
 type Provider interface {
 	SyncInstanceTemplates(ctx context.Context, regions ...string) error
 
-	Create(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
-	Delete(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
-	Update(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) error
+	// Create makes sure every zone the spec targets has a VM template that
+	// matches the template hash. It returns the placements it got even when
+	// some zones failed; the error joins the per-zone failures.
+	Create(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate) (CreateResult, error)
+	// Delete deletes the VM templates at placements and the image imageID
+	// from their zones. On failure it returns the placements still to delete.
+	Delete(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate, imageID string, placements []v1alpha1.TemplatePlacement) ([]v1alpha1.TemplatePlacement, error)
+	// Update applies the spec's in-place fields to the VM templates at placements.
+	Update(ctx context.Context, nodeTemplateClass *v1alpha1.ProxmoxTemplate, placements []v1alpha1.TemplatePlacement) error
 
 	ListWithFilter(ctx context.Context, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo
 }
@@ -87,6 +93,15 @@ type InstanceTemplateInfo struct {
 	Status string
 }
 
+// CreateResult is what Create left in Proxmox for one ProxmoxTemplate.
+type CreateResult struct {
+	// Placements are the VM templates that match the spec's template hash.
+	Placements []v1alpha1.TemplatePlacement
+	// Created are the Placements this call rendered, new or replacing an
+	// outdated VM template, so they already carry the in-place fields.
+	Created []v1alpha1.TemplatePlacement
+}
+
 // Placement returns where the template lives.
 func (info *InstanceTemplateInfo) Placement() v1alpha1.TemplatePlacement {
 	return v1alpha1.TemplatePlacement{Region: info.Region, Zone: info.Zone, TemplateID: info.TemplateID}
@@ -103,13 +118,8 @@ func NewDefaultProvider(ctx context.Context, pool *pxpool.ProxmoxPool, cloudCapa
 	}
 }
 
-func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (CreateResult, error) {
 	log := log.FromContext(ctx).WithName("instancetemplate.Create()")
-
-	imageID := templateClass.GetImageID()
-	if templateClass.Status.ImageID != "" && templateClass.Status.ImageID != imageID {
-		return fmt.Errorf("wait until old image will deleted")
-	}
 
 	regions := []string{}
 	if templateClass.Spec.Region != "" {
@@ -120,7 +130,10 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		regions = p.pool.List()
 	}
 
-	installed := []v1alpha1.TemplatePlacement{}
+	var (
+		result CreateResult
+		errs   error
+	)
 
 	for _, region := range regions {
 		var (
@@ -163,6 +176,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 				err := p.downloadImage(ctx, templateClass, region, zone, storageImage)
 				if err != nil {
 					log.Error(err, "Failed to download image", "region", region, "zone", zone)
+					errs = multierr.Append(errs, fmt.Errorf("region %s zone %s: %w", region, zone, err))
 
 					return
 				}
@@ -170,59 +184,60 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 				// Refresh instance templates cache before creating new one
 				p.SyncInstanceTemplates(ctx, region)
 
-				vmid, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
-				if err != nil || vmid == 0 {
+				vmid, created, err := p.createTemplate(ctx, templateClass, region, zone, storageImage, storageTemplate)
+				if err == nil && vmid == 0 {
+					err = fmt.Errorf("no VM ID for template")
+				}
+
+				if err != nil {
 					log.Error(err, "Failed to create template", "region", region, "zone", zone)
+					errs = multierr.Append(errs, fmt.Errorf("region %s zone %s: %w", region, zone, err))
 
 					return
 				}
 
-				installed = append(installed, v1alpha1.TemplatePlacement{Region: region, Zone: zone, TemplateID: uint64(vmid)})
+				placement := v1alpha1.TemplatePlacement{Region: region, Zone: zone, TemplateID: uint64(vmid)}
+
+				result.Placements = append(result.Placements, placement)
+				if created {
+					result.Created = append(result.Created, placement)
+				}
 			}(zone)
 		}
 
 		p.SyncInstanceTemplates(ctx, region)
 	}
 
-	if len(installed) > 0 {
-		templateClass.Status.ImageID = imageID
-		templateClass.SetTemplatePlacements(installed)
-	}
-
-	return nil
+	return result, errs
 }
 
-func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
-	log := log.FromContext(ctx).WithName("instancetemplate.Delete()").WithValues("imageID", templateClass.Status.ImageID)
+func (p *DefaultProvider) Delete(
+	ctx context.Context,
+	templateClass *v1alpha1.ProxmoxTemplate,
+	imageID string,
+	placements []v1alpha1.TemplatePlacement,
+) ([]v1alpha1.TemplatePlacement, error) {
+	log := log.FromContext(ctx).WithName("instancetemplate.Delete()").WithValues("imageID", imageID)
 	log.V(1).Info("Deleting templates and images")
 
-	for _, entry := range templateClass.Status.Zones {
-		placement, err := v1alpha1.ParseTemplatePlacement(entry)
-		if err != nil {
-			log.Error(err, "Dropping malformed template placement")
-
-			continue
-		}
-
-		if err := p.deletePlacement(ctx, templateClass, placement); err != nil {
-			return err
+	for i, placement := range placements {
+		if err := p.deletePlacement(ctx, templateClass, imageID, placement); err != nil {
+			return placements[i:], err
 		}
 	}
-
-	templateClass.SetTemplatePlacements(nil)
 
 	p.SyncInstanceTemplates(ctx)
 
-	return nil
+	return nil, nil
 }
 
-func (p *DefaultProvider) Update(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+func (p *DefaultProvider) Update(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, placements []v1alpha1.TemplatePlacement) error {
 	log := log.FromContext(ctx).WithName("instancetemplate.Update()").WithValues("InPlaceHash", templateClass.InPlaceHash())
 	log.V(4).Info("Updating template")
 
 	var errs error
 
-	for _, placement := range templateClass.TemplatePlacements() {
+	for _, placement := range placements {
 		region := placement.Region
 		zone := placement.Zone
 		vmid := int(placement.TemplateID)

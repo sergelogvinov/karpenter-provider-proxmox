@@ -101,7 +101,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 
 	templateClassCopy := templateClass.DeepCopy()
 
-	res := c.syncTemplates(ctx, templateClass)
+	res, reused := c.syncTemplates(ctx, templateClass)
 
 	templateClass.Status.Resources = corev1.ResourceList{
 		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(templateClass.Status.Zones))),
@@ -116,7 +116,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 		}
 	}
 
-	if err := c.updateInPlace(ctx, templateClass); err != nil {
+	if err := c.updateInPlace(ctx, templateClass, reused); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -141,28 +141,41 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 // syncTemplates creates the VM templates, replacing them first when the
-// source image changed, and records the outcome in the Ready condition.
-func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) reconcile.Result {
+// source image changed, and records the outcome in status. It returns the
+// placements Create reused rather than rendered, which may still need an
+// in-place update.
+func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, []v1alpha1.TemplatePlacement) {
 	imageID := templateClass.GetImageID()
 	if templateClass.Status.ImageID != "" && templateClass.Status.ImageID != imageID {
-		err := c.instanceTemplateProvider.Delete(ctx, templateClass)
+		remaining, err := c.instanceTemplateProvider.Delete(ctx, templateClass, templateClass.Status.ImageID, templateClass.TemplatePlacements())
 		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to delete outdated Proxmox Templates", "templateClass", templateClass.Name)
+
+			templateClass.SetTemplatePlacements(remaining)
 			templateClass.StatusConditions().SetFalse(
 				v1alpha1.ConditionTemplateReady,
 				NodeTemplateClassResolutionReason,
 				"Image should be updated",
 			)
 
-			return reconcile.Result{RequeueAfter: templateRepeatPeriod}
+			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 		}
 
+		templateClass.SetTemplatePlacements(nil)
 		templateClass.Status.ImageID = imageID
 	}
 
-	err := c.instanceTemplateProvider.Create(ctx, templateClass)
+	created, err := c.instanceTemplateProvider.Create(ctx, templateClass)
 	if err != nil {
-		return reconcile.Result{RequeueAfter: templateRepeatPeriod}
+		log.FromContext(ctx).Error(err, "Failed to create some Proxmox Templates", "templateClass", templateClass.Name)
 	}
+
+	if len(created.Placements) > 0 {
+		templateClass.Status.ImageID = imageID
+		templateClass.SetTemplatePlacements(created.Placements)
+	}
+
+	reused, _ := lo.Difference(created.Placements, created.Created)
 
 	if templateClass.Status.ImageID == "" || templateClass.Status.Zones == nil {
 		templateClass.StatusConditions().SetUnknownWithReason(
@@ -171,18 +184,23 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 			"ImageID or InstalledZones is not set yet",
 		)
 
-		return reconcile.Result{RequeueAfter: templateRepeatPeriod}
+		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 	}
 
 	templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
 
-	return reconcile.Result{RequeueAfter: templateScanPeriod}
+	if err != nil {
+		return reconcile.Result{RequeueAfter: templateRepeatPeriod}, reused
+	}
+
+	return reconcile.Result{RequeueAfter: templateScanPeriod}, reused
 }
 
-// updateInPlace applies in-place fields to ready VM templates and records the
-// applied in-place hash. A template without a recorded hash adopts the current
-// one without an update, so hand edits survive an upgrade.
-func (c *Controller) updateInPlace(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
+// updateInPlace applies in-place fields to the reused VM templates and records
+// the applied in-place hash. VM templates Create rendered in this pass already
+// carry them. A template without a recorded hash adopts the current one
+// without an update, so hand edits survive an upgrade.
+func (c *Controller) updateInPlace(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, reused []v1alpha1.TemplatePlacement) error {
 	if status := templateClass.StatusConditions().Get(v1alpha1.ConditionTemplateReady); status == nil || !status.IsTrue() {
 		return nil
 	}
@@ -194,13 +212,13 @@ func (c *Controller) updateInPlace(ctx context.Context, templateClass *v1alpha1.
 		return nil
 	}
 
-	if ok {
+	if ok && len(reused) > 0 {
 		log.FromContext(ctx).V(4).Info("comparing in-place update hashes",
 			"templateClass", templateClass.Name,
 			"inPlaceHash", inPlaceHash,
 		)
 
-		if err := c.instanceTemplateProvider.Update(ctx, templateClass); err != nil {
+		if err := c.instanceTemplateProvider.Update(ctx, templateClass, reused); err != nil {
 			return err
 		}
 
@@ -226,12 +244,21 @@ func (c *Controller) finalize(ctx context.Context, templateClass *v1alpha1.Proxm
 	templateClassCopy := templateClass.DeepCopy()
 
 	if len(templateClass.Status.Zones) > 0 {
-		err := c.instanceTemplateProvider.Delete(ctx, templateClass)
+		remaining, err := c.instanceTemplateProvider.Delete(ctx, templateClass, templateClass.Status.ImageID, templateClass.TemplatePlacements())
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to delete Proxmox Template", "templateClass", templateClass.Name)
 
-			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil //nolint: nilerr
+			// Keep only what is left, so a retry and a later finalize see the truth.
+			templateClass.SetTemplatePlacements(remaining)
+
+			if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFrom(templateClassCopy)); err != nil {
+				return reconcile.Result{}, client.IgnoreNotFound(err)
+			}
+
+			return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 		}
+
+		templateClass.SetTemplatePlacements(nil)
 	}
 
 	if len(templateClass.Status.Zones) == 0 {
