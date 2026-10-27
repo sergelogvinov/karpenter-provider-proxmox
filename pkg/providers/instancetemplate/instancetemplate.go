@@ -204,31 +204,8 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 			continue
 		}
 
-		region := placement.Region
-		zone := placement.Zone
-		vmid := int(placement.TemplateID)
-
-		if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
-			log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
-
-			return fmt.Errorf("failed to delete template %d: %w", vmid, err)
-		}
-
-		for _, storageID := range templateClass.Spec.StorageIDs {
-			storage := p.cloudCapacityProvider.GetStorage(region, storageID, func(info *cloudcapacity.NodeStorageCapacityInfo) bool {
-				return slices.Contains(info.Capabilities, importContent) && slices.Contains(info.Zones, zone)
-			})
-			if storage == nil {
-				continue
-			}
-
-			p.zoneLocks.Lock(zone)
-			defer p.zoneLocks.Unlock(zone)
-
-			err := p.deleteImage(ctx, templateClass, region, zone, storage)
-			if err != nil {
-				return fmt.Errorf("failed to delete image: %w", err)
-			}
+		if err := p.deletePlacement(ctx, templateClass, placement); err != nil {
+			return err
 		}
 	}
 
