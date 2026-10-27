@@ -59,6 +59,13 @@ type ProxmoxTemplateOptions struct {
 	// something unique to match on instead of picking up unrelated
 	// templates already present in the target cluster.
 	Tags []string
+
+	// Description is spec.description, written ahead of the template hash
+	// in the Proxmox VM template's description.
+	Description string
+
+	// OnBoot is spec.onBoot.
+	OnBoot *bool
 }
 
 // NewProxmoxTemplate builds a minimal, valid ProxmoxTemplate, mirroring
@@ -77,7 +84,9 @@ func NewProxmoxTemplate(opts ProxmoxTemplateOptions) *v1alpha1.ProxmoxTemplate {
 			Network: []v1alpha1.Network{
 				{Name: "net0", Bridge: opts.Bridge},
 			},
-			Tags: opts.Tags,
+			Tags:        opts.Tags,
+			Description: opts.Description,
+			OnBoot:      opts.OnBoot,
 		},
 	}
 }

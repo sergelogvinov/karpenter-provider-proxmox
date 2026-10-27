@@ -74,6 +74,38 @@ func WaitForProxmoxTemplateNotReady(ctx context.Context, cli client.Client, name
 	return tmpl, err
 }
 
+// WaitForProxmoxTemplateInPlaceUpdated polls the named ProxmoxTemplate
+// until it is Ready and its recorded in-place update hash annotation
+// matches the InPlaceHash of its current spec - i.e. the controller has
+// applied the spec's in-place fields to every VM template in status (see
+// pkg/controllers/nodetemplateclass/lifecycle's updateInPlace, which records
+// the hash only once all of them took it).
+func WaitForProxmoxTemplateInPlaceUpdated(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxTemplate, error) {
+	tmpl := &v1alpha1.ProxmoxTemplate{}
+
+	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		err := cli.Get(ctx, client.ObjectKey{Name: name}, tmpl)
+
+		switch {
+		case apierrors.IsNotFound(err) || isTransientError(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+
+		if !tmpl.StatusConditions().IsTrue(status.ConditionReady) {
+			return false, nil
+		}
+
+		return tmpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] == tmpl.InPlaceHash(), nil
+	})
+	if err != nil {
+		return tmpl, fmt.Errorf("proxmoxtemplate %s did not finish its in-place update: %w", name, err)
+	}
+
+	return tmpl, nil
+}
+
 // WaitForProxmoxTemplateGone polls until the named ProxmoxTemplate no
 // longer exists - i.e. its termination finalizer (see
 // pkg/controllers/nodetemplateclass/lifecycle) has finished tearing down

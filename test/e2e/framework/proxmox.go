@@ -26,6 +26,8 @@ import (
 	"github.com/samber/lo"
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 )
@@ -41,7 +43,9 @@ type ProxmoxClient struct {
 // NewProxmoxClient builds a ProxmoxClient from cfg.ProxmoxConfig - the same
 // cloud-config.yaml format pkg/providers/config.ReadCloudConfigFromFile
 // reads for the controller itself (see hack/proxmox-config.yaml) - and
-// syncs its node/storage capacity caches once. Returns (nil, nil) when
+// syncs its storage capacity cache once. Node capacity is not synced: the
+// suite doesn't use it, and its per-node resource managers need the
+// operator's options in the context. Returns (nil, nil) when
 // cfg.ProxmoxConfig is unset; callers should treat a nil client as "skip
 // this check" (t.Skip), the same convention used by
 // proxmox-csi-plugin/test/e2e's E2E_PROXMOX_CONFIG.
@@ -61,10 +65,6 @@ func NewProxmoxClient(ctx context.Context, cfg Config) (*ProxmoxClient, error) {
 	}
 
 	capacity := cloudcapacity.NewProvider(ctx, pool)
-
-	if err := capacity.SyncNodeCapacity(ctx); err != nil {
-		return nil, fmt.Errorf("failed to sync proxmox node capacity: %w", err)
-	}
 
 	if err := capacity.SyncNodeStorageCapacity(ctx); err != nil {
 		return nil, fmt.Errorf("failed to sync proxmox node storage capacity: %w", err)
@@ -108,4 +108,21 @@ func (p *ProxmoxClient) ExpectedTemplateZones(region string, storageIDs []string
 	}
 
 	return lo.Intersect(storageImage.Zones, storageTemplate.Zones)
+}
+
+// TemplateConfig reads the current config of the Proxmox VM template at
+// placement straight from the Proxmox API, bypassing the controller's
+// template cache.
+func (p *ProxmoxClient) TemplateConfig(ctx context.Context, placement v1alpha1.TemplatePlacement) (*qemu.Config, error) {
+	cl, err := p.Pool.Get(placement.Region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proxmox cluster %s: %w", placement.Region, err)
+	}
+
+	cfg, err := cl.Nodes(placement.Zone).Qemu().Config(ctx, int(placement.TemplateID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config of vm template %s: %w", placement, err)
+	}
+
+	return cfg, nil
 }
