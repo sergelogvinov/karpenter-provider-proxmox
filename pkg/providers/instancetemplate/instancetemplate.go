@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -88,6 +87,11 @@ type InstanceTemplateInfo struct {
 	Status string
 }
 
+// Placement returns where the template lives.
+func (info *InstanceTemplateInfo) Placement() v1alpha1.TemplatePlacement {
+	return v1alpha1.TemplatePlacement{Region: info.Region, Zone: info.Zone, TemplateID: info.TemplateID}
+}
+
 func NewDefaultProvider(ctx context.Context, pool *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("instancetemplate")
 
@@ -116,7 +120,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		regions = p.pool.List()
 	}
 
-	installedZones := []string{} // templateClass.Status.InstalledZones
+	installed := []v1alpha1.TemplatePlacement{}
 
 	for _, region := range regions {
 		var (
@@ -173,16 +177,16 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 					return
 				}
 
-				installedZones = append(installedZones, fmt.Sprintf("%s/%s/%d", region, zone, vmid))
+				installed = append(installed, v1alpha1.TemplatePlacement{Region: region, Zone: zone, TemplateID: uint64(vmid)})
 			}(zone)
 		}
 
 		p.SyncInstanceTemplates(ctx, region)
 	}
 
-	if len(installedZones) > 0 {
+	if len(installed) > 0 {
 		templateClass.Status.ImageID = imageID
-		templateClass.Status.Zones = installedZones
+		templateClass.SetTemplatePlacements(installed)
 	}
 
 	return nil
@@ -192,34 +196,22 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 	log := log.FromContext(ctx).WithName("instancetemplate.Delete()").WithValues("imageID", templateClass.Status.ImageID)
 	log.V(1).Info("Deleting templates and images")
 
-	imageID := templateClass.Status.ImageID
-
-	removedImages := []string{}
-
-	for _, key := range templateClass.Status.Zones {
-		parts := strings.SplitN(key, "/", 3)
-		if len(parts) < 2 {
-			removedImages = append(removedImages, key)
+	for _, entry := range templateClass.Status.Zones {
+		placement, err := v1alpha1.ParseTemplatePlacement(entry)
+		if err != nil {
+			log.Error(err, "Dropping malformed template placement")
 
 			continue
 		}
 
-		region := parts[0]
-		zone := parts[1]
+		region := placement.Region
+		zone := placement.Zone
+		vmid := int(placement.TemplateID)
 
-		if len(parts) == 3 {
-			vmid, err := strconv.Atoi(parts[2])
-			if err != nil {
-				log.Error(err, "Failed to parse vmid", "vmid", parts[2])
+		if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
+			log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
 
-				continue
-			}
-
-			if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
-				log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
-
-				return fmt.Errorf("failed to delete template %d: %w", vmid, err)
-			}
+			return fmt.Errorf("failed to delete template %d: %w", vmid, err)
 		}
 
 		for _, storageID := range templateClass.Spec.StorageIDs {
@@ -238,16 +230,9 @@ func (p *DefaultProvider) Delete(ctx context.Context, templateClass *v1alpha1.Pr
 				return fmt.Errorf("failed to delete image: %w", err)
 			}
 		}
-
-		removedImages = append(removedImages, key)
 	}
 
-	templateClass.Status.Zones = lo.Filter(templateClass.Status.Zones, func(item string, index int) bool {
-		return !slices.Contains(removedImages, item)
-	})
-	if len(templateClass.Status.Zones) > 0 {
-		return fmt.Errorf("unable to delete image %s, still installed in zones: %v", imageID, templateClass.Status.Zones)
-	}
+	templateClass.SetTemplatePlacements(nil)
 
 	p.SyncInstanceTemplates(ctx)
 
@@ -260,20 +245,10 @@ func (p *DefaultProvider) Update(ctx context.Context, templateClass *v1alpha1.Pr
 
 	var errs error
 
-	for _, key := range templateClass.Status.Zones {
-		parts := strings.SplitN(key, "/", 3)
-		if len(parts) != 3 {
-			continue
-		}
-
-		region := parts[0]
-		zone := parts[1]
-		vmid, err := strconv.Atoi(parts[2])
-		if err != nil {
-			log.Error(err, "Failed to parse vmid", "vmid", parts[2])
-
-			continue
-		}
+	for _, placement := range templateClass.TemplatePlacements() {
+		region := placement.Region
+		zone := placement.Zone
+		vmid := int(placement.TemplateID)
 
 		log.V(4).Info("Update template for update", "region", region, "zone", zone, "vmid", vmid)
 

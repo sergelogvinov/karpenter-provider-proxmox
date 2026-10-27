@@ -117,12 +117,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				continue
 			}
 
-			templateIDs := nodeClass.GetTemplateIDs(region)
+			placements := nodeClass.TemplatePlacements(region)
+			placementZones := lo.Map(placements, func(placement v1alpha1.TemplatePlacement, _ int) string { return placement.Zone })
 
-			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, lo.Intersect(zones, nodeClass.GetZones(region)))
+			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, lo.Intersect(zones, placementZones))
 			for _, zone := range zones {
 				templates := p.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
-					return c.Region == region && c.Zone == zone && slices.Contains(templateIDs, c.TemplateID)
+					return c.Zone == zone && slices.Contains(placements, c.Placement())
 				})
 
 				if len(templates) == 0 {

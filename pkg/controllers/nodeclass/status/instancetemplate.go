@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -56,17 +55,15 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 		return reconcile.Result{}, fmt.Errorf("resolving TemplateClass from nodeClass failed: %w", err)
 	}
 
-	zones := template.GetZones()
+	placements := template.TemplatePlacements()
 
 	if nodeClass.Spec.Region != "" {
-		zones = lo.Filter(zones, func(zone string, _ int) bool {
-			region, _, _ := strings.Cut(zone, "/")
-
-			return region == nodeClass.Spec.Region
+		placements = lo.Filter(placements, func(p v1alpha1.TemplatePlacement, _ int) bool {
+			return p.Region == nodeClass.Spec.Region
 		})
 	}
 
-	availableZones := []string{}
+	availablePlacements := []v1alpha1.TemplatePlacement{}
 
 	for _, region := range i.cloudCapacityProvider.Regions() {
 		storage := i.cloudCapacityProvider.GetStorage(region, nodeClass.Spec.BootDevice.Storage)
@@ -75,22 +72,20 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 		}
 
 		for _, z := range storage.Zones {
-			key := fmt.Sprintf("%s/%s/", region, z)
-
-			if zone, ok := lo.Find(zones, func(item string) bool {
-				return strings.HasPrefix(item, key)
+			if placement, ok := lo.Find(placements, func(p v1alpha1.TemplatePlacement) bool {
+				return p.Region == region && p.Zone == z
 			}); ok {
-				availableZones = append(availableZones, zone)
+				availablePlacements = append(availablePlacements, placement)
 			}
 		}
 	}
 
 	nodeClass.Status.Resources = corev1.ResourceList{
-		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(availableZones))),
+		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(availablePlacements))),
 	}
-	nodeClass.Status.SelectedZones = availableZones
+	nodeClass.SetTemplatePlacements(availablePlacements)
 
-	if len(availableZones) == 0 {
+	if len(availablePlacements) == 0 {
 		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
