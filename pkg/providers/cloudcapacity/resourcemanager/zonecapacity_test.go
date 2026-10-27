@@ -264,3 +264,60 @@ func TestZoneCapacityPinnedPrefersNodeHoldingWholeVM(t *testing.T) {
 	require.NoError(t, zone.Reserve(op))
 	require.True(t, op.CPUSet.IsSubsetOf(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)), "placed on NUMA node 1: %v", op.CPUSet)
 }
+
+// trackNUMAMemoryUse pins one CPU on each NUMA node with the given memory bound to it.
+func trackNUMAMemoryUse(t *testing.T, zone *ZoneCapacity, node0MiB, node1MiB uint64) {
+	t.Helper()
+
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 101, CPUs: 1, Memory: node0MiB << 20, CPUSet: cpuset.New(3),
+		NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0", Memory: node0MiB}},
+	}))
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 102, CPUs: 1, Memory: node1MiB << 20, CPUSet: cpuset.New(7),
+		NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0", Memory: node1MiB}},
+	}))
+}
+
+func TestZoneCapacityPinnedSpreadsSmallVMForMemory(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Each NUMA node has 6GiB free, so a 10GiB VM fits only with one CPU on each.
+	trackNUMAMemoryUse(t, zone, 10*1024, 10*1024)
+
+	op := &resources.VMResources{ID: 1, CPUs: 2, Memory: 10 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.Equal(t, map[int]resources.NUMANodeState{
+		0: {CPUs: "0-0", Memory: 5120, Policy: "bind"},
+		1: {CPUs: "1-1", Memory: 5120, Policy: "bind"},
+	}, op.NUMANodes)
+}
+
+func TestZoneCapacityPinnedRebalancesCPUsToMemory(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Node 0 has 4GiB free and node 1 has 12GiB, both with 7 free CPUs.
+	trackNUMAMemoryUse(t, zone, 12*1024, 4*1024)
+
+	// Packing puts 6 CPUs and 10.5GiB on node 0; node 0 can back only 2 of 8 CPUs.
+	op := &resources.VMResources{ID: 1, CPUs: 8, Memory: 14 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.Equal(t, 6, op.CPUSet.Intersection(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)).Size(), "6 CPUs on NUMA node 1: %v", op.CPUSet)
+	require.Equal(t, map[int]resources.NUMANodeState{
+		0: {CPUs: "0-1", Memory: 3584, Policy: "bind"},
+		1: {CPUs: "2-7", Memory: 10752, Policy: "bind"},
+	}, op.NUMANodes)
+}
+
+func TestZoneCapacityPinnedRejectsWhenNoDistributionFits(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	trackNUMAMemoryUse(t, zone, 10*1024, 10*1024)
+
+	// 6GiB + 6GiB free cannot back 13GiB however the CPUs are spread.
+	require.ErrorContains(t, zone.Reserve(&resources.VMResources{ID: 1, CPUs: 2, Memory: 13 * gib}), "not enough memory")
+	require.Equal(t, Capacity{CPUs: 14, Memory: 11 * gib}, zone.Available())
+}
