@@ -65,7 +65,7 @@ func WaitForProxmoxTemplateReady(ctx context.Context, cli client.Client, name st
 // none of spec.storageIDs resolve to real Proxmox storage, in which case
 // the controller never sets status.imageID/zones at all and leaves Ready
 // Unknown rather than False (see
-// pkg/controllers/nodetemplateclass/status/instancetemplate.go).
+// pkg/controllers/nodetemplateclass/lifecycle).
 func WaitForProxmoxTemplateNotReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxTemplate, error) {
 	tmpl := &v1alpha1.ProxmoxTemplate{}
 
@@ -76,7 +76,7 @@ func WaitForProxmoxTemplateNotReady(ctx context.Context, cli client.Client, name
 
 // WaitForProxmoxTemplateGone polls until the named ProxmoxTemplate no
 // longer exists - i.e. its termination finalizer (see
-// pkg/controllers/nodetemplateclass/termination) has finished tearing down
+// pkg/controllers/nodetemplateclass/lifecycle) has finished tearing down
 // every Proxmox-side template/image it provisioned.
 func WaitForProxmoxTemplateGone(ctx context.Context, cli client.Client, name string, timeout time.Duration) error {
 	return waitForGone(ctx, cli, &v1alpha1.ProxmoxTemplate{}, "proxmoxtemplate", name, timeout)

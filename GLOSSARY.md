@@ -46,6 +46,10 @@ _Avoid_: immutable field
 A ProxmoxTemplate spec field outside the template hash; changing one updates the existing VM template's config.
 _Avoid_: mutable field
 
+**Template lifecycle**:
+The stages a ProxmoxTemplate's VM templates go through: created on each zone, replaced when a rebuild field changes, updated in place when only in-place fields change, and deleted with the ProxmoxTemplate. When one change touches both kinds of field, the replacement already carries the in-place fields, so no separate in-place update follows.
+_Avoid_: template reconcile, template sync
+
 **Template placement**:
 One VM template on one zone of one region, stored in status fields as `region/zone/vmid` (`ProxmoxTemplate.status.zones`, `ProxmoxUnmanagedTemplate.status.zones`, `ProxmoxNodeClass.status.selectedZones`). Region and zone are required and vmid is positive; entries that don't parse are skipped.
 _Avoid_: zone (for the whole triple), template location

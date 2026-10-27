@@ -14,43 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package inplaceupdate
+package lifecycle
 
 import (
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 )
 
-type inPlaceChangedPredicate struct {
+// deletionStartedPredicate passes the update that sets the deletion timestamp,
+// so finalization does not depend on the apiserver bumping the generation.
+type deletionStartedPredicate struct {
 	predicate.Funcs
 }
 
-var _ predicate.Predicate = inPlaceChangedPredicate{}
+var _ predicate.Predicate = deletionStartedPredicate{}
 
-func (p inPlaceChangedPredicate) Create(e event.CreateEvent) bool {
-	return false
-}
-
-func (p inPlaceChangedPredicate) Delete(e event.DeleteEvent) bool {
-	return false
-}
-
-func (p inPlaceChangedPredicate) Update(e event.UpdateEvent) bool {
+func (p deletionStartedPredicate) Update(e event.UpdateEvent) bool {
 	if e.ObjectOld == nil || e.ObjectNew == nil {
 		return false
 	}
 
-	typedOld, ok := e.ObjectOld.(*v1alpha1.ProxmoxTemplate)
-	if !ok {
-		return false
-	}
-
-	typedNew, ok := e.ObjectNew.(*v1alpha1.ProxmoxTemplate)
-	if !ok {
-		return false
-	}
-
-	return typedOld.InPlaceHash() != typedNew.InPlaceHash()
+	return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()
 }
