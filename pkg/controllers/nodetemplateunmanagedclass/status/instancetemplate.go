@@ -18,7 +18,6 @@ package status
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/samber/lo"
@@ -39,7 +38,7 @@ type InstanceTemplate struct {
 
 func (i *InstanceTemplate) Reconcile(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error) {
 	if err := templateClass.Validate(); err != nil {
-		templateClass.Status.Zones = nil
+		templateClass.SetTemplatePlacements(nil)
 		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplateValidation", err.Error())
 
 		return reconcile.Result{}, nil
@@ -64,18 +63,18 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, templateClass *v1alpha
 		return true
 	})
 	if len(templates) == 0 {
-		templateClass.Status.Zones = nil
+		templateClass.SetTemplatePlacements(nil)
 		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
 	}
 
-	zones := make([]string, 0, len(templates))
+	placements := make([]v1alpha1.TemplatePlacement, 0, len(templates))
 	for _, template := range templates {
-		zones = append(zones, fmt.Sprintf("%s/%s/%d", template.Region, template.Zone, template.TemplateID))
+		placements = append(placements, template.Placement())
 	}
 
-	templateClass.Status.Zones = zones
+	templateClass.SetTemplatePlacements(placements)
 	templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, nil

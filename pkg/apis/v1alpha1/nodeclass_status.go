@@ -17,9 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/awslabs/operatorpkg/status"
 
 	corev1 "k8s.io/api/core/v1"
@@ -47,41 +44,16 @@ type ProxmoxNodeClassStatus struct {
 	SelectedZones []string `json:"selectedZones,omitempty"`
 }
 
-// GetZones returns the zones that are selected for this node class
-func (in *ProxmoxNodeClass) GetZones(region string) []string {
-	zones := []string{}
-
-	for _, selectedZone := range in.Status.SelectedZones {
-		if !strings.HasPrefix(selectedZone, region+"/") {
-			continue
-		}
-
-		p := strings.SplitN(selectedZone, "/", 3)
-		if len(p) == 3 {
-			zones = append(zones, p[1])
-		}
-	}
-
-	return zones
+// TemplatePlacements returns the template placements selected for this node
+// class in region, skipping malformed entries.
+func (in *ProxmoxNodeClass) TemplatePlacements(region string) []TemplatePlacement {
+	return parseTemplatePlacements(in.Status.SelectedZones, region)
 }
 
-// GetTemplateIDs returns the template IDs that are selected for this node class
-func (in *ProxmoxNodeClass) GetTemplateIDs(region string) []uint64 {
-	ids := []uint64{}
-
-	for _, selectedZone := range in.Status.SelectedZones {
-		if !strings.HasPrefix(selectedZone, region+"/") {
-			continue
-		}
-
-		p := strings.SplitN(selectedZone, "/", 3)
-		if len(p) == 3 {
-			id, _ := strconv.Atoi(p[2])
-			ids = append(ids, uint64(id))
-		}
-	}
-
-	return ids
+// SetTemplatePlacements stores the template placements selected for this node
+// class.
+func (in *ProxmoxNodeClass) SetTemplatePlacements(placements []TemplatePlacement) {
+	in.Status.SelectedZones = formatTemplatePlacements(placements)
 }
 
 // StatusConditions returns the condition set for the status.Object interface

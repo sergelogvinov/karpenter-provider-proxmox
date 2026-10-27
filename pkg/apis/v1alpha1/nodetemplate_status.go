@@ -57,7 +57,8 @@ type ProxmoxTemplateStatus struct {
 // +k8s:deepcopy-gen=false
 type ProxmoxCommonTemplate interface {
 	GetStatus() *ProxmoxTemplateStatus
-	GetZones() []string
+	TemplatePlacements() []TemplatePlacement
+	SetTemplatePlacements(placements []TemplatePlacement)
 	GetImageID() string
 }
 
@@ -76,8 +77,15 @@ func (in *ProxmoxTemplate) GetStatus() *ProxmoxTemplateStatus {
 	return &status
 }
 
-func (in *ProxmoxTemplate) GetZones() []string {
-	return in.Status.Zones
+// TemplatePlacements returns the template placements in Status.Zones,
+// skipping malformed entries.
+func (in *ProxmoxTemplate) TemplatePlacements() []TemplatePlacement {
+	return parseTemplatePlacements(in.Status.Zones, "")
+}
+
+// SetTemplatePlacements stores placements in Status.Zones.
+func (in *ProxmoxTemplate) SetTemplatePlacements(placements []TemplatePlacement) {
+	in.Status.Zones = formatTemplatePlacements(placements)
 }
 
 func (in *ProxmoxTemplate) GetImageID() string {
@@ -107,8 +115,15 @@ func (in *ProxmoxUnmanagedTemplate) GetStatus() *ProxmoxTemplateStatus {
 	return &status
 }
 
-func (in *ProxmoxUnmanagedTemplate) GetZones() []string {
-	return in.Status.Zones
+// TemplatePlacements returns the template placements in Status.Zones,
+// skipping malformed entries.
+func (in *ProxmoxUnmanagedTemplate) TemplatePlacements() []TemplatePlacement {
+	return parseTemplatePlacements(in.Status.Zones, "")
+}
+
+// SetTemplatePlacements stores placements in Status.Zones.
+func (in *ProxmoxUnmanagedTemplate) SetTemplatePlacements(placements []TemplatePlacement) {
+	in.Status.Zones = formatTemplatePlacements(placements)
 }
 
 func (in *ProxmoxUnmanagedTemplate) GetImageID() string {

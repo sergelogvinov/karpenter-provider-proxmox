@@ -87,10 +87,10 @@ func (c *CloudProvider) isTemplateDrifted(ctx context.Context, nodeClaim *karpv1
 	}
 
 	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-	templateIDs := nodeClass.GetTemplateIDs(region)
+	placements := nodeClass.TemplatePlacements(region)
 
 	templates := c.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
-		return c.Region == region && c.Zone == zone && lo.Contains(templateIDs, c.TemplateID)
+		return c.Zone == zone && lo.Contains(placements, c.Placement())
 	})
 
 	if len(templates) == 0 {
