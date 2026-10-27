@@ -163,6 +163,11 @@ helm-unit: ## Helm Unit Tests
 	@helm template --include-crds -f charts/karpenter-provider-proxmox/ci/values.yaml \
 		karpenter-provider-proxmox charts/karpenter-provider-proxmox >/dev/null
 
+.PHONY: helm-prepare
+helm-prepare: ## Prepare Helm Chart for Release
+	sh hack/bump-chart-version.sh karpenter-provider-proxmox false false true
+	yq -i '.appVersion = "$(TAG)"' charts/karpenter-provider-proxmox/Chart.yaml
+
 .PHONY: helm-login
 helm-login: ## Helm Login
 	@echo "${HELM_TOKEN}" | helm registry login $(REGISTRY) --username $(USERNAME) --password-stdin

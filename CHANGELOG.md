@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.13.0...v0.14.0) (2026-10-27)
+
+
+### Features
+
+* reserve first subnet ip in node ipam ([636ed59](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/636ed5967f2a0bd5db11949628c49eb09a3181a5))
+* support configurable shared CPU overcommit ([7b0573c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/7b0573ce997f1fcb1681583cf4aa8f2df583aef2))
+
+
+### Bug Fixes
+
+* deadlock deleting a template from one zone twice ([e8ef1bf](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e8ef1bf606c2c2770b015fb6e87f2b39ab8d7b86))
+* delete VM templates of zones a template no longer targets ([a102533](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a1025334cda0960530709080cb823b500a4f2dde))
+* goreleaser ([51f9b56](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/51f9b5665a55d55950aa0a97ddf7fc150cb1570d))
+* keep placements of failed zones and finish in-place updates ([1dc7a44](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/1dc7a4477a47040ad3872a0108af6bf7c1a9521f))
+* keep template placements when deletion races create ([322bc83](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/322bc83d21fa4c03b0ea909747be7115bf924489))
+* proxmox-scheduler ([3ab0fb8](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/3ab0fb854376cb08ff44439609c47ee915c5fe8a))
+* update build version to include SHA in the Makefile ([850fa88](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/850fa88b0a87fe24f16f05d07bb19a4f0a5f587f))
+
 ## [0.13.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.12.0...v0.13.0) (2026-09-27)
 
 
