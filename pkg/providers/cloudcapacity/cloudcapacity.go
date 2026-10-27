@@ -68,8 +68,14 @@ type DefaultProvider struct {
 
 	zoneList map[string][]string
 
+	// muSync serializes capacity syncs.
+	muSync sync.Mutex
+
 	muCapacityInfo sync.RWMutex
 	capacityInfo   map[string]NodeCapacityInfo
+	// releasedDuringSync collects, per zone, the VMs released while a sync builds new zones,
+	// so the swap does not bring back VMs the build saw before their release.
+	releasedDuringSync map[string][]int
 
 	muStorageInfo sync.RWMutex
 	storageInfo   map[string]NodeStorageCapacityInfo
@@ -78,6 +84,9 @@ type DefaultProvider struct {
 	networkInfo   map[string]NodeNetworkIfaceInfo
 
 	log logr.Logger
+
+	// afterBuild, if set, runs between building the new zones and swapping them in.
+	afterBuild func()
 }
 
 func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider {
@@ -103,6 +112,10 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok && info.Capacity != nil {
+		if info.omitted {
+			return fmt.Errorf("zone %s/%s is unavailable", region, zone)
+		}
+
 		err := info.Capacity.Reserve(op)
 		if err != nil {
 			return fmt.Errorf("failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
@@ -132,6 +145,10 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 	if info, ok := p.capacityInfo[key]; ok && info.Capacity != nil {
 		info.Capacity.Release(id)
 
+		if p.releasedDuringSync != nil {
+			p.releasedDuringSync[key] = append(p.releasedDuringSync[key], id)
+		}
+
 		log.V(1).Info("Capacity released successfully", "resourceStatus", info.Capacity.String())
 
 		return nil
@@ -140,14 +157,17 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 	return fmt.Errorf("no resource manager found for zone %s/%s", region, zone)
 }
 
+// SyncNodeCapacity rebuilds every zone's capacity from Proxmox without holding the lock,
+// then swaps it in, keeping the pending reservations of the zones it replaces or omits.
 func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 	log := p.log.WithName("SyncNodeCapacity()")
 
-	p.muCapacityInfo.Lock()
-	defer p.muCapacityInfo.Unlock()
+	p.muSync.Lock()
+	defer p.muSync.Unlock()
 
-	p.muNetworkInfo.Lock()
-	defer p.muNetworkInfo.Unlock()
+	p.muCapacityInfo.Lock()
+	p.releasedDuringSync = map[string][]int{}
+	p.muCapacityInfo.Unlock()
 
 	capacityInfo := make(map[string]NodeCapacityInfo)
 	networkIfaceInfo := make(map[string]NodeNetworkIfaceInfo)
@@ -222,19 +242,49 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 
 	log.V(1).Info("Syncing finished", "nodes", len(capacityInfo))
 
-	for key, info := range networkIfaceInfo {
-		log.V(1).Info("Node network interfaces available", "node", key, "ifaces", len(info.Ifaces))
+	if p.afterBuild != nil {
+		p.afterBuild()
 	}
 
+	p.muCapacityInfo.Lock()
+	defer p.muCapacityInfo.Unlock()
+
+	p.muNetworkInfo.Lock()
+	defer p.muNetworkInfo.Unlock()
+
 	for key, info := range capacityInfo {
-		if info.Capacity != nil {
-			log.V(1).Info("Node capacity available", "node", key, "resourceStatus", info.Capacity.String())
+		for _, id := range p.releasedDuringSync[key] {
+			info.Capacity.Release(id)
 		}
+
+		if prev, ok := p.capacityInfo[key]; ok && prev.Capacity != nil {
+			info.Capacity.KeepPending(prev.Capacity, info.vms.has)
+		}
+
+		log.V(1).Info("Node capacity available", "node", key, "resourceStatus", info.Capacity.String())
+	}
+
+	// A node missing from this sync keeps its pending reservations, unavailable for placement,
+	// so they still count if it comes back.
+	for key, prev := range p.capacityInfo {
+		if _, ok := capacityInfo[key]; ok || prev.Capacity == nil || !prev.Capacity.HasPending() {
+			continue
+		}
+
+		prev.omitted = true
+		capacityInfo[key] = prev
+
+		log.V(1).Info("Node missing, keeping its pending reservations", "node", key, "resourceStatus", prev.Capacity.String())
+	}
+
+	for key, info := range networkIfaceInfo {
+		log.V(1).Info("Node network interfaces available", "node", key, "ifaces", len(info.Ifaces))
 	}
 
 	p.capacityInfo = capacityInfo
 	p.networkInfo = networkIfaceInfo
 	p.zoneList = zoneList
+	p.releasedDuringSync = nil
 
 	return nil
 }
@@ -440,7 +490,7 @@ func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.Re
 	zones := []string{}
 
 	for _, info := range p.capacityInfo {
-		if info.Region != region || info.Capacity == nil {
+		if info.Region != region || info.Capacity == nil || info.omitted {
 			continue
 		}
 
@@ -465,7 +515,7 @@ func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList
 
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok {
-		if info.Capacity == nil {
+		if info.Capacity == nil || info.omitted {
 			return false
 		}
 

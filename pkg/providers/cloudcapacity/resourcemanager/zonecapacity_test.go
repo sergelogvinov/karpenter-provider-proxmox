@@ -19,6 +19,7 @@ package resourcemanager
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/samber/lo"
@@ -320,4 +321,103 @@ func TestZoneCapacityPinnedRejectsWhenNoDistributionFits(t *testing.T) {
 	// 6GiB + 6GiB free cannot back 13GiB however the CPUs are spread.
 	require.ErrorContains(t, zone.Reserve(&resources.VMResources{ID: 1, CPUs: 2, Memory: 13 * gib}), "not enough memory")
 	require.Equal(t, Capacity{CPUs: 14, Memory: 11 * gib}, zone.Available())
+}
+
+func noVMs(int) bool { return false }
+
+func TestZoneCapacityKeepPending(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, 10, 27, 12, 0, 0, 0, time.UTC)
+	reserve := &resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib}
+
+	for _, tc := range []struct {
+		name   string
+		prev   func(*ZoneCapacity)
+		next   func(*ZoneCapacity)
+		after  time.Duration
+		exists func(int) bool
+		want   Capacity
+	}{
+		{
+			name: "pending reservation is kept",
+			prev: func(z *ZoneCapacity) { require.NoError(t, z.Reserve(reserve)) },
+			want: Capacity{CPUs: 12, Memory: 23 * gib},
+		},
+		{
+			name: "VM seen running is counted once",
+			prev: func(z *ZoneCapacity) { require.NoError(t, z.Reserve(reserve)) },
+			next: func(z *ZoneCapacity) {
+				require.NoError(t, z.Track(&resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib}))
+			},
+			want: Capacity{CPUs: 12, Memory: 23 * gib},
+		},
+		{
+			name: "released reservation is gone",
+			prev: func(z *ZoneCapacity) { require.NoError(t, z.Reserve(reserve)); z.Release(1) },
+			want: Capacity{CPUs: 16, Memory: 31 * gib},
+		},
+		{
+			name: "tracked VM no longer running is not kept",
+			prev: func(z *ZoneCapacity) {
+				require.NoError(t, z.Track(&resources.VMResources{ID: 2, CPUs: 4, Memory: 8 * gib}))
+			},
+			want: Capacity{CPUs: 16, Memory: 31 * gib},
+		},
+		{
+			name:  "reservation past the grace period without a VM expires",
+			prev:  func(z *ZoneCapacity) { require.NoError(t, z.Reserve(reserve)) },
+			after: 11 * time.Minute,
+			want:  Capacity{CPUs: 16, Memory: 31 * gib},
+		},
+		{
+			name:   "reservation past the grace period with a stopped VM is kept",
+			prev:   func(z *ZoneCapacity) { require.NoError(t, z.Reserve(reserve)) },
+			after:  11 * time.Minute,
+			exists: func(id int) bool { return id == 1 },
+			want:   Capacity{CPUs: 12, Memory: 23 * gib},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			now := start
+			clock := func() time.Time { return now }
+
+			prev := newTestZone(t, Shared(1))
+			prev.now = clock
+			tc.prev(prev)
+
+			now = now.Add(tc.after)
+
+			next := newTestZone(t, Shared(1))
+			next.now = clock
+			if tc.next != nil {
+				tc.next(next)
+			}
+
+			exists := tc.exists
+			if exists == nil {
+				exists = noVMs
+			}
+
+			next.KeepPending(prev, exists)
+			require.Equal(t, tc.want, next.Available())
+		})
+	}
+}
+
+func TestZoneCapacityKeepPendingPinned(t *testing.T) {
+	t.Parallel()
+
+	prev := newPinnedTestZone(t)
+	op := &resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib}
+	require.NoError(t, prev.Reserve(op))
+
+	next := newPinnedTestZone(t)
+	next.KeepPending(prev, noVMs)
+
+	other := &resources.VMResources{ID: 2, CPUs: 12, Memory: gib}
+	require.NoError(t, next.Reserve(other))
+	require.True(t, other.CPUSet.Intersection(op.CPUSet).IsEmpty(), "kept pinned CPUs %v are not handed out again: %v", op.CPUSet, other.CPUSet)
 }
