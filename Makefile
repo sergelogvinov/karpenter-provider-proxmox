@@ -24,8 +24,10 @@ VERSION ?= $(shell git describe --dirty --tag --match='v*' 2> /dev/null)
 SHA ?= $(shell git describe --match=none --always --abbrev=7 --dirty)
 TAG ?= $(VERSION)
 
+BUILD_VERSION ?= $(TAG)$(if $(and $(SHA),$(if $(filter v%,$(TAG)),,1)),-$(SHA))
+
 GO_LDFLAGS := -s -w
-GO_LDFLAGS += -X sigs.k8s.io/karpenter/pkg/operator.Version=$(TAG)
+GO_LDFLAGS += -X sigs.k8s.io/karpenter/pkg/operator.Version=$(BUILD_VERSION)
 
 OS ?= $(shell go env GOOS)
 ARCH ?= $(shell go env GOARCH)
