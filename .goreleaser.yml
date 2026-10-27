@@ -3,6 +3,21 @@ version: 2
 project_name: karpenter
 
 builds:
+  - id: controller
+    dir: ./cmd/controller
+    binary: controller
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -X sigs.k8s.io/karpenter/pkg/operator.Version={{ .Version }}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
   - id: proxmox-scheduler
     dir: ./cmd/proxmox-scheduler
     binary: proxmox-scheduler
@@ -63,13 +78,13 @@ changelog:
   disable: true
 
 dockers_v2:
-  - id: proxmox-scheduler
+  - id: controller
     ids:
-      - proxmox-scheduler
+      - controller
     flags:
       - --target=goreleaser
     images:
-      - "ghcr.io/sergelogvinov/{{ .ProjectName }}"
+      - "ghcr.io/sergelogvinov/karpenter-provider-proxmox"
     tags:
       - "{{ if not .IsSnapshot }}v{{.Version}}{{ else }}edge{{ end }}"
       - edge
