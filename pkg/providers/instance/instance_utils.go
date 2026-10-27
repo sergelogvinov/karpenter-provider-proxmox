@@ -30,7 +30,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu/firewall"
-	"github.com/sergelogvinov/go-proxmox-rest/nodes/tasks"
+	"github.com/sergelogvinov/go-proxmox-rest/task"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
@@ -179,15 +179,13 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 
 	log.V(1).Info("Starting VM", "vmID", newID)
 
-	startUPID, err := px.Nodes(zone).Qemu().Start(ctx, newID, nil)
+	startTask, err := px.Nodes(zone).Qemu().Start(ctx, newID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to start vm %d: %v", newID, err)
 	}
 
-	if startUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, startUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-			return nil, fmt.Errorf("failed to start vm %d: %v", newID, err)
-		}
+	if err = startTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+		return nil, fmt.Errorf("failed to start vm %d: %v", newID, err)
 	}
 
 	cfg, err := px.Nodes(zone).Qemu().Config(ctx, newID, nil)
@@ -299,7 +297,7 @@ type cloneVMParams struct {
 func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone string, vmTemplateID uint64, newID int, params cloneVMParams) error {
 	full := true
 
-	cloneUPID, err := px.Nodes(zone).Qemu().Clone(ctx, int(vmTemplateID), &qemu.CloneOptions{
+	cloneTask, err := px.Nodes(zone).Qemu().Clone(ctx, int(vmTemplateID), &qemu.CloneOptions{
 		NewID:       newID,
 		Name:        params.vmName,
 		Description: params.description,
@@ -311,10 +309,8 @@ func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone strin
 		return fmt.Errorf("failed to clone vm template %d: %v", vmTemplateID, err)
 	}
 
-	if cloneUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, cloneUPID, &tasks.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
-			return fmt.Errorf("failed to clone vm template %d: %v", vmTemplateID, err)
-		}
+	if err = cloneTask.Wait(ctx, &task.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
+		return fmt.Errorf("failed to clone vm template %d: %v", vmTemplateID, err)
 	}
 
 	cfg, err := px.Nodes(zone).Qemu().Config(ctx, newID, nil)
@@ -327,7 +323,7 @@ func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone strin
 		return fmt.Errorf("failed to detect boot disk for vm %d", newID)
 	}
 
-	resizeUPID, err := px.Nodes(zone).Qemu().Resize(ctx, newID, &qemu.ResizeOptions{
+	resizeTask, err := px.Nodes(zone).Qemu().Resize(ctx, newID, &qemu.ResizeOptions{
 		Disk: bootDisk,
 		Size: fmt.Sprintf("%dG", params.resources.DiskGBytes),
 	})
@@ -335,10 +331,8 @@ func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone strin
 		return fmt.Errorf("failed to resize disk %s for vm %d: %v", bootDisk, newID, err)
 	}
 
-	if resizeUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, resizeUPID, &tasks.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
-			return fmt.Errorf("failed to resize disk %s for vm %d: %v", bootDisk, newID, err)
-		}
+	if err = resizeTask.Wait(ctx, &task.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
+		return fmt.Errorf("failed to resize disk %s for vm %d: %v", bootDisk, newID, err)
 	}
 
 	vmConfig := cloneConfigOverrides(params.resources, params.tags, params.instanceTypeName, params.vmName, newID, cfg)

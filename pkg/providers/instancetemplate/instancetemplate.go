@@ -19,14 +19,12 @@ package instancetemplate
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/go-logr/logr"
-	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 
@@ -371,14 +369,7 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 				info.TemplateTags = *cfg.Tags
 			}
 
-			info.TemplateHash = fmt.Sprintf("%d-%d", vm.VMID, lo.Must(hashstructure.Hash(cfg.Meta, hashstructure.FormatV2, nil)))
-
-			if strings.Contains(cfg.Description, "Hash: ") {
-				re := regexp.MustCompile(`Hash:\s*(\d+)`)
-				if matches := re.FindStringSubmatch(cfg.Description); len(matches) > 1 {
-					info.TemplateHash = strings.TrimSpace(matches[1])
-				}
-			}
+			info.TemplateHash = templateHash(vm.VMID, cfg)
 
 			info.Status = InstanceTemplateStatusAvailable
 
