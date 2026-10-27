@@ -1,0 +1,224 @@
+/*
+Copyright 2025 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package lifecycle_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/lifecycle"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+)
+
+var (
+	talosZone1 = instancetemplate.InstanceTemplateInfo{
+		Name: "talos", Region: "region-1", Zone: "zone-1", TemplateID: 1000,
+		TemplateTags: []string{"talos", "v1.11"}, Status: instancetemplate.InstanceTemplateStatusAvailable,
+	}
+	talosZone2 = instancetemplate.InstanceTemplateInfo{
+		Name: "talos", Region: "region-1", Zone: "zone-2", TemplateID: 1001,
+		TemplateTags: []string{"talos"}, Status: instancetemplate.InstanceTemplateStatusAvailable,
+	}
+	talosRegion2 = instancetemplate.InstanceTemplateInfo{
+		Name: "talos", Region: "region-2", Zone: "zone-1", TemplateID: 2000,
+		TemplateTags: []string{"talos", "v1.11"}, Status: instancetemplate.InstanceTemplateStatusAvailable,
+	}
+	ubuntu = instancetemplate.InstanceTemplateInfo{
+		Name: "ubuntu", Region: "region-1", Zone: "zone-1", TemplateID: 1002,
+		TemplateTags: []string{"ubuntu"}, Status: instancetemplate.InstanceTemplateStatusAvailable,
+	}
+)
+
+// fakeProvider serves a fixed VM template inventory.
+type fakeProvider struct {
+	instancetemplate.Provider
+
+	inventory []instancetemplate.InstanceTemplateInfo
+	syncErr   error
+
+	syncs int
+}
+
+func (p *fakeProvider) SyncInstanceTemplates(_ context.Context, _ ...string) error {
+	p.syncs++
+
+	return p.syncErr
+}
+
+func (p *fakeProvider) ListWithFilter(_ context.Context, filter ...func(*instancetemplate.InstanceTemplateInfo) bool) []instancetemplate.InstanceTemplateInfo {
+	templates := []instancetemplate.InstanceTemplateInfo{}
+
+	for _, info := range p.inventory {
+		for _, f := range filter {
+			if f(&info) {
+				templates = append(templates, info)
+			}
+		}
+	}
+
+	return templates
+}
+
+func newTemplate(spec v1alpha1.ProxmoxUnmanagedTemplateSpec) *v1alpha1.ProxmoxUnmanagedTemplate {
+	return &v1alpha1.ProxmoxUnmanagedTemplate{
+		Name: "talos",
+		Spec: spec,
+	}
+}
+
+func newKubeClient(t *testing.T, tpl *v1alpha1.ProxmoxUnmanagedTemplate, funcs interceptor.Funcs) client.Client {
+	t.Helper()
+
+	scheme := runtime.NewScheme()
+	require.NoError(t, v1alpha1.AddToScheme(scheme))
+
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha1.ProxmoxUnmanagedTemplate{}).
+		WithObjects(tpl).
+		WithInterceptorFuncs(funcs).
+		Build()
+}
+
+func reconcile(t *testing.T, kubeClient client.Client, provider *fakeProvider) (time.Duration, error) {
+	t.Helper()
+
+	res, err := lifecycle.NewController(kubeClient, provider).Reconcile(t.Context(), get(t, kubeClient))
+
+	return res.RequeueAfter, err
+}
+
+func get(t *testing.T, kubeClient client.Client) *v1alpha1.ProxmoxUnmanagedTemplate {
+	t.Helper()
+
+	tpl := &v1alpha1.ProxmoxUnmanagedTemplate{}
+	require.NoError(t, kubeClient.Get(t.Context(), client.ObjectKey{Name: "talos"}, tpl))
+
+	return tpl
+}
+
+func TestMatchingTemplatesBecomePlacements(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{
+		Region: "region-1",
+		Tags:   []string{"talos", "v1.11"},
+	}), interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, talosZone2, talosRegion2, ubuntu}}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement()}, tpl.TemplatePlacements())
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
+	assert.Equal(t, int64(1), tpl.Status.Resources.Name(v1alpha1.ResourceZones, "").Value())
+	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestTemplateNameMatchesAcrossRegions(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{
+		TemplateName: "talos",
+	}), interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, talosRegion2, ubuntu}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement(), talosRegion2.Placement()}, tpl.TemplatePlacements())
+}
+
+func TestNoMatchClearsPlacements(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{Tags: []string{"flatcar"}})
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{talosZone1.Placement()})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, ubuntu}}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Empty(t, tpl.TemplatePlacements())
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsFalse())
+	assert.Equal(t, "TemplatesNotFound", ready.Reason)
+	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestInvalidSpecSkipsInventory(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{Region: "region-1"})
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{talosZone1.Placement()})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1}}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Zero(t, provider.syncs)
+	assert.Empty(t, tpl.TemplatePlacements())
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsFalse())
+	assert.Equal(t, "TemplateValidation", ready.Reason)
+	assert.Zero(t, requeue)
+}
+
+func TestSyncFailureKeepsStatus(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"})
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{talosZone1.Placement()})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{syncErr: errors.New("proxmox unavailable")}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement()}, tpl.TemplatePlacements())
+	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestStatusConflictRequeues(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{
+		SubResourcePatch: func(_ context.Context, _ client.Client, _ string, obj client.Object, _ client.Patch, _ ...client.SubResourcePatchOption) error {
+			return apierrors.NewConflict(schema.GroupResource{Resource: "proxmoxunmanagedtemplates"}, obj.GetName(), errors.New("modified"))
+		},
+	})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1}}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, 5*time.Second, requeue)
+}

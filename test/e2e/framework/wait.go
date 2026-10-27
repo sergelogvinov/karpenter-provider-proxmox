@@ -85,7 +85,7 @@ func WaitForProxmoxTemplateGone(ctx context.Context, cli client.Client, name str
 // WaitForProxmoxUnmanagedTemplateReady polls the named ProxmoxUnmanagedTemplate
 // until its aggregate "Ready" condition reports True - i.e. the controller
 // found at least one Proxmox VM template matching spec.templateName/tags
-// (see pkg/controllers/nodetemplateunmanagedclass/status).
+// (see pkg/controllers/nodetemplateunmanagedclass/lifecycle).
 func WaitForProxmoxUnmanagedTemplateReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxUnmanagedTemplate, error) {
 	tmpl := &v1alpha1.ProxmoxUnmanagedTemplate{}
 
@@ -99,7 +99,7 @@ func WaitForProxmoxUnmanagedTemplateReady(ctx context.Context, cli client.Client
 // anything other than True - e.g. when spec.tags/templateName match no
 // Proxmox VM template at all, which the controller reports as an explicit
 // False condition with reason "TemplatesNotFound" (see
-// pkg/controllers/nodetemplateunmanagedclass/status/instancetemplate.go).
+// pkg/controllers/nodetemplateunmanagedclass/lifecycle).
 func WaitForProxmoxUnmanagedTemplateNotReady(ctx context.Context, cli client.Client, name string, timeout time.Duration) (*v1alpha1.ProxmoxUnmanagedTemplate, error) {
 	tmpl := &v1alpha1.ProxmoxUnmanagedTemplate{}
 

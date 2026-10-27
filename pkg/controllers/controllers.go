@@ -27,8 +27,7 @@ import (
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
 	nodetemplateclasslifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/lifecycle"
-	nodetemplateunmanagedclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/hash"
-	nodetemplateunmanagedclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/status"
+	nodetemplateunmanagedclasslifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/lifecycle"
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
@@ -62,8 +61,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, cloudCapacityProvider),
 		nodetemplateclasslifecycle.NewController(kubeClient, instanceTemplateProvider),
-		nodetemplateunmanagedclasshash.NewController(kubeClient),
-		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateunmanagedclasslifecycle.NewController(kubeClient, instanceTemplateProvider),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
 		cloudcapacitynodeload.NewController(cloudCapacityProvider, instanceTypeProvider),
 		nodeipamctl.NewController(kubeClient, nodeIpamProvider),
