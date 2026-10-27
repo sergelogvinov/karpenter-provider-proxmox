@@ -77,21 +77,40 @@ func (p pinned) ratio() float64 {
 }
 
 func (p pinned) place(free freeResources, op *resources.VMResources) (cpuset.CPUSet, map[int]resources.NUMANodeState, error) {
-	candidates := cpuset.New()
-
 	if len(op.NUMANodes) > 0 {
+		nodes := cpuset.New()
 		for i := range op.NUMANodes {
-			candidates = candidates.Union(free.topo.CPUDetails.CPUsInNUMANodes(i))
+			nodes = nodes.Union(cpuset.New(i))
 		}
-	} else {
-		for i, mem := range free.numaMemory {
-			if mem >= op.Memory {
-				candidates = candidates.Union(free.topo.CPUDetails.CPUsInNUMANodes(i))
-			}
+
+		return p.take(free, nodes, op)
+	}
+
+	// Keep the VM on nodes that could each hold all of its memory when possible;
+	// otherwise span every node with free memory and let the split decide.
+	if cpus, numaNodes, err := p.take(free, nodesWithMemory(free, op.Memory), op); err == nil {
+		return cpus, numaNodes, nil
+	}
+
+	return p.take(free, nodesWithMemory(free, 1), op)
+}
+
+// nodesWithMemory returns the NUMA nodes with at least memory bytes free.
+func nodesWithMemory(free freeResources, memory uint64) cpuset.CPUSet {
+	nodes := cpuset.New()
+
+	for i, mem := range free.numaMemory {
+		if mem >= memory {
+			nodes = nodes.Union(cpuset.New(i))
 		}
 	}
 
-	candidates = candidates.Intersection(free.cpus)
+	return nodes
+}
+
+// take picks op's CPUs from the free CPUs of the given NUMA nodes and splits its memory across them.
+func (p pinned) take(free freeResources, nodes cpuset.CPUSet, op *resources.VMResources) (cpuset.CPUSet, map[int]resources.NUMANodeState, error) {
+	candidates := free.topo.CPUDetails.CPUsInNUMANodes(nodes.List()...).Intersection(free.cpus)
 	if candidates.Size() < op.CPUs {
 		return cpuset.New(), nil, fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, candidates.Size())
 	}
@@ -101,13 +120,19 @@ func (p pinned) place(free freeResources, op *resources.VMResources) (cpuset.CPU
 		return cpuset.New(), nil, err
 	}
 
-	return cpus, splitNUMAMemory(free.topo, cpus, op.Memory), nil
+	numaNodes, err := splitNUMAMemory(free, cpus, op.Memory)
+	if err != nil {
+		return cpuset.New(), nil, err
+	}
+
+	return cpus, numaNodes, nil
 }
 
 // splitNUMAMemory gives each NUMA node a share of memory in proportion to the VM's CPUs on it,
 // in MiB, with the rounding remainder on the lowest node. Each node's CPUs are numbered
-// from the VM's point of view, in NUMA node order.
-func splitNUMAMemory(topo *topology.Topology, cpus cpuset.CPUSet, memory uint64) map[int]resources.NUMANodeState {
+// from the VM's point of view, in NUMA node order. It fails if a node's share exceeds its free memory.
+func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map[int]resources.NUMANodeState, error) {
+	topo := free.topo
 	totalMiB := memory / 1024 / 1024
 	nodes := make(map[int]resources.NUMANodeState)
 
@@ -145,5 +170,11 @@ func splitNUMAMemory(topo *topology.Topology, cpus cpuset.CPUSet, memory uint64)
 		nodes[lowest] = node
 	}
 
-	return nodes
+	for i, node := range nodes {
+		if node.Memory*1024*1024 > free.numaMemory[i] {
+			return nil, fmt.Errorf("not enough memory available on NUMA node %d: requested=%dM, available=%dM", i, node.Memory, free.numaMemory[i]/1024/1024)
+		}
+	}
+
+	return nodes, nil
 }

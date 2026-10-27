@@ -221,3 +221,46 @@ func TestZoneCapacityPinnedKeepsRoomForSharedVMs(t *testing.T) {
 	require.NoError(t, zone.Reserve(&resources.VMResources{ID: 3, CPUs: 2, Memory: gib}))
 	require.Equal(t, 0, zone.Available().CPUs)
 }
+
+func TestZoneCapacityPinnedSpansNUMANodesWithoutWholeFit(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Each NUMA node keeps 7 free CPUs and 8.5GiB of free memory.
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 1, CPUs: 1, Memory: 7680 << 20, CPUSet: cpuset.New(3),
+		NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0", Memory: 7680}},
+	}))
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 2, CPUs: 1, Memory: 7680 << 20, CPUSet: cpuset.New(7),
+		NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0", Memory: 7680}},
+	}))
+
+	// No single node holds 10GiB. Packing takes the 3 whole free cores of node 0 and 2 of node 1,
+	// so the 10 CPUs split 6+4 and need only 6GiB and 4GiB.
+	op := &resources.VMResources{ID: 3, CPUs: 10, Memory: 10 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.Equal(t, map[int]resources.NUMANodeState{
+		0: {CPUs: "0-5", Memory: 6144, Policy: "bind"},
+		1: {CPUs: "6-9", Memory: 4096, Policy: "bind"},
+	}, op.NUMANodes)
+}
+
+func TestZoneCapacityPinnedPrefersNodeHoldingWholeVM(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Both NUMA nodes keep 7 free CPUs, but node 0 has only 1GiB of memory left.
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 1, CPUs: 1, Memory: 15 * gib, CPUSet: cpuset.New(0),
+		NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0", Memory: 15 * 1024}},
+	}))
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 2, CPUs: 1, Memory: gib, CPUSet: cpuset.New(4),
+		NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0", Memory: 1024}},
+	}))
+
+	op := &resources.VMResources{ID: 3, CPUs: 4, Memory: 8 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.True(t, op.CPUSet.IsSubsetOf(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)), "placed on NUMA node 1: %v", op.CPUSet)
+}
