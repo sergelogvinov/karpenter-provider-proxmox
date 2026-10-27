@@ -17,7 +17,9 @@ limitations under the License.
 package resourcemanager
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/go-logr/logr"
 
@@ -27,6 +29,9 @@ import (
 
 	"k8s.io/utils/cpuset"
 )
+
+// errNUMAMemory means a CPU distribution puts more memory on a NUMA node than it has free.
+var errNUMAMemory = errors.New("not enough memory available on NUMA node")
 
 // Placement decides where a zone puts the CPUs of a newly reserved VM.
 type Placement interface {
@@ -92,7 +97,68 @@ func (p pinned) place(free freeResources, op *resources.VMResources) (cpuset.CPU
 		return cpus, numaNodes, nil
 	}
 
-	return p.take(free, nodesWithMemory(free, 1), op)
+	nodes := nodesWithMemory(free, 1)
+
+	cpus, numaNodes, err := p.take(free, nodes, op)
+	if errors.Is(err, errNUMAMemory) {
+		// Packing put too much memory on some node; spread the CPUs to where the memory is.
+		return p.takeByMemory(free, nodes, op)
+	}
+
+	return cpus, numaNodes, err
+}
+
+// takeByMemory gives each node no more of op's CPUs than its free memory can back,
+// filling the nodes that can back the most CPUs first.
+func (p pinned) takeByMemory(free freeResources, nodes cpuset.CPUSet, op *resources.VMResources) (cpuset.CPUSet, map[int]resources.NUMANodeState, error) {
+	totalMiB := max(1, op.Memory/1024/1024)
+
+	type room struct {
+		node int
+		cpus int
+	}
+
+	rooms := make([]room, 0, nodes.Size())
+	for _, i := range nodes.List() {
+		freeCPUs := free.topo.CPUDetails.CPUsInNUMANodes(i).Intersection(free.cpus).Size()
+		backed := int(free.numaMemory[i] / 1024 / 1024 * uint64(op.CPUs) / totalMiB)
+
+		if n := min(freeCPUs, backed); n > 0 {
+			rooms = append(rooms, room{node: i, cpus: n})
+		}
+	}
+
+	sort.SliceStable(rooms, func(a, b int) bool { return rooms[a].cpus > rooms[b].cpus })
+
+	cpus := cpuset.New()
+	left := op.CPUs
+
+	for _, r := range rooms {
+		if left == 0 {
+			break
+		}
+
+		n := min(left, r.cpus)
+
+		taken, err := cpumanager.TakeByTopology(p.log, &free.topo.CPUTopology, free.topo.CPUDetails.CPUsInNUMANodes(r.node).Intersection(free.cpus), n)
+		if err != nil {
+			return cpuset.New(), nil, err
+		}
+
+		cpus = cpus.Union(taken)
+		left -= n
+	}
+
+	if left > 0 {
+		return cpuset.New(), nil, fmt.Errorf("not enough memory available across NUMA nodes for %d CPUs and %dM", op.CPUs, op.Memory/1024/1024)
+	}
+
+	numaNodes, err := splitNUMAMemory(free, cpus, op.Memory)
+	if err != nil {
+		return cpuset.New(), nil, err
+	}
+
+	return cpus, numaNodes, nil
 }
 
 // nodesWithMemory returns the NUMA nodes with at least memory bytes free.
@@ -172,7 +238,7 @@ func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map
 
 	for i, node := range nodes {
 		if node.Memory*1024*1024 > free.numaMemory[i] {
-			return nil, fmt.Errorf("not enough memory available on NUMA node %d: requested=%dM, available=%dM", i, node.Memory, free.numaMemory[i]/1024/1024)
+			return nil, fmt.Errorf("%w %d: requested=%dM, available=%dM", errNUMAMemory, i, node.Memory, free.numaMemory[i]/1024/1024)
 		}
 	}
 
