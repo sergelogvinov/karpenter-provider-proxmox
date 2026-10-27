@@ -26,10 +26,7 @@ import (
 	nodeclaimlifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclaim/lifecycle"
 	nodeclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/hash"
 	nodeclaasstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
-	nodetemplateclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/hash"
-	nodetemplateclassinplaceupdate "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/inplaceupdate"
-	nodetemplateclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/status"
-	nodetemplateclasstermination "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/termination"
+	nodetemplateclasslifecycle "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateclass/lifecycle"
 	nodetemplateunmanagedclasshash "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/hash"
 	nodetemplateunmanagedclassstatus "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/status"
 	cloudcapacitynode "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/node"
@@ -64,10 +61,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodeclaimlifecycle.NewController(kubeClient, kubernetesBootstrapProvider, cloudProvider, instanceProvider),
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, cloudCapacityProvider),
-		nodetemplateclassinplaceupdate.NewController(kubeClient, instanceTemplateProvider),
-		nodetemplateclasshash.NewController(kubeClient),
-		nodetemplateclassstatus.NewController(kubeClient, instanceTemplateProvider),
-		nodetemplateclasstermination.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateclasslifecycle.NewController(kubeClient, instanceTemplateProvider),
 		nodetemplateunmanagedclasshash.NewController(kubeClient),
 		nodetemplateunmanagedclassstatus.NewController(kubeClient, instanceTemplateProvider),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
