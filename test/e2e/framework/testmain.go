@@ -20,7 +20,11 @@ package framework
 
 import (
 	"log"
+	"os"
 	"testing"
+
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 // TestMain does the one-time setup every e2e scenario package needs: build
@@ -31,6 +35,11 @@ import (
 //
 //	func TestMain(m *testing.M) { os.Exit(framework.TestMain(m)) }
 func TestMain(m *testing.M) int {
+	// The provider packages the suite uses directly (e.g. cloudcapacity in
+	// NewProxmoxClient) log through controller-runtime; without a logger set
+	// it prints a "log.SetLogger(...) was never called" stack trace instead.
+	ctrllog.SetLogger(zap.New(zap.WriteTo(os.Stderr)))
+
 	cfg := LoadConfig()
 
 	client, err := NewClient(cfg.Kubeconfig)

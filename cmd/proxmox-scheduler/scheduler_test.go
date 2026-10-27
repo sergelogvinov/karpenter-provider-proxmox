@@ -40,21 +40,19 @@ import (
 // 3/7 are SMT sibling pairs).
 func dualNodeTopology() *topology.Topology {
 	return &topology.Topology{ //nolint:modernize // MemTopology is a second embedded field; the suggested elision does not compile
-		CPUTopology: topology.CPUTopology{
-			NumCPUs:      8,
-			NumCores:     4,
-			NumSockets:   2,
-			NumNUMANodes: 2,
-			CPUDetails: topology.CPUDetails{
-				0: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
-				1: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
-				2: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
-				3: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
-				4: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
-				5: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
-				6: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
-				7: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
-			},
+		NumCPUs:      8,
+		NumCores:     4,
+		NumSockets:   2,
+		NumNUMANodes: 2,
+		CPUDetails: topology.CPUDetails{
+			0: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
+			1: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
+			2: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
+			3: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
+			4: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
+			5: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
+			6: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
+			7: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
 		},
 	}
 }
@@ -81,13 +79,11 @@ func liveTopology(t *testing.T) *topology.Topology {
 	}
 
 	return &topology.Topology{ //nolint:modernize // MemTopology is a second embedded field; the suggested elision does not compile
-		CPUTopology: topology.CPUTopology{
-			NumCPUs:      len(ids),
-			NumCores:     len(ids),
-			NumSockets:   1,
-			NumNUMANodes: 1,
-			CPUDetails:   details,
-		},
+		NumCPUs:      len(ids),
+		NumCores:     len(ids),
+		NumSockets:   1,
+		NumNUMANodes: 1,
+		CPUDetails:   details,
 	}
 }
 
