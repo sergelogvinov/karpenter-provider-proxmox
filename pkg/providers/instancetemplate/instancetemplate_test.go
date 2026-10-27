@@ -135,3 +135,31 @@ func TestDeleteTwoImageStoragesInOneZone(t *testing.T) {
 		assert.Empty(t, content, "image left on %s", name)
 	}
 }
+
+// TestCreateRegionWithoutCommonZoneIsUnresolved resolves both storages of a
+// region but finds no zone that has both. The region's zones are unknown, so
+// it must not show up as targeted with no zones, which would make every VM
+// template there stale.
+func TestCreateRegionWithoutCommonZoneIsUnresolved(t *testing.T) {
+	t.Parallel()
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes("pve-1", "pve-2"))
+
+	capacity := &fakeCloudCapacity{storages: map[string]*cloudcapacity.NodeStorageCapacityInfo{
+		"local": {Name: "local", Region: region, Capabilities: []string{"import"}, Zones: []string{"pve-1"}},
+		"lvm":   {Name: "lvm", Region: region, Capabilities: []string{"images"}, Zones: []string{"pve-2"}},
+	}}
+
+	p := newProvider(t, cluster, capacity)
+
+	templateClass := &v1alpha1.ProxmoxTemplate{}
+	templateClass.Name = "talos"
+	templateClass.Spec.StorageIDs = []string{"local", "lvm"}
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Placements)
+	assert.NotContains(t, result.Targets, region)
+	assert.Equal(t, []string{region}, result.Unresolved)
+}

@@ -176,6 +176,14 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		})
 
 		zones := targetZones(storageImage, storageTemplate, existing)
+		if len(zones) == 0 {
+			log.Error(nil, "No zone has both the image and the template storage", "region", region, "storageImage", storageImage.Name, "storageTemplate", storageTemplate.Name)
+
+			result.Unresolved = append(result.Unresolved, region)
+
+			continue
+		}
+
 		result.Targets[region] = zones
 
 		for _, zone := range zones {

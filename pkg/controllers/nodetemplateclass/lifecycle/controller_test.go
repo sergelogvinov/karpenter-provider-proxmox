@@ -54,6 +54,7 @@ type fakeProvider struct {
 	createErr error
 	remaining []v1alpha1.TemplatePlacement
 	deleteErr error
+	updateErr error
 	onCreate  func()
 
 	calls   []string
@@ -109,7 +110,7 @@ func (p *fakeProvider) Update(_ context.Context, _ *v1alpha1.ProxmoxTemplate, pl
 	p.calls = append(p.calls, "update")
 	p.updated = append(p.updated, placements...)
 
-	return nil
+	return p.updateErr
 }
 
 func newTemplate() *v1alpha1.ProxmoxTemplate {
@@ -519,4 +520,58 @@ func TestNoTargetsDeletesNothing(t *testing.T) {
 	tpl := get(t, kubeClient)
 	assert.Equal(t, []string{"create"}, provider.calls)
 	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2, placementR}, tpl.TemplatePlacements())
+}
+
+func TestFailedZoneKeepsPlacement(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result: instancetemplate.CreateResult{
+			Placements: []v1alpha1.TemplatePlacement{placement},
+			Targets:    targets(placement, placement2),
+		},
+		createErr: errors.New("zone-2: download failed"),
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.NotContains(t, provider.calls, "delete")
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, tpl.TemplatePlacements())
+}
+
+func TestInPlaceUpdateCoversFailedZone(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] = "stale"
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result: instancetemplate.CreateResult{
+			Placements: []v1alpha1.TemplatePlacement{placement},
+			Targets:    targets(placement, placement2),
+		},
+		createErr: errors.New("zone-2: download failed"),
+		updateErr: errors.New("zone-2: template not found for update"),
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.Error(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, provider.updated)
+	assert.Equal(t, "stale", tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
+
+	provider.result, provider.createErr, provider.updateErr = reused(placement, placement2), nil, nil
+	provider.updated = nil
+
+	_, err = reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, provider.updated)
+	assert.Equal(t, tpl.InPlaceHash(), tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
 }

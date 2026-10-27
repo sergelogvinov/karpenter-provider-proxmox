@@ -143,8 +143,8 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 // syncTemplates creates the VM templates, replacing them first when the
 // source image changed, and records the outcome in status. It returns the
-// placements Create reused rather than rendered, which may still need an
-// in-place update.
+// placements in status that Create did not render in this pass, which may
+// still need an in-place update.
 func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate) (reconcile.Result, []v1alpha1.TemplatePlacement) {
 	imageID := templateClass.GetImageID()
 	if templateClass.Status.ImageID != "" && templateClass.Status.ImageID != imageID {
@@ -174,19 +174,24 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 	}
 
 	if len(created.Placements) > 0 {
-		// Placements of regions whose storage did not resolve are unknown,
-		// not gone, so they stay.
-		unresolved := lo.Filter(current, func(p v1alpha1.TemplatePlacement, _ int) bool {
-			return slices.Contains(created.Unresolved, p.Region)
+		// A placement leaves status only when Create returns another one for
+		// its zone or deleteStale deletes it: a zone that failed in this pass,
+		// or a region whose storage did not resolve, still has its VM template.
+		kept := lo.Reject(current, func(p v1alpha1.TemplatePlacement, _ int) bool {
+			return lo.ContainsBy(created.Placements, func(n v1alpha1.TemplatePlacement) bool {
+				return n.Region == p.Region && n.Zone == p.Zone
+			})
 		})
 
 		templateClass.Status.ImageID = imageID
-		templateClass.SetTemplatePlacements(append(slices.Clone(created.Placements), unresolved...))
+		templateClass.SetTemplatePlacements(append(slices.Clone(created.Placements), kept...))
 	}
 
 	c.deleteStale(ctx, templateClass, current, created)
 
-	reused, _ := lo.Difference(created.Placements, created.Created)
+	// Every placement in status needs the in-place fields, not only the ones
+	// Create returned, or a zone that failed in this pass would never get them.
+	reused, _ := lo.Difference(templateClass.TemplatePlacements(), created.Created)
 
 	if templateClass.Status.ImageID == "" || templateClass.Status.Zones == nil {
 		templateClass.StatusConditions().SetUnknownWithReason(
@@ -243,8 +248,8 @@ func (c *Controller) deleteStale(ctx context.Context, templateClass *v1alpha1.Pr
 }
 
 // updateInPlace applies in-place fields to the reused VM templates and records
-// the applied in-place hash. VM templates Create rendered in this pass already
-// carry them. A template without a recorded hash adopts the current one
+// the applied in-place hash only once all of them took it. VM templates Create
+// rendered in this pass already carry them. A template without a recorded hash adopts the current one
 // without an update, so hand edits survive an upgrade.
 func (c *Controller) updateInPlace(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, reused []v1alpha1.TemplatePlacement) error {
 	if status := templateClass.StatusConditions().Get(v1alpha1.ConditionTemplateReady); status == nil || !status.IsTrue() {
