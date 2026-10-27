@@ -30,7 +30,7 @@ import (
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/storage"
-	"github.com/sergelogvinov/go-proxmox-rest/nodes/tasks"
+	"github.com/sergelogvinov/go-proxmox-rest/task"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
@@ -101,7 +101,7 @@ func (p *DefaultProvider) attachCloudInitISO(
 	}
 	defer isoFile.Close()
 
-	uploadUPID, err := px.Nodes(zone).Storage().Upload(ctx, storageID, &storage.UploadOptions{
+	uploadTask, err := px.Nodes(zone).Storage().Upload(ctx, storageID, &storage.UploadOptions{
 		Content:  "iso",
 		Filename: isoName,
 		File:     isoFile,
@@ -110,13 +110,11 @@ func (p *DefaultProvider) attachCloudInitISO(
 		return fmt.Errorf("failed to upload cloud-init ISO for vm %d: %v", vmID, err)
 	}
 
-	if uploadUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, uploadUPID, &tasks.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
-			return fmt.Errorf("failed to upload cloud-init ISO for vm %d: %v", vmID, err)
-		}
+	if err = uploadTask.Wait(ctx, &task.WaitOptions{Timeout: cloneTaskTimeout}); err != nil {
+		return fmt.Errorf("failed to upload cloud-init ISO for vm %d: %v", vmID, err)
 	}
 
-	attachUPID, err := px.Nodes(zone).Qemu().AttachISO(ctx, vmID, &qemu.AttachISOOptions{
+	attachTask, err := px.Nodes(zone).Qemu().AttachISO(ctx, vmID, &qemu.AttachISOOptions{
 		Drive:  cloudInitDrive,
 		Volume: fmt.Sprintf("%s:iso/%s", storageID, isoName),
 	})
@@ -124,10 +122,8 @@ func (p *DefaultProvider) attachCloudInitISO(
 		return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
 	}
 
-	if attachUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, attachUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-			return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
-		}
+	if err = attachTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+		return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
 	}
 
 	return nil
@@ -164,26 +160,22 @@ func (p *DefaultProvider) detachCloudInitISO(
 		return nil
 	}
 
-	detachUPID, err := px.Nodes(zone).Qemu().DetachISO(ctx, vmID, cloudInitDrive)
+	detachTask, err := px.Nodes(zone).Qemu().DetachISO(ctx, vmID, cloudInitDrive)
 	if err != nil {
 		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
 	}
 
-	if detachUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, detachUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-			return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
-		}
+	if err = detachTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
 	}
 
-	deleteUPID, err := px.Nodes(zone).Storage().Content(storageID).Delete(ctx, volume, 0)
+	deleteTask, err := px.Nodes(zone).Storage().Content(storageID).Delete(ctx, volume, 0)
 	if err != nil {
 		return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
 	}
 
-	if deleteUPID != "" {
-		if err = px.Nodes(zone).Tasks().Wait(ctx, deleteUPID, &tasks.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-			return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
-		}
+	if err = deleteTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+		return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
 	}
 
 	return nil
