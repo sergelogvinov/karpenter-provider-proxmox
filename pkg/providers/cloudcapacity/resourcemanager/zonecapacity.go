@@ -20,12 +20,16 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	"k8s.io/utils/cpuset"
 )
+
+// pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.
+const pendingGracePeriod = 10 * time.Minute
 
 // Capacity is what a new shared VM could still get in a zone.
 type Capacity struct {
@@ -48,6 +52,8 @@ type ZoneCapacity struct {
 	memory uint64
 
 	vms map[int]record
+
+	now func() time.Time
 }
 
 // record is what one VM holds: shared vCPUs or a pinned CPU set, and its memory.
@@ -57,6 +63,8 @@ type record struct {
 	memory uint64
 	// numaMemory is the VM's memory bound to each NUMA node, if any.
 	numaMemory map[int]uint64
+	// reservedAt is when Reserve admitted the VM; zero for a tracked VM.
+	reservedAt time.Time
 }
 
 // usage is the sum of all records.
@@ -98,6 +106,7 @@ func NewZoneCapacity(topo *topology.Topology, reservedCPUs []int, reservedMemory
 		reservedCPUs: reserved,
 		memory:       topo.TotalMemory - reservedMemory,
 		vms:          map[int]record{},
+		now:          time.Now,
 	}, nil
 }
 
@@ -120,6 +129,7 @@ func (z *ZoneCapacity) Reserve(op *resources.VMResources) error {
 	}
 
 	rec := newRecord(op.CPUs, cpus, op.Memory, numaNodes)
+	rec.reservedAt = z.now()
 
 	u := z.usageWith(op.ID, rec)
 	if u.memory > z.memory {
@@ -159,6 +169,50 @@ func (z *ZoneCapacity) Track(op *resources.VMResources) error {
 	z.vms[op.ID] = newRecord(op.CPUs, op.CPUSet, op.Memory, op.NUMANodes)
 
 	return nil
+}
+
+// KeepPending copies prev's pending reservations into z: reserved VMs that z has not tracked.
+// A reservation older than the grace period is dropped when its VM does not exist in the cluster.
+func (z *ZoneCapacity) KeepPending(prev *ZoneCapacity, exists func(id int) bool) {
+	if prev == nil || prev == z {
+		return
+	}
+
+	prev.mu.Lock()
+	defer prev.mu.Unlock()
+
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	for id, rec := range prev.vms {
+		if rec.reservedAt.IsZero() {
+			continue
+		}
+
+		if _, ok := z.vms[id]; ok {
+			continue
+		}
+
+		if z.now().Sub(rec.reservedAt) > pendingGracePeriod && !exists(id) {
+			continue
+		}
+
+		z.vms[id] = rec
+	}
+}
+
+// HasPending reports whether the zone holds any reservation not yet seen running.
+func (z *ZoneCapacity) HasPending() bool {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	for _, rec := range z.vms {
+		if !rec.reservedAt.IsZero() {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Release forgets VM id. Releasing a VM without a record changes nothing.

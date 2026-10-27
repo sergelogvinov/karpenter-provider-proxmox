@@ -30,6 +30,20 @@ type NodeCapacityInfo struct {
 
 	// Capacity tracks the CPU and memory the node gives to VMs.
 	Capacity *resourcemanager.ZoneCapacity `json:"-"`
+
+	// vms is the set of the node's VMs in any state, as of the sync that built Capacity.
+	vms vmIDs
+	// omitted marks a node missing from the last sync, kept only to hold its pending
+	// reservations until it returns; it is not available for placement.
+	omitted bool
+}
+
+// vmIDs is a set of VM IDs.
+type vmIDs map[int]bool
+
+// has reports whether VM id is in the set.
+func (s vmIDs) has(id int) bool {
+	return s[id]
 }
 
 type NodeStorageCapacityInfo struct {

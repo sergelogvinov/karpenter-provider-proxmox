@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+// getNodeCapacity returns the node's capacity with its running VMs tracked.
 func getNodeCapacity(ctx context.Context, cl *proxmoxrest.Client, region string, r *cluster.Resource) (NodeCapacityInfo, error) {
 	capacity, err := resourcemanager.ZoneCapacityFromCluster(ctx, cl, region, r.Node)
 	if err != nil {
@@ -52,6 +53,7 @@ func getNodeCapacity(ctx context.Context, cl *proxmoxrest.Client, region string,
 	return info, nil
 }
 
+// updateNodeCapacity records all the node's VMs and tracks the running ones.
 func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxrest.Client) error {
 	log := log.FromContext(ctx).WithName("updateNodeCapacity()")
 
@@ -59,16 +61,20 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 		Type:      cluster.ResourceTypeVM,
 		GuestType: "qemu",
 		Node:      i.Name,
-		Match: func(r *cluster.Resource) (bool, error) {
-			return r.Status == "running", nil
-		},
 	})
 	if err != nil {
 		return fmt.Errorf("cannot list vms for node %s: %w", i.Name, err)
 	}
 
+	i.vms = make(vmIDs, len(vms))
+
 	for idx := range vms {
 		vmr := vms[idx]
+		i.vms[vmr.VMID] = true
+
+		if vmr.Status != "running" {
+			continue
+		}
 
 		cfg, err := cl.Nodes(vmr.Node).Qemu().Config(ctx, vmr.VMID, nil)
 		if err != nil {

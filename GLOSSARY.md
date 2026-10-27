@@ -72,6 +72,10 @@ _Avoid_: allocate (for this)
 To record a virtual machine that already runs in a zone, even if the zone is then over its limits.
 _Avoid_: allocate-or-update, observe, adopt
 
+**Pending reservation**:
+A reservation whose virtual machine has not yet been seen running in its zone. It keeps holding capacity across capacity syncs, including syncs that find its zone missing, until the virtual machine is seen running and tracked, is released, or never appears in the cluster within a grace period.
+_Avoid_: in-flight reservation, carry-over
+
 **Release**:
 To forget a virtual machine's record and return what it held to the zone's capacity. Releasing a virtual machine that has no record changes nothing.
 
