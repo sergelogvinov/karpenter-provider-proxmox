@@ -49,12 +49,17 @@ type fakeProvider struct {
 
 	installed []v1alpha1.TemplatePlacement
 	deleteErr error
+	onCreate  func()
 
 	calls []string
 }
 
 func (p *fakeProvider) Create(_ context.Context, templateClass *v1alpha1.ProxmoxTemplate) error {
 	p.calls = append(p.calls, "create")
+
+	if p.onCreate != nil {
+		p.onCreate()
+	}
 
 	if len(p.installed) > 0 {
 		templateClass.Status.ImageID = templateClass.GetImageID()
@@ -256,12 +261,9 @@ func TestDeletionFailureKeepsFinalizer(t *testing.T) {
 	assert.Equal(t, 10*time.Second, requeue)
 }
 
-func TestStatusConflictSkipsInPlaceUpdate(t *testing.T) {
-	tpl := readyTemplate()
-	tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash] = "stale"
-
-	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{
-		SubResourcePatch: func(_ context.Context, _ client.Client, _ string, obj client.Object, _ client.Patch, _ ...client.SubResourcePatchOption) error {
+func TestFinalizerConflictRequeuesBeforeCreate(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(), interceptor.Funcs{
+		Patch: func(_ context.Context, _ client.WithWatch, obj client.Object, _ client.Patch, _ ...client.PatchOption) error {
 			return apierrors.NewConflict(schema.GroupResource{Resource: "proxmoxtemplates"}, obj.GetName(), errors.New("modified"))
 		},
 	})
@@ -270,8 +272,31 @@ func TestStatusConflictSkipsInPlaceUpdate(t *testing.T) {
 	requeue, err := reconcile(t, kubeClient, provider)
 	require.NoError(t, err)
 
-	tpl = get(t, kubeClient)
-	assert.NotContains(t, provider.calls, "update")
-	assert.Equal(t, "stale", tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
+	assert.Empty(t, provider.calls)
 	assert.Equal(t, 10*time.Second, requeue)
+}
+
+func TestDeletionDuringCreateKeepsPlacements(t *testing.T) {
+	tpl := newTemplate()
+	tpl.Finalizers = []string{v1alpha1.TerminationFinalizer}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{installed: []v1alpha1.TemplatePlacement{placement}}
+	provider.onCreate = func() {
+		require.NoError(t, kubeClient.Delete(t.Context(), newTemplate()))
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	require.False(t, tpl.DeletionTimestamp.IsZero())
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, tpl.TemplatePlacements())
+
+	provider.onCreate = nil
+
+	_, err = reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"create", "delete"}, provider.calls)
 }
