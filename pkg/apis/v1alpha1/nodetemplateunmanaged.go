@@ -19,9 +19,6 @@ package v1alpha1
 import (
 	"fmt"
 
-	"github.com/mitchellh/hashstructure/v2"
-	"github.com/samber/lo"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -64,14 +61,6 @@ type ProxmoxUnmanagedTemplateSpec struct {
 	// +kubebuilder:validation:MaxItems:=10
 	// +optional
 	Tags []string `json:"tags,omitempty"`
-}
-
-func (in *ProxmoxUnmanagedTemplate) Hash() string {
-	return fmt.Sprint(lo.Must(hashstructure.Hash(in.Spec, hashstructure.FormatV2, &hashstructure.HashOptions{
-		SlicesAsSets:    true,
-		IgnoreZeroValue: true,
-		ZeroNil:         true,
-	})))
 }
 
 func (in *ProxmoxUnmanagedTemplate) Validate() (err error) {

@@ -32,7 +32,7 @@ import (
 // whose tags can't match any real Proxmox VM template, and confirms the
 // controller reports this as an explicit not-ready state rather than the
 // resource just sitting there with no observable signal as to why (see
-// pkg/controllers/nodetemplateunmanagedclass/status/instancetemplate.go's
+// pkg/controllers/nodetemplateunmanagedclass/lifecycle's
 // "TemplatesNotFound" reason).
 func TestProxmoxUnmanagedTemplateNoMatch(t *testing.T) {
 	f := framework.New(t)

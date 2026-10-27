@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package status
+package lifecycle
 
 import (
 	"context"
@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
-	"go.uber.org/multierr"
+	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
@@ -39,29 +39,30 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
-	"sigs.k8s.io/karpenter/pkg/utils/result"
 )
 
-type nodeTemplateStatusReconciler interface {
-	Reconcile(context.Context, *v1alpha1.ProxmoxUnmanagedTemplate) (reconcile.Result, error)
-}
+const (
+	templateRepeatPeriod = 5 * time.Second
+	templateScanPeriod   = 5 * time.Minute
+)
 
-// Controller reconciles an ProxmoxUnmanagedTemplate object to update its status
+// Controller keeps the template placements of a ProxmoxUnmanagedTemplate in
+// step with the Proxmox VM templates that match its spec.
 type Controller struct {
 	kubeClient               client.Client
-	instanceTemplateProvider *InstanceTemplate
+	instanceTemplateProvider instancetemplate.Provider
 }
 
 // NewController constructs a controller instance
 func NewController(kubeClient client.Client, instanceTemplateProvider instancetemplate.Provider) *Controller {
 	return &Controller{
 		kubeClient:               kubeClient,
-		instanceTemplateProvider: &InstanceTemplate{instanceTemplateProvider: instanceTemplateProvider},
+		instanceTemplateProvider: instanceTemplateProvider,
 	}
 }
 
 func (c *Controller) Name() string {
-	return "nodetemplateunmanagedclass.status"
+	return "nodetemplateunmanagedclass.lifecycle"
 }
 
 // Reconcile executes a control loop for the resource
@@ -71,18 +72,7 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 
 	templateClassCopy := templateClass.DeepCopy()
 
-	var errs error
-
-	results := []reconcile.Result{}
-
-	for _, reconciler := range []nodeTemplateStatusReconciler{
-		c.instanceTemplateProvider,
-	} {
-		res, err := reconciler.Reconcile(ctx, templateClass)
-		errs = multierr.Append(errs, err)
-
-		results = append(results, res)
-	}
+	res := c.syncTemplates(ctx, templateClass)
 
 	templateClass.Status.Resources = corev1.ResourceList{
 		v1alpha1.ResourceZones: resource.MustParse(strconv.Itoa(len(templateClass.Status.Zones))),
@@ -94,20 +84,16 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 		// Here, we are updating the status condition list
 		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
+				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
 			}
 
-			errs = multierr.Append(errs, client.IgnoreNotFound(err))
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
-	}
-
-	if errs != nil {
-		return reconcile.Result{}, errs
 	}
 
 	log.FromContext(ctx).V(1).Info("Finished syncing Proxmox Unmanaged Templates", "zones", len(templateClass.Status.Zones))
 
-	return result.Min(results...), nil
+	return res, nil
 }
 
 // Register registers the controller with the manager
@@ -120,4 +106,50 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 			MaxConcurrentReconciles: 10,
 		}).
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
+}
+
+// syncTemplates records the placements of the VM templates that match the
+// spec by name, region and tags, and the outcome in the Ready condition.
+func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) reconcile.Result {
+	if err := templateClass.Validate(); err != nil {
+		templateClass.SetTemplatePlacements(nil)
+		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplateValidation", err.Error())
+
+		return reconcile.Result{}
+	}
+
+	if err := c.instanceTemplateProvider.SyncInstanceTemplates(ctx); err != nil {
+		return reconcile.Result{RequeueAfter: templateScanPeriod}
+	}
+
+	templates := c.instanceTemplateProvider.ListWithFilter(ctx, func(info *instancetemplate.InstanceTemplateInfo) bool {
+		if (templateClass.Spec.TemplateName != "" && info.Name != templateClass.Spec.TemplateName) ||
+			(templateClass.Spec.Region != "" && info.Region != templateClass.Spec.Region) {
+			return false
+		}
+
+		if len(templateClass.Spec.Tags) > 0 {
+			if !lo.Every(info.TemplateTags, templateClass.Spec.Tags) {
+				return false
+			}
+		}
+
+		return true
+	})
+	if len(templates) == 0 {
+		templateClass.SetTemplatePlacements(nil)
+		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
+
+		return reconcile.Result{RequeueAfter: templateScanPeriod}
+	}
+
+	placements := make([]v1alpha1.TemplatePlacement, 0, len(templates))
+	for _, template := range templates {
+		placements = append(placements, template.Placement())
+	}
+
+	templateClass.SetTemplatePlacements(placements)
+	templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
+
+	return reconcile.Result{RequeueAfter: templateScanPeriod}
 }
