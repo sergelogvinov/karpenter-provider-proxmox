@@ -86,8 +86,14 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 
 		controllerutil.AddFinalizer(templateClass, v1alpha1.TerminationFinalizer)
 
-		if err := c.kubeClient.Patch(ctx, templateClass, client.MergeFrom(templateClassCopy)); err != nil {
-			return reconcile.Result{}, err
+		// A merge patch replaces the whole finalizer list, so lock it against
+		// finalizers added by others since the read.
+		if err := c.kubeClient.Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
+			if errors.IsConflict(err) {
+				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
+			}
+
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 
@@ -102,15 +108,10 @@ func (c *Controller) Reconcile(ctx context.Context, templateClass *v1alpha1.Prox
 	}
 
 	if !equality.Semantic.DeepEqual(templateClassCopy.Status, templateClass.Status) {
-		// We use client.MergeFromWithOptimisticLock because patching a list with a JSON merge patch
-		// can cause races due to the fact that it fully replaces the list on a change
-		// Here, we are updating the status condition list
-		// https://github.com/kubernetes/kubernetes/issues/111643#issuecomment-2016489732
-		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFromWithOptions(templateClassCopy, client.MergeFromWithOptimisticLock{})); err != nil {
-			if errors.IsConflict(err) {
-				return reconcile.Result{RequeueAfter: templateRepeatPeriod}, nil
-			}
-
+		// This controller is the only status writer, so the patch takes no
+		// optimistic lock: a concurrent metadata change, such as the deletion
+		// timestamp, must not drop placements that finalize needs to clean up.
+		if err := c.kubeClient.Status().Patch(ctx, templateClass, client.MergeFrom(templateClassCopy)); err != nil {
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
