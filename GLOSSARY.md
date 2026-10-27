@@ -47,7 +47,7 @@ A ProxmoxTemplate spec field outside the template hash; changing one updates the
 _Avoid_: mutable field
 
 **Template lifecycle**:
-The stages a ProxmoxTemplate's VM templates go through: created on each zone, replaced when a rebuild field changes, updated in place when only in-place fields change, and deleted with the ProxmoxTemplate. When one change touches both kinds of field, the replacement already carries the in-place fields.
+The stages a ProxmoxTemplate's VM templates go through: created on each zone, replaced when a rebuild field changes, updated in place when only in-place fields change, removed from zones the spec no longer targets, and deleted with the ProxmoxTemplate. When one change touches both kinds of field, the replacement already carries the in-place fields.
 _Avoid_: template reconcile, template sync
 
 **Template placement**:

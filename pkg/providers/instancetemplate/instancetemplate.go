@@ -24,7 +24,6 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
-	"github.com/samber/lo"
 	"go.uber.org/multierr"
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
@@ -100,6 +99,13 @@ type CreateResult struct {
 	// Created are the Placements this call rendered, new or replacing an
 	// outdated VM template, so they already carry the in-place fields.
 	Created []v1alpha1.TemplatePlacement
+	// Targets are the zones the spec targets, by region, for every region
+	// whose storage resolved. A VM template of a resolved region outside
+	// its zones is stale.
+	Targets map[string][]string
+	// Unresolved are the targeted regions whose storage did not resolve, so
+	// their zones are unknown and none of their VM templates are stale.
+	Unresolved []string
 }
 
 // Placement returns where the template lives.
@@ -131,7 +137,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 	}
 
 	var (
-		result CreateResult
+		result = CreateResult{Targets: map[string][]string{}}
 		errs   error
 	)
 
@@ -160,13 +166,17 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		if storageImage == nil || storageTemplate == nil {
 			log.Error(nil, "No storage found for image or template", "region", region, "storageIDs", templateClass.Spec.StorageIDs, "storageImage", storageImage, "storageTemplate", storageTemplate)
 
+			result.Unresolved = append(result.Unresolved, region)
+
 			continue
 		}
 
-		zones := lo.Intersect(storageImage.Zones, storageTemplate.Zones)
-		if storageTemplate.Shared {
-			zones = []string{storageTemplate.Zones[0]}
-		}
+		existing := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
+			return info.Region == region && info.Name == templateClass.Name
+		})
+
+		zones := targetZones(storageImage, storageTemplate, existing)
+		result.Targets[region] = zones
 
 		for _, zone := range zones {
 			func(zone string) {

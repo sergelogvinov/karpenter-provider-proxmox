@@ -19,6 +19,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -165,15 +166,25 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 		templateClass.Status.ImageID = imageID
 	}
 
+	current := templateClass.TemplatePlacements()
+
 	created, err := c.instanceTemplateProvider.Create(ctx, templateClass)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "Failed to create some Proxmox Templates", "templateClass", templateClass.Name)
 	}
 
 	if len(created.Placements) > 0 {
+		// Placements of regions whose storage did not resolve are unknown,
+		// not gone, so they stay.
+		unresolved := lo.Filter(current, func(p v1alpha1.TemplatePlacement, _ int) bool {
+			return slices.Contains(created.Unresolved, p.Region)
+		})
+
 		templateClass.Status.ImageID = imageID
-		templateClass.SetTemplatePlacements(created.Placements)
+		templateClass.SetTemplatePlacements(append(slices.Clone(created.Placements), unresolved...))
 	}
+
+	c.deleteStale(ctx, templateClass, current, created)
 
 	reused, _ := lo.Difference(created.Placements, created.Created)
 
@@ -194,6 +205,41 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 	}
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, reused
+}
+
+// deleteStale deletes the VM templates in zones the spec no longer targets.
+// Any it could not delete stay in status, so a retry and finalize see them.
+func (c *Controller) deleteStale(ctx context.Context, templateClass *v1alpha1.ProxmoxTemplate, current []v1alpha1.TemplatePlacement, created instancetemplate.CreateResult) {
+	// Nothing targeted at all means the regions are unknown, not dropped.
+	if len(created.Targets) == 0 && len(created.Unresolved) == 0 {
+		return
+	}
+
+	stale := lo.Filter(current, func(p v1alpha1.TemplatePlacement, _ int) bool {
+		if slices.Contains(created.Unresolved, p.Region) {
+			return false
+		}
+
+		zones, ok := created.Targets[p.Region]
+
+		return !ok || !slices.Contains(zones, p.Zone)
+	})
+	if len(stale) == 0 {
+		return
+	}
+
+	log.FromContext(ctx).V(1).Info("Deleting Proxmox Templates of untargeted zones", "templateClass", templateClass.Name, "placements", stale)
+
+	remaining, err := c.instanceTemplateProvider.Delete(ctx, templateClass, templateClass.Status.ImageID, stale)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to delete Proxmox Templates of untargeted zones", "templateClass", templateClass.Name)
+	}
+
+	placements := lo.Filter(templateClass.TemplatePlacements(), func(p v1alpha1.TemplatePlacement, _ int) bool {
+		return !slices.Contains(stale, p)
+	})
+
+	templateClass.SetTemplatePlacements(append(placements, remaining...))
 }
 
 // updateInPlace applies in-place fields to the reused VM templates and records

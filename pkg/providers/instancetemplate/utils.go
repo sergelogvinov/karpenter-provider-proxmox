@@ -141,6 +141,24 @@ func (p *DefaultProvider) deleteImage(
 	return nil
 }
 
+// targetZones returns the zones of one region that get a VM template: every
+// zone with both the image and the template storage, or for shared template
+// storage a single zone, kept where a VM template of this name already is so
+// a change in zone order does not move it.
+func targetZones(storageImage, storageTemplate *cloudcapacity.NodeStorageCapacityInfo, existing []InstanceTemplateInfo) []string {
+	if !storageTemplate.Shared {
+		return lo.Intersect(storageImage.Zones, storageTemplate.Zones)
+	}
+
+	for _, info := range existing {
+		if slices.Contains(storageTemplate.Zones, info.Zone) {
+			return []string{info.Zone}
+		}
+	}
+
+	return []string{storageTemplate.Zones[0]}
+}
+
 func (p *DefaultProvider) createTemplate(
 	ctx context.Context,
 	templateClass *v1alpha1.ProxmoxTemplate,

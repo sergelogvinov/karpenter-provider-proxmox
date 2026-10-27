@@ -43,6 +43,7 @@ import (
 var (
 	placement  = v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-1", TemplateID: 1000}
 	placement2 = v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-2", TemplateID: 1001}
+	placementR = v1alpha1.TemplatePlacement{Region: "region-2", Zone: "zone-1", TemplateID: 2000}
 )
 
 // fakeProvider returns canned results and records what it was asked to do.
@@ -61,14 +62,25 @@ type fakeProvider struct {
 	updated []v1alpha1.TemplatePlacement
 }
 
-// created is a CreateResult whose placements were all rendered by the call.
+// created is a CreateResult whose placements were all rendered by the call
+// and are the only zones it targeted.
 func created(placements ...v1alpha1.TemplatePlacement) instancetemplate.CreateResult {
-	return instancetemplate.CreateResult{Placements: placements, Created: placements}
+	return instancetemplate.CreateResult{Placements: placements, Created: placements, Targets: targets(placements...)}
 }
 
-// reused is a CreateResult whose placements all existed before the call.
+// reused is a CreateResult whose placements all existed before the call and
+// are the only zones it targeted.
 func reused(placements ...v1alpha1.TemplatePlacement) instancetemplate.CreateResult {
-	return instancetemplate.CreateResult{Placements: placements}
+	return instancetemplate.CreateResult{Placements: placements, Targets: targets(placements...)}
+}
+
+func targets(placements ...v1alpha1.TemplatePlacement) map[string][]string {
+	zones := map[string][]string{}
+	for _, p := range placements {
+		zones[p.Region] = append(zones[p.Region], p.Zone)
+	}
+
+	return zones
 }
 
 func (p *fakeProvider) Create(_ context.Context, _ *v1alpha1.ProxmoxTemplate) (instancetemplate.CreateResult, error) {
@@ -340,6 +352,7 @@ func TestInPlaceUpdateSkipsCreatedPlacements(t *testing.T) {
 	provider := &fakeProvider{result: instancetemplate.CreateResult{
 		Placements: []v1alpha1.TemplatePlacement{placement, placement2},
 		Created:    []v1alpha1.TemplatePlacement{placement2},
+		Targets:    targets(placement, placement2),
 	}}
 
 	_, err := reconcile(t, kubeClient, provider)
@@ -407,4 +420,103 @@ func TestPartialFinalizeKeepsRemainingPlacements(t *testing.T) {
 	assert.True(t, controllerutil.ContainsFinalizer(tpl, v1alpha1.TerminationFinalizer))
 	assert.Equal(t, []v1alpha1.TemplatePlacement{placement2}, tpl.TemplatePlacements())
 	assert.Equal(t, 10*time.Second, requeue)
+}
+
+// staleTemplate is a ready template with VM templates in zone-1 and zone-2
+// of region-1 and in zone-1 of region-2.
+func staleTemplate() *v1alpha1.ProxmoxTemplate {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2, placementR})
+
+	return tpl
+}
+
+func TestUntargetedZoneIsDeleted(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{result: instancetemplate.CreateResult{
+		Placements: []v1alpha1.TemplatePlacement{placement, placementR},
+		Targets:    map[string][]string{"region-1": {"zone-1"}, "region-2": {"zone-1"}},
+	}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []string{"create", "delete"}, provider.calls)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement2}, provider.deleted)
+	assert.Equal(t, []string{tpl.GetImageID()}, provider.images)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placementR}, tpl.TemplatePlacements())
+}
+
+func TestUntargetedRegionIsDeleted(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{result: reused(placement, placement2)}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placementR}, provider.deleted)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, tpl.TemplatePlacements())
+}
+
+func TestUnresolvedRegionKeepsPlacements(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{result: instancetemplate.CreateResult{
+		Placements: []v1alpha1.TemplatePlacement{placement, placement2},
+		Targets:    targets(placement, placement2),
+		Unresolved: []string{"region-2"},
+	}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.NotContains(t, provider.calls, "delete")
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2, placementR}, tpl.TemplatePlacements())
+}
+
+func TestNothingCreatedStillDeletesStale(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    instancetemplate.CreateResult{Targets: targets(placement, placement2)},
+		createErr: errors.New("downloads failed"),
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placementR}, provider.deleted)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, tpl.TemplatePlacements())
+}
+
+func TestFailedStaleDeleteStaysInStatus(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    reused(placement),
+		remaining: []v1alpha1.TemplatePlacement{placementR},
+		deleteErr: errors.New("region-2: proxmox unavailable"),
+	}
+
+	requeue, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement2, placementR}, provider.deleted)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placementR}, tpl.TemplatePlacements())
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
+	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestNoTargetsDeletesNothing(t *testing.T) {
+	kubeClient := newKubeClient(t, staleTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []string{"create"}, provider.calls)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2, placementR}, tpl.TemplatePlacements())
 }
