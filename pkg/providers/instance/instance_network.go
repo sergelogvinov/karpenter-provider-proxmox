@@ -26,6 +26,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	utilsip "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/ip"
+
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // instanceNetworkSetup pushes IPAM-allocated addresses into the guest's
@@ -36,8 +38,10 @@ import (
 // instance templates ship with Proxmox's native cloud-init drive already
 // configured (e.g. for network bootstrap before the custom ISO's userdata
 // takes over), and this keeps that drive's IP config in sync either way.
+// Each address it allocates is added to rollback.
 func (p *DefaultProvider) instanceNetworkSetup(
 	ctx context.Context,
+	rollback *launchRollback,
 	region string,
 	zone string,
 	vmID int,
@@ -60,7 +64,7 @@ func (p *DefaultProvider) instanceNetworkSetup(
 	}
 
 	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(cfg, ifaces)
-	if err = p.generateNetworkIPs(&networkValues); err != nil {
+	if err = p.generateNetworkIPs(rollback, &networkValues); err != nil {
 		return fmt.Errorf("failed to generate network IPs: %v", err)
 	}
 
@@ -92,7 +96,11 @@ func hasCloudInitDrive(cfg *qemu.Config) bool {
 	return false
 }
 
-func (p *DefaultProvider) generateNetworkIPs(networkConfig *cloudinit.NetworkConfig) error {
+// generateNetworkIPs allocates an address from the IP pool for every IPv4
+// interface address that names a subnet, and derives a SLAAC address for
+// every IPv6 one. Each allocation is added to rollback as it is made, so
+// one that fails partway leaves nothing occupied once rollback runs.
+func (p *DefaultProvider) generateNetworkIPs(rollback *launchRollback, networkConfig *cloudinit.NetworkConfig) error {
 	for i := range networkConfig.Interfaces {
 		iface := &networkConfig.Interfaces[i]
 
@@ -135,7 +143,15 @@ func (p *DefaultProvider) generateNetworkIPs(networkConfig *cloudinit.NetworkCon
 					}
 
 					ipnet.IP = ip
-					addresses = append(addresses, ipnet.String())
+					cidr := ipnet.String()
+
+					rollback.add(func(ctx context.Context) {
+						if err := p.nodeIpamProvider.ReleaseIP(cidr); err != nil {
+							log.FromContext(ctx).Error(err, "failed to release IP", "cidr", cidr)
+						}
+					})
+
+					addresses = append(addresses, cidr)
 				}
 			}
 

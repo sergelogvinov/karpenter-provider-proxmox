@@ -40,6 +40,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
@@ -91,8 +92,12 @@ type cloudInitFiles struct {
 	NetworkConfig string
 }
 
+// attachCloudInitISO renders the VM's cloud-init, uploads it as an ISO and
+// mounts it in the VM's cloud-init CD-ROM slot. Removing the ISO is added
+// to rollback before the upload starts.
 func (p *DefaultProvider) attachCloudInitISO(
 	ctx context.Context,
+	rollback *launchRollback,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
 	instanceType *cloudprovider.InstanceType,
@@ -140,6 +145,20 @@ func (p *DefaultProvider) attachCloudInitISO(
 	}
 	defer isoFile.Close()
 
+	volid := fmt.Sprintf("%s:iso/%s", storageID, isoName)
+
+	// Added before the upload, which can still finish after its wait times out.
+	rollback.add(func(ctx context.Context) {
+		cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmID, nil)
+		if err != nil {
+			cfg = &qemu.Config{}
+		}
+
+		if err := removeCloudInitISO(ctx, px, zone, vmID, cfg, volid); err != nil {
+			log.FromContext(ctx).Error(err, "failed to remove cloud-init ISO", "vmID", vmID, "volume", volid)
+		}
+	})
+
 	uploadTask, err := px.Nodes(zone).Storage().Upload(ctx, storageID, &storage.UploadOptions{
 		Content:  "iso",
 		Filename: isoName,
@@ -155,7 +174,7 @@ func (p *DefaultProvider) attachCloudInitISO(
 
 	attachTask, err := px.Nodes(zone).Qemu().AttachISO(ctx, vmID, &qemu.AttachISOOptions{
 		Drive:  cloudInitDrive,
-		Volume: fmt.Sprintf("%s:iso/%s", storageID, isoName),
+		Volume: volid,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to attach cloud-init ISO to vm %d in region %s: %v", vmID, region, err)
@@ -190,31 +209,43 @@ func (p *DefaultProvider) detachCloudInitISO(
 	}
 
 	drive, ok := cfg.IDE[2]
-	if !ok || drive.File == "" || drive.File == "none" {
+	if !ok || drive.File == "" || drive.File == "none" || !strings.Contains(drive.File, ":") {
 		return nil
 	}
 
-	storageID, volume, ok := strings.Cut(drive.File, ":")
+	if err := removeCloudInitISO(ctx, px, zone, vmID, cfg, drive.File); err != nil {
+		return fmt.Errorf("region %s: %w", region, err)
+	}
+
+	return nil
+}
+
+// removeCloudInitISO ejects volid from the VM's cloud-init CD-ROM slot if
+// cfg shows it mounted there, then deletes volid from its storage.
+func removeCloudInitISO(ctx context.Context, px *proxmoxrest.Client, zone string, vmID int, cfg *qemu.Config, volid string) error {
+	storageID, volume, ok := strings.Cut(volid, ":")
 	if !ok {
-		return nil
+		return fmt.Errorf("invalid volume id %q", volid)
 	}
 
-	detachTask, err := px.Nodes(zone).Qemu().DetachISO(ctx, vmID, cloudInitDrive)
-	if err != nil {
-		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
-	}
+	if drive, ok := cfg.IDE[2]; ok && drive.File == volid {
+		detachTask, err := px.Nodes(zone).Qemu().DetachISO(ctx, vmID, cloudInitDrive)
+		if err != nil {
+			return fmt.Errorf("failed to detach cloud-init ISO %s from vm %d: %v", volid, vmID, err)
+		}
 
-	if err = detachTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmID, region, err)
+		if err = detachTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
+			return fmt.Errorf("failed to detach cloud-init ISO %s from vm %d: %v", volid, vmID, err)
+		}
 	}
 
 	deleteTask, err := px.Nodes(zone).Storage().Content(storageID).Delete(ctx, volume, 0)
 	if err != nil {
-		return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
+		return fmt.Errorf("failed to delete cloud-init ISO %s of vm %d: %v", volid, vmID, err)
 	}
 
 	if err = deleteTask.Wait(ctx, &task.WaitOptions{Timeout: powerActionTimeout}); err != nil {
-		return fmt.Errorf("failed to delete cloud-init ISO %s from vm %d in region %s: %v", drive.File, vmID, region, err)
+		return fmt.Errorf("failed to delete cloud-init ISO %s of vm %d: %v", volid, vmID, err)
 	}
 
 	return nil
