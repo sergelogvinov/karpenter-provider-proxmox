@@ -29,6 +29,9 @@ type NodeSettings struct {
 	NumUncoreCaches int `json:"uncorecaches,omitempty"`
 	// NUMANodes is a map of NUMA node ID to its information.
 	NUMANodes NUMANodes `json:"nodes,omitempty"`
+	// HugePageSize is the page size, in bytes, of the zone's hugepage pool;
+	// 0 means none. When set, NUMANodes' MemSize is the pool on each node.
+	HugePageSize uint64 `json:"hugepagesize,omitempty"`
 
 	// ReservedCPUs is the list of reserved CPU IDs. For example: [0,4]
 	ReservedCPUs []int `json:"reservedcpus,omitempty"`

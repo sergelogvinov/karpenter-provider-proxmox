@@ -64,10 +64,23 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 		return fmt.Errorf("failed to check existing VMs: %w", err)
 	}
 
-	cfg := buildVMConfig(serverInfo, tp)
+	cfg := buildVMConfig(logger, serverInfo, tp)
 
 	if len(guests) > 0 {
 		vmID := guests[0].VMID
+
+		// Update never sends an option the desired config leaves unset, so
+		// a hugepage pool the host no longer has must be deleted explicitly.
+		if cfg.Hugepages == nil {
+			current, err := client.Qemu().Get(ctx, vmID)
+			if err != nil {
+				return fmt.Errorf("failed to get existing VM %d config: %w", vmID, err)
+			}
+
+			if current.Hugepages != nil {
+				cfg.Delete = []string{"hugepages"}
+			}
+		}
 
 		if err := client.Qemu().Update(ctx, vmID, cfg); err != nil {
 			return fmt.Errorf("failed to update existing VM %d: %w", vmID, err)
@@ -94,11 +107,75 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 	return nil
 }
 
+// Hugepage sizes, in KiB, that Proxmox's hugepages option accepts.
+const (
+	hugepageSize2M = 2 * 1024
+	hugepageSize1G = 1024 * 1024
+)
+
+// hugepagePools returns the hugepage counts the node-capacity guest is
+// built from: those of the NUMA nodes it reports when cadvisor knows the
+// topology, the machine-wide ones otherwise, so the page size chosen and
+// the memory reported come from the same pages.
+func hugepagePools(serverInfo *info.MachineInfo, tp *topology.Topology) []info.HugePagesInfo {
+	if len(serverInfo.Topology) == 0 || tp == nil {
+		return serverInfo.HugePages
+	}
+
+	var pools []info.HugePagesInfo
+
+	for _, nodeInfo := range serverInfo.Topology {
+		if tp.CPUDetails.CPUsInNUMANodes(nodeInfo.Id).Size() > 0 {
+			pools = append(pools, nodeInfo.HugePages...)
+		}
+	}
+
+	return pools
+}
+
+// hugepageSize returns the page size (KiB) of the host's hugepage pool, or
+// 0 when it has none. Hosts are expected to preallocate one size only; if
+// they have both, the size holding more memory wins.
+func hugepageSize(logger logr.Logger, pools []info.HugePagesInfo) uint64 {
+	pool2M := poolMB(pools, hugepageSize2M)
+	pool1G := poolMB(pools, hugepageSize1G)
+
+	if pool2M > 0 && pool1G > 0 {
+		logger.Info("Warning: host has both 2M and 1G hugepages, reporting only the larger pool",
+			"pool2MMiB", pool2M, "pool1GMiB", pool1G)
+	}
+
+	switch {
+	case pool1G > 0 && pool1G >= pool2M:
+		return hugepageSize1G
+	case pool2M > 0:
+		return hugepageSize2M
+	default:
+		return 0
+	}
+}
+
+// poolMB returns how much memory, in MiB, pools hold in pages of pageSize
+// KiB.
+func poolMB(pools []info.HugePagesInfo, pageSize uint64) int {
+	total := 0
+
+	for _, pool := range pools {
+		if pool.PageSize == pageSize {
+			total += int(pool.NumPages * pool.PageSize / 1024)
+		}
+	}
+
+	return total
+}
+
 // buildVMConfig builds the node-capacity guest's desired configuration
-// as a typed *qemu.Config
-func buildVMConfig(serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
+// as a typed *qemu.Config. On a host with a hugepage pool the memory it
+// reports is the pool's, per NUMA node, not the host's ordinary memory.
+func buildVMConfig(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
 	totalCores := serverInfo.NumCores
 	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))
+	pageSize := hugepageSize(logger, hugepagePools(serverInfo, tp))
 
 	cfg := &qemu.Config{
 		Name:        "node-capacity",
@@ -109,6 +186,11 @@ func buildVMConfig(serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Co
 		NUMAEnabled: new(true),
 		OSType:      new("l26"),
 		Tags:        &qemu.Tags{"karpenter"},
+	}
+
+	if pageSize > 0 {
+		cfg.Hugepages = new(strconv.FormatUint(pageSize/1024, 10))
+		totalMemoryMB = poolMB(serverInfo.HugePages, pageSize)
 	}
 
 	if len(serverInfo.Topology) > 0 {
@@ -133,6 +215,13 @@ func buildVMConfig(serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Co
 			}
 
 			memoryInNode *= 1024
+
+			if pageSize > 0 {
+				// A node without pages of this size reports 0, but keeps
+				// its CPUs.
+				memoryInNode = poolMB(nodeInfo.HugePages, pageSize)
+			}
+
 			totalMemoryMB += memoryInNode
 
 			numa[idx] = qemu.NUMA{

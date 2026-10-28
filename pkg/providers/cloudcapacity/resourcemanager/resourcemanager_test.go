@@ -88,6 +88,51 @@ func TestNodeSettingsFromVM(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "VM with a hugepage pool and a NUMA node without pages",
+			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 8, MaxMem: 16 * 1024 * 1024 * 1024},
+			cfg: &qemu.Config{
+				Affinity:  "0-1,4-5,2-3,6-7",
+				Hugepages: new("1024"),
+				NUMA: map[int]qemu.NUMA{
+					0: {CPUIDs: []string{"0-3"}, HostNodes: []string{"0"}, Memory: new(16384)},
+					1: {CPUIDs: []string{"4-7"}, HostNodes: []string{"1"}, Memory: new(0)},
+				},
+			},
+			nodeSettings: &settings.NodeSettings{ReservedMemory: 1024 * 1024 * 1024},
+			expected: &settings.NodeSettings{
+				HugePageSize: 1024 * 1024 * 1024,
+				NUMANodes: settings.NUMANodes{
+					0: {
+						CPUs:    "0-1,4-5",
+						MemSize: 16384 * 1024 * 1024,
+					},
+					1: {
+						CPUs: "2-3,6-7",
+					},
+				},
+			},
+		},
+		{
+			name: "VM without a hugepage pool clears a stale page size",
+			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 8, MaxMem: 16 * 1024 * 1024 * 1024},
+			cfg: &qemu.Config{
+				Affinity: "0-7",
+				NUMA: map[int]qemu.NUMA{
+					0: {CPUIDs: []string{"0-7"}, HostNodes: []string{"0"}, Memory: new(16384)},
+				},
+			},
+			nodeSettings: &settings.NodeSettings{HugePageSize: 1024 * 1024 * 1024, ReservedMemory: 1024 * 1024 * 1024},
+			expected: &settings.NodeSettings{
+				ReservedMemory: 1024 * 1024 * 1024,
+				NUMANodes: settings.NUMANodes{
+					0: {
+						CPUs:    "0-7",
+						MemSize: 16384 * 1024 * 1024,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {

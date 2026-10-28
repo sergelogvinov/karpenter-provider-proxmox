@@ -91,6 +91,10 @@ _Avoid_: static policy
 How many shared vCPUs a zone offers for each unpinned host CPU; 1.0 means no overcommit.
 _Avoid_: oversubscription factor
 
+**Hugepage pool**:
+The memory a zone holds as preallocated hugepages of one size, per NUMA node; when a zone has one, the node-capacity guest's NUMA memory reports the pool, not ordinary memory.
+_Avoid_: hugepages memory, reserved memory
+
 **Fit**:
 What placing a virtual machine in a zone would leave the zone with, worked out without reserving: how many NUMA nodes the virtual machine would span, and what share of the zone's scarcer resource, CPU or memory, would stay free. Spanning fewer NUMA nodes is always the better fit.
 _Avoid_: score, load

@@ -66,7 +66,9 @@ func GetResourceFromVMConfig(vmr *cluster.Resource, cfg *qemu.Config) (opt *reso
 	for _, idx := range numaIdx {
 		n := cfg.NUMA[idx]
 
-		if n.Memory == nil || *n.Memory <= 0 || len(n.CPUIDs) == 0 || len(n.HostNodes) == 0 {
+		// memory=0 is kept: the node-capacity guest reports a NUMA node
+		// without hugepages that way, and its CPUs still count.
+		if n.Memory == nil || *n.Memory < 0 || len(n.CPUIDs) == 0 || len(n.HostNodes) == 0 {
 			continue
 		}
 
