@@ -26,6 +26,7 @@ import (
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/go-proxmox-rest/fakeapi"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/storage"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
@@ -162,4 +163,160 @@ func TestCreateRegionWithoutCommonZoneIsUnresolved(t *testing.T) {
 	assert.Empty(t, result.Placements)
 	assert.NotContains(t, result.Targets, region)
 	assert.Equal(t, []string{region}, result.Unresolved)
+}
+
+// placedZone is the zone setupPlacedTemplate places the VM template in.
+const placedZone = "pve-1"
+
+// setupPlacedTemplate returns a ProxmoxTemplate whose status places its VM
+// template 1000 in placedZone, with the image already imported there. The test
+// seeds the VM template itself.
+func setupPlacedTemplate(t *testing.T) (*fakeapi.Cluster, *instancetemplate.DefaultProvider, *v1alpha1.ProxmoxTemplate) {
+	t.Helper()
+
+	const zone = placedZone
+
+	templateClass := &v1alpha1.ProxmoxTemplate{}
+	templateClass.Name = "talos"
+	templateClass.Spec.SourceImage = &v1alpha1.SourceImage{URL: "https://example.com/talos.raw.xz", ImageName: "talos.raw"}
+	templateClass.Spec.StorageIDs = []string{"local"}
+	templateClass.SetTemplatePlacements([]v1alpha1.TemplatePlacement{{Region: region, Zone: zone, TemplateID: 1000}})
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes(zone))
+	cluster.Node(zone).AddStorage("local", "dir", fakeapi.WithVolume(storage.Volume{VolID: "local:import/" + templateClass.GetImageID()}))
+
+	capacity := &fakeCloudCapacity{storages: map[string]*cloudcapacity.NodeStorageCapacityInfo{
+		"local": {Name: "local", Region: region, Capabilities: []string{"import", "images"}, Zones: []string{zone}},
+	}}
+
+	return cluster, newProvider(t, cluster, capacity), templateClass
+}
+
+// TestCreateReusesPlacedTemplateMissingFromCache creates a template whose VM
+// template is in status but not yet listed as a template by cluster/resources,
+// which happens for a few seconds after Proxmox creates it. Create must reuse
+// it instead of creating a second one and leaking the first.
+func TestCreateReusesPlacedTemplateMissingFromCache(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: " + templateClass.Hash()})
+	cluster.FailRequests("GET /cluster/resources")
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: region, Zone: zone, TemplateID: 1000}}, result.Placements)
+	assert.Empty(t, result.Created)
+
+	_, err = cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1001, nil)
+	assert.Error(t, err, "Create made a second VM template")
+}
+
+// TestCreateReplacesOutdatedPlacedTemplateMissingFromCache creates a template
+// whose outdated VM template is in status but missing from the cache. Create
+// must replace it under the same vmid, not leave it behind.
+func TestCreateReplacesOutdatedPlacedTemplateMissingFromCache(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: outdated"})
+	cluster.FailRequests("GET /cluster/resources")
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	placement := v1alpha1.TemplatePlacement{Region: region, Zone: zone, TemplateID: 1000}
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, result.Placements)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, result.Created)
+
+	cfg, err := cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
+	require.NoError(t, err)
+	assert.Contains(t, cfg.Description, "Hash: "+templateClass.Hash())
+
+	_, err = cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1001, nil)
+	assert.Error(t, err, "Create made a second VM template")
+}
+
+// TestCreateReusesPlacedTemplateBesideCachedOutdatedOne creates a template
+// whose cache lists an outdated VM template in the zone but not the up to
+// date one status places there. Create must delete the outdated one and reuse
+// the placed one, not rebuild the outdated one and leak the placed one.
+func TestCreateReusesPlacedTemplateBesideCachedOutdatedOne(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: outdated"})
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: " + templateClass.Hash()})
+	cluster.FailRequests("GET /cluster/resources")
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: region, Zone: zone, TemplateID: 1000}}, result.Placements)
+	assert.Empty(t, result.Created)
+
+	client := cluster.Client(t)
+	_, err = client.Nodes(zone).Qemu().Config(context.Background(), 900, nil)
+	assert.Error(t, err, "outdated VM template 900 was kept")
+
+	_, err = client.Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
+	assert.NoError(t, err, "placed VM template 1000 was deleted")
+}
+
+// TestCreateKeepsPlacedTemplateOverCachedDuplicate creates a template whose
+// cache lists an up to date VM template in the zone, leaked by an earlier
+// pass, but not the one status places there. Create must keep the placed one
+// and delete the duplicate, not keep the duplicate and leak the placed one.
+func TestCreateKeepsPlacedTemplateOverCachedDuplicate(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: " + templateClass.Hash()})
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: " + templateClass.Hash()})
+	cluster.FailRequests("GET /cluster/resources")
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: region, Zone: zone, TemplateID: 1000}}, result.Placements)
+	assert.Empty(t, result.Created)
+
+	client := cluster.Client(t)
+	_, err = client.Nodes(zone).Qemu().Config(context.Background(), 900, nil)
+	assert.Error(t, err, "duplicate VM template 900 was kept")
+
+	_, err = client.Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
+	assert.NoError(t, err, "placed VM template 1000 was deleted")
+}
+
+// TestCreateDeletesTemplateOfFailedTask creates a VM template whose create
+// task fails after Proxmox made the guest. Create must delete that guest.
+func TestCreateDeletesTemplateOfFailedTask(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	templateClass.SetTemplatePlacements(nil)
+	cluster.FailRequests("POST /nodes/{node}/qemu", fakeapi.AsFailedTask())
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.Error(t, err)
+	assert.Empty(t, result.Placements)
+
+	_, err = cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
+	assert.Error(t, err, "VM template of the failed create task was kept")
 }
