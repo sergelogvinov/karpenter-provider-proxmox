@@ -202,6 +202,58 @@ func WaitForNodePoolGone(ctx context.Context, cli client.Client, name string, ti
 	return waitForGone(ctx, cli, &karpv1.NodePool{}, "nodepool", name, timeout)
 }
 
+// WaitForNodeClaimsInPlaceUpdated polls the NodeClaims the named NodePool
+// launched until there is at least one, every one of them has a providerID,
+// and every one's in-place update hash annotation matches the InPlaceHash
+// of the named ProxmoxNodeClass's current spec - i.e. the controller has
+// applied the spec's in-place fields (tags, securityGroups, resourcePool)
+// to every VM (see pkg/controllers/nodeclaim/inplaceupdate, which records
+// the hash only once all of them succeeded).
+func WaitForNodeClaimsInPlaceUpdated(ctx context.Context, cli client.Client, nodePoolName, nodeClassName string, timeout time.Duration) ([]karpv1.NodeClaim, error) {
+	nodeClaims := &karpv1.NodeClaimList{}
+
+	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		nodeClass := &v1alpha1.ProxmoxNodeClass{}
+
+		err := cli.Get(ctx, client.ObjectKey{Name: nodeClassName}, nodeClass)
+
+		switch {
+		case apierrors.IsNotFound(err) || isTransientError(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+
+		err = cli.List(ctx, nodeClaims, client.MatchingLabels{karpv1.NodePoolLabelKey: nodePoolName})
+
+		switch {
+		case isTransientError(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		}
+
+		if len(nodeClaims.Items) == 0 {
+			return false, nil
+		}
+
+		hash := nodeClass.InPlaceHash()
+
+		for _, nc := range nodeClaims.Items {
+			if nc.Status.ProviderID == "" || nc.Annotations[v1alpha1.AnnotationProxmoxNodeInPlaceUpdateHash] != hash {
+				return false, nil
+			}
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		return nodeClaims.Items, fmt.Errorf("nodeclaims of nodepool %s did not finish their in-place update to proxmoxnodeclass %s: %w", nodePoolName, nodeClassName, err)
+	}
+
+	return nodeClaims.Items, nil
+}
+
 // WaitForStatefulSetReplicasReady polls until the named StatefulSet
 // reports the given number of ready replicas.
 func WaitForStatefulSetReplicasReady(ctx context.Context, cli client.Client, namespace, name string, replicas int32, timeout time.Duration) (*appsv1.StatefulSet, error) {
