@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/diskfs/go-diskfs/backend/file"
@@ -127,7 +126,7 @@ func (p *DefaultProvider) attachCloudInitISO(
 
 	isoName := fmt.Sprintf("vm-%d-custom-cloudinit.iso", vmID)
 
-	isoPath, cleanup, err := buildCloudInitISO(isoName, files)
+	isoPath, cleanup, err := buildCloudInitISO(files)
 	defer cleanup()
 
 	if err != nil {
@@ -270,16 +269,20 @@ func findISOStorage(ctx context.Context, px *proxmoxrest.Client, zone string) (s
 }
 
 // buildCloudInitISO writes files into a NoCloud-layout ISO9660 image at a
-// temp path named filename, returning that path and a cleanup func that
-// removes it. cleanup is always safe to call, even if err != nil.
-func buildCloudInitISO(filename string, cloudInit cloudInitFiles) (isopath string, cleanup func(), err error) {
-	isopath = filepath.Join(os.TempDir(), filename)
-	cleanup = func() { os.Remove(isopath) }
+// new temp path of its own, returning that path and a cleanup func that
+// removes it. cleanup is always safe to call, even if err != nil. The path
+// is unique per call, since VM ids repeat across regions and two launches
+// sharing one would overwrite and remove each other's image.
+func buildCloudInitISO(cloudInit cloudInitFiles) (isopath string, cleanup func(), err error) {
+	cleanup = func() {}
 
-	isoFile, err := os.Create(isopath)
+	isoFile, err := os.CreateTemp("", "cloudinit-*.iso")
 	if err != nil {
 		return "", cleanup, err
 	}
+
+	isopath = isoFile.Name()
+	cleanup = func() { os.Remove(isopath) }
 
 	if err := isoFile.Close(); err != nil {
 		return "", cleanup, err

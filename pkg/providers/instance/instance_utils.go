@@ -166,7 +166,9 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 			return nil, fmt.Errorf("failed to set firewall options for vm %d: %v", newID, err)
 		}
 
-		for _, r := range rules {
+		// Proxmox inserts each new rule at position 0, so creating them
+		// last to first leaves them in order.
+		for _, r := range slices.Backward(rules) {
 			if err = px.Nodes(zone).Qemu().Firewall().Rules(newID).Create(ctx, firewallRuleOptions(r)); err != nil {
 				return nil, fmt.Errorf("failed to create firewall rules for vm %d: %v", newID, err)
 			}

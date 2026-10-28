@@ -28,7 +28,9 @@ const rollbackTimeout = 5 * time.Minute
 // launchRollback undoes a launch that failed partway. Each launch step that
 // changes something outside the VM's own config (zone capacity, the VM
 // itself, IP pool addresses, the cloud-init ISO) adds its undo as soon as
-// the change is made, and run undoes them newest first.
+// the change is made, and run undoes them newest first. The bootstrap token
+// is deliberately not undone: it expires on its own and is cleaned up with
+// the other expired tokens.
 type launchRollback struct {
 	undo []func(ctx context.Context)
 }
