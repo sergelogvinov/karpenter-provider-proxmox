@@ -171,7 +171,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	}
 
 	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
-		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, newID)
+		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceType, region, zone, newID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d: %v", newID, err)
 		}

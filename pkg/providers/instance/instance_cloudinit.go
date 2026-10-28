@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -56,11 +56,45 @@ const cloudInitVolumeLabel = "cidata"
 // cloud-init ISO, matching the old client's default.
 const cloudInitISOBlockSize = 2048
 
+// cloudInitInputs is everything renderCloudInit needs: the claim and where
+// its VM runs, plus what gatherCloudInitInputs fetched from Kubernetes and
+// Proxmox.
+type cloudInitInputs struct {
+	NodeClaim    *karpv1.NodeClaim
+	NodeClass    *v1alpha1.ProxmoxNodeClass
+	InstanceType *cloudprovider.InstanceType
+	Region       string
+	Zone         string
+	VMID         int
+
+	// InstanceUUID is the VM's SMBIOS UUID.
+	InstanceUUID string
+	// Network is the VM's network config as read from its Proxmox config.
+	Network cloudinit.NetworkConfig
+
+	KubernetesVersion string
+	RootCA            string
+	BootstrapToken    string
+	// Templates is the templates secret's data. Each of user-data,
+	// meta-data, vendor-data and network-config is optional.
+	Templates map[string][]byte
+	// Values is the values secret's data, exposed to templates as .Values.
+	Values map[string]string
+}
+
+// cloudInitFiles is a rendered NoCloud file set. An empty VendorData or
+// NetworkConfig is left off the ISO.
+type cloudInitFiles struct {
+	UserData      string
+	MetaData      string
+	VendorData    string
+	NetworkConfig string
+}
+
 func (p *DefaultProvider) attachCloudInitISO(
 	ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
-	instanceTemplate *instancetemplate.InstanceTemplateInfo,
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
@@ -76,14 +110,19 @@ func (p *DefaultProvider) attachCloudInitISO(
 		return fmt.Errorf("unable to get vm config for vm %d: %w", vmID, err)
 	}
 
-	userdata, metadata, vendordata, networkconfig, err := p.generateCloudInitVars(ctx, nodeClaim, nodeClass, instanceTemplate, instanceType, region, zone, vmID, cfg)
+	inputs, err := p.gatherCloudInitInputs(ctx, nodeClaim, nodeClass, instanceType, region, zone, vmID, cfg)
 	if err != nil {
-		return fmt.Errorf("failed to generate cloud-init for vm %d in region %s: %v", vmID, region, err)
+		return fmt.Errorf("failed to gather cloud-init inputs for vm %d in region %s: %v", vmID, region, err)
+	}
+
+	files, err := renderCloudInit(inputs)
+	if err != nil {
+		return fmt.Errorf("failed to render cloud-init for vm %d in region %s: %v", vmID, region, err)
 	}
 
 	isoName := fmt.Sprintf("vm-%d-custom-cloudinit.iso", vmID)
 
-	isoPath, cleanup, err := buildCloudInitISO(isoName, userdata, metadata, vendordata, networkconfig)
+	isoPath, cleanup, err := buildCloudInitISO(isoName, files)
 	defer cleanup()
 
 	if err != nil {
@@ -199,11 +238,10 @@ func findISOStorage(ctx context.Context, px *proxmoxrest.Client, zone string) (s
 	return "", fmt.Errorf("no enabled iso-capable storage found on node %s", zone)
 }
 
-// buildCloudInitISO renders userdata/metadata/vendordata/networkconfig into
-// a NoCloud-layout ISO9660 image at a temp path named filename, returning
-// that path and a cleanup func that removes it. cleanup is always safe to
-// call, even if err != nil.
-func buildCloudInitISO(filename, userdata, metadata, vendordata, networkconfig string) (isopath string, cleanup func(), err error) {
+// buildCloudInitISO writes files into a NoCloud-layout ISO9660 image at a
+// temp path named filename, returning that path and a cleanup func that
+// removes it. cleanup is always safe to call, even if err != nil.
+func buildCloudInitISO(filename string, cloudInit cloudInitFiles) (isopath string, cleanup func(), err error) {
 	isopath = filepath.Join(os.TempDir(), filename)
 	cleanup = func() { os.Remove(isopath) }
 
@@ -237,15 +275,15 @@ func buildCloudInitISO(filename, userdata, metadata, vendordata, networkconfig s
 	}
 
 	files := map[string]string{
-		"user-data": userdata,
-		"meta-data": metadata,
+		"user-data": cloudInit.UserData,
+		"meta-data": cloudInit.MetaData,
 	}
-	if vendordata != "" {
-		files["vendor-data"] = vendordata
+	if cloudInit.VendorData != "" {
+		files["vendor-data"] = cloudInit.VendorData
 	}
 
-	if networkconfig != "" {
-		files["network-config"] = networkconfig
+	if cloudInit.NetworkConfig != "" {
+		files["network-config"] = cloudInit.NetworkConfig
 	}
 
 	for name, content := range files {
@@ -297,7 +335,7 @@ func applyKubernetesConfiguration(
 		}
 
 		if len(instanceType.Overhead.EvictionThreshold) > 0 && instanceType.Overhead.EvictionThreshold.Memory().String() != "" {
-			kubeletConfig.EvictionHard = DefaultEvictionHard
+			kubeletConfig.EvictionHard = maps.Clone(DefaultEvictionHard)
 			kubeletConfig.EvictionHard["memory.available"] = instanceType.Overhead.EvictionThreshold.Memory().String()
 		}
 	}
@@ -326,17 +364,29 @@ func requestsToMap(requests corev1.ResourceList) map[string]string {
 	return m
 }
 
-func (p *DefaultProvider) generateCloudInitVars(
+// gatherCloudInitInputs fetches what rendering cloud-init needs from
+// Kubernetes (server version, root CA, the node class's template and value
+// secrets, a bootstrap token) and from the VM's Proxmox config.
+func (p *DefaultProvider) gatherCloudInitInputs(
 	ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
-	_ *instancetemplate.InstanceTemplateInfo,
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
 	vmID int,
 	cfg *qemu.Config,
-) (string, string, string, string, error) {
+) (cloudInitInputs, error) {
+	inputs := cloudInitInputs{
+		NodeClaim:    nodeClaim,
+		NodeClass:    nodeClass,
+		InstanceType: instanceType,
+		Region:       region,
+		Zone:         zone,
+		VMID:         vmID,
+		Values:       map[string]string{},
+	}
+
 	systemNamespace := strings.TrimSpace(os.Getenv("SYSTEM_NAMESPACE"))
 	if systemNamespace == "" {
 		systemNamespace = "kube-system"
@@ -344,55 +394,45 @@ func (p *DefaultProvider) generateCloudInitVars(
 
 	version, err := p.kubernetesInterface.Discovery().ServerVersion()
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to get kubernetes server version: %v", err)
+		return inputs, fmt.Errorf("failed to get kubernetes server version: %v", err)
 	}
+
+	inputs.KubernetesVersion = version.String()
 
 	cm, err := p.kubernetesInterface.CoreV1().ConfigMaps(systemNamespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to get configmap %s/kube-root-ca.crt: %v", systemNamespace, err)
+		return inputs, fmt.Errorf("failed to get configmap %s/kube-root-ca.crt: %v", systemNamespace, err)
 	}
 
-	rootCA := cm.Data["ca.crt"]
+	inputs.RootCA = cm.Data["ca.crt"]
 
 	secretKey := nodeClass.Spec.MetadataOptions.TemplatesRef
 	secret, err := p.kubernetesInterface.CoreV1().Secrets(secretKey.Namespace).Get(ctx, secretKey.Name, metav1.GetOptions{})
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to get secret %s/%s: %v", secretKey.Namespace, secretKey.Name, err)
+		return inputs, fmt.Errorf("failed to get secret %s/%s: %v", secretKey.Namespace, secretKey.Name, err)
 	}
 
-	values := map[string]string{}
+	inputs.Templates = secret.Data
+
 	if nodeClass.Spec.MetadataOptions.ValuesRef != nil && nodeClass.Spec.MetadataOptions.ValuesRef.Name != "" && nodeClass.Spec.MetadataOptions.ValuesRef.Namespace != "" {
 		valuesKey := nodeClass.Spec.MetadataOptions.ValuesRef
 		secret, err := p.kubernetesInterface.CoreV1().Secrets(valuesKey.Namespace).Get(ctx, valuesKey.Name, metav1.GetOptions{})
 		if err != nil {
-			return "", "", "", "", fmt.Errorf("failed to get secret %s/%s: %v", valuesKey.Namespace, valuesKey.Name, err)
+			return inputs, fmt.Errorf("failed to get secret %s/%s: %v", valuesKey.Namespace, valuesKey.Name, err)
 		}
 
 		for k, v := range secret.Data {
-			values[k] = string(v)
+			inputs.Values[k] = string(v)
 		}
 	}
 
-	bootstrapToken, err := p.kubernetesBootstrapProvider.CreateToken(ctx, nodeClaim)
+	inputs.BootstrapToken, err = p.kubernetesBootstrapProvider.CreateToken(ctx, nodeClaim)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to create bootstrap token: %v", err)
+		return inputs, fmt.Errorf("failed to create bootstrap token: %v", err)
 	}
 
-	uuid := ""
 	if cfg.SMBios1 != nil {
-		uuid = cfg.SMBios1.UUID
-	}
-
-	metadataValues := cloudinit.MetaData{
-		Hostname:     nodeClaim.Name,
-		InstanceID:   fmt.Sprintf("%d", vmID),
-		InstanceType: instanceType.Name,
-		InstanceUUID: uuid,
-		ProviderID:   provider.GetProviderID(region, vmID),
-		Region:       region,
-		Zone:         zone,
-		Tags:         nodeClass.Spec.Tags,
-		NodeClass:    nodeClass.Name,
+		inputs.InstanceUUID = cfg.SMBios1.UUID
 	}
 
 	ifaces := map[string]cloudcapacity.NetworkIfaceInfo{}
@@ -402,22 +442,46 @@ func (p *DefaultProvider) generateCloudInitVars(
 		ifaces = net.Ifaces
 	}
 
-	networkValues := cloudinit.GetNetworkConfigFromVirtualMachineConfig(cfg, ifaces)
+	inputs.Network = cloudinit.GetNetworkConfigFromVirtualMachineConfig(cfg, ifaces)
+
+	return inputs, nil
+}
+
+// renderCloudInit executes the node class's cloud-init templates, falling
+// back to the built-in user-data, meta-data and network-config templates
+// for any the templates secret leaves out. User-data sees UserDataValues,
+// meta-data and vendor-data see the instance metadata, and network-config
+// sees the VM's network config.
+func renderCloudInit(inputs cloudInitInputs) (cloudInitFiles, error) {
+	nodeClass := inputs.NodeClass
+	instanceType := inputs.InstanceType
+
+	metadataValues := cloudinit.MetaData{
+		Hostname:     inputs.NodeClaim.Name,
+		InstanceID:   fmt.Sprintf("%d", inputs.VMID),
+		InstanceType: instanceType.Name,
+		InstanceUUID: inputs.InstanceUUID,
+		ProviderID:   provider.GetProviderID(inputs.Region, inputs.VMID),
+		Region:       inputs.Region,
+		Zone:         inputs.Zone,
+		Tags:         nodeClass.Spec.Tags,
+		NodeClass:    nodeClass.Name,
+	}
 
 	userdataValues := UserDataValues{
 		Metadata: metadataValues,
-		Network:  networkValues,
+		Network:  inputs.Network,
 		Resources: Resources{
 			CPU:    instanceType.Capacity.Cpu().Value(),
 			Memory: instanceType.Capacity.Memory().Value(),
 		},
 		Kubernetes: Kubernetes{
-			Version:              version.String(),
-			RootCA:               rootCA,
-			BootstrapToken:       bootstrapToken,
+			Version:              inputs.KubernetesVersion,
+			RootCA:               inputs.RootCA,
+			BootstrapToken:       inputs.BootstrapToken,
 			KubeletConfiguration: applyKubernetesConfiguration(nodeClass, instanceType),
 		},
-		Values: values,
+		Values: inputs.Values,
 	}
 	userdataValues.Kubernetes.KubeletConfiguration.ProviderID = metadataValues.ProviderID
 
@@ -441,45 +505,49 @@ func (p *DefaultProvider) generateCloudInitVars(
 		}
 	}
 
-	userdata := string(secret.Data["user-data"])
+	var (
+		files cloudInitFiles
+		err   error
+	)
+
+	userdata := string(inputs.Templates["user-data"])
 	if userdata == "" {
 		userdata = cloudinit.DefaultUserdata
 	}
 
-	userdata, err = cloudinit.ExecuteTemplate(userdata, userdataValues)
+	files.UserData, err = cloudinit.ExecuteTemplate(userdata, userdataValues)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to execute userdata template: %v", err)
+		return cloudInitFiles{}, fmt.Errorf("failed to execute userdata template: %v", err)
 	}
 
-	metadata := string(secret.Data["meta-data"])
+	metadata := string(inputs.Templates["meta-data"])
 	if metadata == "" {
 		metadata = cloudinit.DefaultMetadata
 	}
 
-	metadata, err = cloudinit.ExecuteTemplate(metadata, metadataValues)
+	files.MetaData, err = cloudinit.ExecuteTemplate(metadata, metadataValues)
 	if err != nil {
-		return "", "", "", "", fmt.Errorf("failed to execute metadata template: %v", err)
+		return cloudInitFiles{}, fmt.Errorf("failed to execute metadata template: %v", err)
 	}
 
-	vendordata := string(secret.Data["vendor-data"])
-	if vendordata != "" {
-		vendordata, err = cloudinit.ExecuteTemplate(vendordata, metadataValues)
+	if vendordata := string(inputs.Templates["vendor-data"]); vendordata != "" {
+		files.VendorData, err = cloudinit.ExecuteTemplate(vendordata, metadataValues)
 		if err != nil {
-			return "", "", "", "", fmt.Errorf("failed to execute vendor-data template: %v", err)
+			return cloudInitFiles{}, fmt.Errorf("failed to execute vendor-data template: %v", err)
 		}
 	}
 
-	networkconfig := string(secret.Data["network-config"])
+	networkconfig := string(inputs.Templates["network-config"])
 	if networkconfig == "" {
 		networkconfig = cloudinit.DefaultNetworkV2
 	}
 
 	if networkconfig != "" {
-		networkconfig, err = cloudinit.ExecuteTemplate(networkconfig, networkValues)
+		files.NetworkConfig, err = cloudinit.ExecuteTemplate(networkconfig, inputs.Network)
 		if err != nil {
-			return "", "", "", "", fmt.Errorf("failed to execute network-config template: %v", err)
+			return cloudInitFiles{}, fmt.Errorf("failed to execute network-config template: %v", err)
 		}
 	}
 
-	return userdata, metadata, vendordata, networkconfig, nil
+	return files, nil
 }
