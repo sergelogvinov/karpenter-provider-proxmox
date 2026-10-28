@@ -281,8 +281,11 @@ func buildCloudInitISO(cloudInit cloudInitFiles) (isopath string, cleanup func()
 		return "", cleanup, err
 	}
 
-	isopath = isoFile.Name()
-	cleanup = func() { os.Remove(isopath) }
+	// cleanup removes the path captured here: the error returns below
+	// reset the isopath result to "".
+	path := isoFile.Name()
+	isopath = path
+	cleanup = func() { os.Remove(path) }
 
 	if err := isoFile.Close(); err != nil {
 		return "", cleanup, err
