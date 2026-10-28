@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 
 	"github.com/samber/lo"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	providerconfig "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 )
 
 // ProxmoxClient bundles the clients the e2e suite uses to talk to Proxmox
@@ -122,6 +124,34 @@ func (p *ProxmoxClient) TemplateConfig(ctx context.Context, placement v1alpha1.T
 	cfg, err := cl.Nodes(placement.Zone).Qemu().Config(ctx, int(placement.TemplateID), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get config of vm template %s: %w", placement, err)
+	}
+
+	return cfg, nil
+}
+
+// VMConfig reads the current config of the Proxmox VM behind providerID
+// (proxmox://<region>/<vmid>) straight from the Proxmox API. The VM's node
+// comes from the cluster's resource list, not the NodeClaim's zone label,
+// so a VM that migrated is still found.
+func (p *ProxmoxClient) VMConfig(ctx context.Context, providerID string) (*qemu.Config, error) {
+	vmid, region, err := provider.ParseProviderID(providerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse providerID %s: %w", providerID, err)
+	}
+
+	cl, err := p.Pool.Get(region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get proxmox cluster %s: %w", region, err)
+	}
+
+	vm, err := p.Pool.Cluster(region).Get(ctx, pxpool.ResourceKindVM, strconv.Itoa(vmid))
+	if err != nil {
+		return nil, fmt.Errorf("failed to find vm %d in region %s: %w", vmid, region, err)
+	}
+
+	cfg, err := cl.Nodes(vm.Node).Qemu().Config(ctx, vmid, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config of vm %d on %s/%s: %w", vmid, region, vm.Node, err)
 	}
 
 	return cfg, nil

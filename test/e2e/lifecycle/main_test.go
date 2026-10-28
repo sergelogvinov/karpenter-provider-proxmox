@@ -19,7 +19,9 @@ limitations under the License.
 // Package lifecycle covers the common node-provisioning lifecycle: against
 // an already-configured ProxmoxNodeClass/ProxmoxUnmanagedTemplate (see
 // docs/deploy/nodepool.yaml), create a NodePool and confirm a workload
-// scheduled onto it comes up, and scales, for real.
+// scheduled onto it comes up, and scales, for real; and that changing a
+// NodeClass's in-place fields updates its already running VMs without
+// replacing them.
 package lifecycle
 
 import (
