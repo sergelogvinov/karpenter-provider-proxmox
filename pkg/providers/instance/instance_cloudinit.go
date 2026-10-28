@@ -191,17 +191,7 @@ func (p *DefaultProvider) attachCloudInitISO(
 // marker tag (the old client's approach), it re-reads the guest's current
 // CD-ROM slot and acts only if something is actually mounted there — see
 // docs/migration.md §7.2 for why.
-func (p *DefaultProvider) detachCloudInitISO(
-	ctx context.Context,
-	region string,
-	zone string,
-	vmID int,
-) error {
-	px, err := p.cluster.Get(region)
-	if err != nil {
-		return fmt.Errorf("failed to get proxmox client with region name %s: %v", region, err)
-	}
-
+func detachCloudInitISO(ctx context.Context, px *proxmoxrest.Client, zone string, vmID int) error {
 	cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmID, nil)
 	if err != nil {
 		return fmt.Errorf("unable to get vm config for vm %d: %w", vmID, err)
@@ -212,11 +202,7 @@ func (p *DefaultProvider) detachCloudInitISO(
 		return nil
 	}
 
-	if err := removeCloudInitISO(ctx, px, zone, vmID, cfg, drive.File); err != nil {
-		return fmt.Errorf("region %s: %w", region, err)
-	}
-
-	return nil
+	return removeCloudInitISO(ctx, px, zone, vmID, cfg, drive.File)
 }
 
 // removeCloudInitISO ejects volid from the VM's cloud-init CD-ROM slot if
