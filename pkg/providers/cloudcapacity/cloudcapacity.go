@@ -37,10 +37,13 @@ import (
 )
 
 type Provider interface {
-	// AllocateCapacityInZone allocates the specified capacity in the given region and zone.
-	AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error
-	// ReleaseCapacityInZone releases the specified capacity in the given region and zone.
-	ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error
+	// Reserve admits a new VM into the zone's capacity if the zone has room for it.
+	// It returns the reserved resources: req plus, for pinned placement, the host CPUs
+	// and NUMA split the VM got.
+	Reserve(ctx context.Context, region, zone string, req resources.VMResources) (resources.VMResources, error)
+	// Release forgets VM id's record and returns what it held to the zone's capacity.
+	// Releasing a VM that has no record changes nothing.
+	Release(ctx context.Context, region, zone string, id int) error
 
 	// SyncNodeCapacity updates the node CPU and RAM capacity information for all regions.
 	SyncNodeCapacity(ctx context.Context) error
@@ -98,14 +101,9 @@ func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider
 	}
 }
 
-//nolint:dupl
-func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error {
-	if op == nil {
-		return fmt.Errorf("cannot allocate capacity: VMResources must be provided")
-	}
-
-	log := log.FromContext(ctx).WithName("AllocateCapacityInZone()").WithValues("region", region, "zone", zone)
-	log.V(1).Info("Allocating capacity", "cpu", op.CPUs, "memory", op.Memory, "storage", op.DiskGBytes)
+func (p *DefaultProvider) Reserve(ctx context.Context, region, zone string, req resources.VMResources) (resources.VMResources, error) {
+	log := log.FromContext(ctx).WithName("Reserve()").WithValues("region", region, "zone", zone)
+	log.V(1).Info("Reserving capacity", "vmID", req.ID, "cpu", req.CPUs, "memory", req.Memory, "storage", req.DiskGBytes)
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
@@ -113,30 +111,25 @@ func (p *DefaultProvider) AllocateCapacityInZone(ctx context.Context, region, zo
 	key := fmt.Sprintf("%s/%s", region, zone)
 	if info, ok := p.capacityInfo[key]; ok && info.Capacity != nil {
 		if info.omitted {
-			return fmt.Errorf("zone %s/%s is unavailable", region, zone)
+			return resources.VMResources{}, fmt.Errorf("zone %s/%s is unavailable", region, zone)
 		}
 
-		err := info.Capacity.Reserve(op)
-		if err != nil {
-			return fmt.Errorf("failed to allocate CPU capacity in zone %s/%s: %w", region, zone, err)
+		reserved := req
+		if err := info.Capacity.Reserve(&reserved); err != nil {
+			return resources.VMResources{}, fmt.Errorf("failed to reserve capacity in zone %s/%s: %w", region, zone, err)
 		}
 
-		log.V(1).Info("Capacity allocated successfully", "resourceStatus", info.Capacity.String())
+		log.V(1).Info("Capacity reserved successfully", "resourceStatus", info.Capacity.String())
 
-		return nil
+		return reserved, nil
 	}
 
-	return fmt.Errorf("no resource manager found for zone %s/%s", region, zone)
+	return resources.VMResources{}, fmt.Errorf("no zone capacity found for zone %s/%s", region, zone)
 }
 
-//nolint:dupl
-func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zone string, id int, op *resources.VMResources) error {
-	if op == nil {
-		return fmt.Errorf("cannot release capacity: VMResources must be provided")
-	}
-
-	log := log.FromContext(ctx).WithName("ReleaseCapacityInZone()").WithValues("region", region, "zone", zone)
-	log.V(1).Info("Releasing capacity", "cpu", op.CPUs, "memory", op.Memory/1024/1024, "storage", op.DiskGBytes)
+func (p *DefaultProvider) Release(ctx context.Context, region, zone string, id int) error {
+	log := log.FromContext(ctx).WithName("Release()").WithValues("region", region, "zone", zone)
+	log.V(1).Info("Releasing capacity", "vmID", id)
 
 	p.muCapacityInfo.Lock()
 	defer p.muCapacityInfo.Unlock()
@@ -154,7 +147,7 @@ func (p *DefaultProvider) ReleaseCapacityInZone(ctx context.Context, region, zon
 		return nil
 	}
 
-	return fmt.Errorf("no resource manager found for zone %s/%s", region, zone)
+	return fmt.Errorf("no zone capacity found for zone %s/%s", region, zone)
 }
 
 // SyncNodeCapacity rebuilds every zone's capacity from Proxmox without holding the lock,
