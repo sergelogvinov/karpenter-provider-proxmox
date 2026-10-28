@@ -202,52 +202,23 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.N
 func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
 	log := log.FromContext(ctx).WithName("instance.Delete()")
 
-	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	loc, err := p.locate(ctx, nodeClaim)
 	if err != nil {
-		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+		return err
 	}
 
-	if region == "" {
-		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
-	}
+	log.V(1).Info("Delete instance", "region", loc.region, "zone", loc.zone, "vmID", loc.vm.VMID)
 
-	vmr, err := p.cluster.Cluster(region).Get(ctx, pxpool.ResourceKindVM, strconv.Itoa(vmid))
-	if err != nil {
-		if errors.Is(err, pxpool.ErrResourceNotFound) {
-			return cloudprovider.NewNodeClaimNotFoundError(err)
-		}
-
-		return fmt.Errorf("failed to get vm: %v", err)
-	}
-
-	zone := vmr.Node
-	if zone == "" {
-		zone = nodeClaim.Labels[corev1.LabelTopologyZone]
-	}
-
-	log.V(1).Info("Delete instance", "region", region, "zone", zone, "vmID", vmid)
-
-	return p.instanceDelete(ctx, region, zone, vmr)
+	return p.instanceDelete(ctx, loc.region, loc.zone, loc.vm)
 }
 
 func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
-	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	loc, err := p.locate(ctx, nodeClaim)
 	if err != nil {
-		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+		return err
 	}
 
-	if region == "" {
-		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
-	}
-
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-
-	px, err := p.cluster.Get(region)
-	if err != nil {
-		return pxpool.ErrClusterNotFound
-	}
-
-	return reconcileFirewallRules(ctx, px, zone, vmid, buildFirewallRules(nodeClass.Spec.SecurityGroups))
+	return reconcileFirewallRules(ctx, loc.px, loc.zone, loc.vm.VMID, buildFirewallRules(nodeClass.Spec.SecurityGroups))
 }
 
 // buildFirewallRules converts a node class's security groups into the
@@ -340,21 +311,12 @@ func (p *DefaultProvider) UpdateTags(ctx context.Context, nodeClaim *karpv1.Node
 	tags := lo.Uniq(nodeClass.Spec.Tags)
 	slices.Sort(tags)
 
-	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	loc, err := p.locate(ctx, nodeClaim)
 	if err != nil {
-		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+		return err
 	}
 
-	if region == "" {
-		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
-	}
-
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-
-	px, err := p.cluster.Get(region)
-	if err != nil {
-		return pxpool.ErrClusterNotFound
-	}
+	px, zone, vmid := loc.px, loc.zone, loc.vm.VMID
 
 	cfg, err := px.Nodes(zone).Qemu().Config(ctx, vmid, nil)
 	if err != nil {
@@ -402,19 +364,12 @@ func normalizeTags(tags []string) []string {
 }
 
 func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
-	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	loc, err := p.locate(ctx, nodeClaim)
 	if err != nil {
-		return fmt.Errorf("failed to get vm id from provider-id: %v", err)
+		return err
 	}
 
-	if region == "" {
-		region = nodeClaim.Labels[corev1.LabelTopologyRegion]
-	}
-
-	px, err := p.cluster.Get(region)
-	if err != nil {
-		return pxpool.ErrClusterNotFound
-	}
+	px, vmid := loc.px, loc.vm.VMID
 
 	poolName := nodeClass.Spec.ResourcePool
 	poolNameOld := nodeClaim.Annotations[v1alpha1.AnnotationProxmoxNodeClassPool]
@@ -464,16 +419,13 @@ func (p *DefaultProvider) UpdatePoolMembership(ctx context.Context, nodeClaim *k
 }
 
 func (p *DefaultProvider) DetachCloudInit(ctx context.Context, nodeClaim *karpv1.NodeClaim) error {
-	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
+	loc, err := p.locate(ctx, nodeClaim)
 	if err != nil {
-		return fmt.Errorf("failed to parse providerID: %v", err)
+		return err
 	}
 
-	zone := nodeClaim.Labels[corev1.LabelTopologyZone]
-
-	err = p.detachCloudInitISO(ctx, region, zone, vmid)
-	if err != nil {
-		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", vmid, region, err)
+	if err := detachCloudInitISO(ctx, loc.px, loc.zone, loc.vm.VMID); err != nil {
+		return fmt.Errorf("failed to detach cloud-init ISO from vm %d in region %s: %v", loc.vm.VMID, loc.region, err)
 	}
 
 	return nil
