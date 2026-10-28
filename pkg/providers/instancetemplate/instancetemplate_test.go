@@ -224,7 +224,7 @@ func TestCreateReplacesOutdatedPlacedTemplateMissingFromCache(t *testing.T) {
 	const zone = placedZone
 
 	cluster, p, templateClass := setupPlacedTemplate(t)
-	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: outdated"})
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: 1"})
 	cluster.FailRequests("GET /cluster/resources")
 
 	result, err := p.Create(context.Background(), templateClass)
@@ -252,7 +252,7 @@ func TestCreateReusesPlacedTemplateBesideCachedOutdatedOne(t *testing.T) {
 	const zone = placedZone
 
 	cluster, p, templateClass := setupPlacedTemplate(t)
-	cluster.Node(zone).AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: outdated"})
+	cluster.Node(zone).AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: 1"})
 	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
 
 	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "Hash: " + templateClass.Hash()})
@@ -319,4 +319,109 @@ func TestCreateDeletesTemplateOfFailedTask(t *testing.T) {
 
 	_, err = cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
 	assert.Error(t, err, "VM template of the failed create task was kept")
+}
+
+// TestCreateLeavesPlacedTemplateWithoutHashMarker creates a template whose
+// status places a VM template of the same name that Karpenter did not create:
+// its description has no template hash. Create must leave it alone and build
+// its own VM template instead of deleting it as outdated.
+func TestCreateLeavesPlacedTemplateWithoutHashMarker(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "made by hand"})
+	cluster.FailRequests("GET /cluster/resources")
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: region, Zone: zone, TemplateID: 1001}}, result.Placements)
+
+	cfg, err := cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 1000, nil)
+	require.NoError(t, err, "VM template 1000 made by hand was deleted")
+	assert.Equal(t, "made by hand", cfg.Description)
+}
+
+// TestCreateLeavesCachedTemplateWithoutHashMarker is
+// TestCreateLeavesPlacedTemplateWithoutHashMarker for a VM template the cache
+// lists and status does not place.
+func TestCreateLeavesCachedTemplateWithoutHashMarker(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	templateClass.SetTemplatePlacements(nil)
+	cluster.Node(zone).AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "made by hand"})
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	require.Len(t, result.Placements, 1)
+	assert.NotEqual(t, uint64(900), result.Placements[0].TemplateID)
+
+	cfg, err := cluster.Client(t).Nodes(zone).Qemu().Config(context.Background(), 900, nil)
+	require.NoError(t, err, "VM template 900 made by hand was deleted")
+	assert.Equal(t, "made by hand", cfg.Description)
+}
+
+// TestDeleteLeavesTemplatesItDidNotCreate deletes placements whose vmids now
+// hold VM templates Karpenter did not create for this ProxmoxTemplate: one
+// without the template hash, one of another name. Delete must leave both.
+func TestDeleteLeavesTemplatesItDidNotCreate(t *testing.T) {
+	t.Parallel()
+
+	const zone = placedZone
+
+	cluster, p, templateClass := setupPlacedTemplate(t)
+	cluster.Node(zone).AddVM(1000, &qemu.Config{Name: "talos", Template: new(true), Description: "made by hand"})
+	cluster.Node(zone).AddVM(1001, &qemu.Config{Name: "ubuntu", Template: new(true), Description: "Hash: " + templateClass.Hash()})
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	remaining, err := p.Delete(context.Background(), templateClass, templateClass.GetImageID(), []v1alpha1.TemplatePlacement{
+		{Region: region, Zone: zone, TemplateID: 1000},
+		{Region: region, Zone: zone, TemplateID: 1001},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, remaining)
+
+	client := cluster.Client(t)
+	for _, vmid := range []int{1000, 1001} {
+		_, err = client.Nodes(zone).Qemu().Config(context.Background(), vmid, nil)
+		assert.NoError(t, err, "VM template %d was deleted", vmid)
+	}
+}
+
+// TestCreateOnSharedStorageIgnoresTemplateItDidNotCreate creates a template on
+// shared storage while a VM template of the same name without the template
+// hash sits in the second zone. That VM template must not pick the zone.
+func TestCreateOnSharedStorageIgnoresTemplateItDidNotCreate(t *testing.T) {
+	t.Parallel()
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes("pve-1", "pve-2"))
+
+	templateClass := &v1alpha1.ProxmoxTemplate{}
+	templateClass.Name = "talos"
+	templateClass.Spec.SourceImage = &v1alpha1.SourceImage{URL: "https://example.com/talos.raw.xz", ImageName: "talos.raw"}
+	templateClass.Spec.StorageIDs = []string{"nfs"}
+
+	for _, zone := range []string{"pve-1", "pve-2"} {
+		cluster.Node(zone).AddStorage("nfs", "nfs", fakeapi.WithShared(), fakeapi.WithVolume(storage.Volume{VolID: "nfs:import/" + templateClass.GetImageID()}))
+	}
+
+	cluster.Node("pve-2").AddVM(900, &qemu.Config{Name: "talos", Template: new(true), Description: "made by hand"})
+
+	capacity := &fakeCloudCapacity{storages: map[string]*cloudcapacity.NodeStorageCapacityInfo{
+		"nfs": {Name: "nfs", Region: region, Capabilities: []string{"import", "images"}, Zones: []string{"pve-1", "pve-2"}, Shared: true},
+	}}
+
+	p := newProvider(t, cluster, capacity)
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	result, err := p.Create(context.Background(), templateClass)
+	require.NoError(t, err)
+
+	assert.Equal(t, map[string][]string{region: {"pve-1"}}, result.Targets)
 }
