@@ -174,31 +174,62 @@ func (p *DefaultProvider) createTemplate(
 
 	vmid := 0
 
+	cl, err := p.pool.Get(region)
+	if err != nil {
+		log.Error(err, "Failed to get proxmox cluster")
+
+		return 0, false, err
+	}
+
 	templates := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
 		return info.Region == region && info.Zone == zone && info.Name == templateClass.Name
 	})
-	for _, t := range templates {
-		if t.TemplateHash == templateClass.Hash() {
-			return int(t.TemplateID), false, nil
+
+	placement, ok := lo.Find(templateClass.TemplatePlacements(), func(p v1alpha1.TemplatePlacement) bool {
+		return p.Region == region && p.Zone == zone
+	})
+	if ok && !lo.ContainsBy(templates, func(info InstanceTemplateInfo) bool { return info.TemplateID == placement.TemplateID }) {
+		placed, err := placedTemplate(ctx, cl, templateClass, placement)
+		if err != nil {
+			return 0, false, fmt.Errorf("failed to read placed template: %w", err)
+		}
+
+		if placed != nil {
+			templates = append(templates, *placed)
+		}
+	}
+
+	// The VM template status places goes first, so it is the one kept when
+	// several match and the one whose vmid a rebuild takes.
+	if i := slices.IndexFunc(templates, func(info InstanceTemplateInfo) bool { return info.TemplateID == placement.TemplateID }); i > 0 {
+		templates[0], templates[i] = templates[i], templates[0]
+	}
+
+	kept := slices.IndexFunc(templates, func(info InstanceTemplateInfo) bool { return info.TemplateHash == templateClass.Hash() })
+
+	for i, t := range templates {
+		if i == kept {
+			continue
 		}
 
 		log.V(1).Info("Deleting outdated template", "templateID", t.TemplateID, "templateHash", t.TemplateHash)
 
-		if err := p.deleteTemplate(ctx, region, zone, int(t.TemplateID)); err != nil {
+		// The candidate may be missing from the cache, which deleteTemplate
+		// would take for already deleted.
+		if err := deleteQemuVM(ctx, cl, zone, int(t.TemplateID)); err != nil {
 			return 0, false, fmt.Errorf("failed to delete outdated template: %w", err)
 		}
 
-		vmid = int(t.TemplateID)
+		if vmid == 0 {
+			vmid = int(t.TemplateID)
+		}
+	}
+
+	if kept >= 0 {
+		return int(templates[kept].TemplateID), false, nil
 	}
 
 	log.V(1).Info("Creating template")
-
-	cl, err := p.pool.Get(region)
-	if err != nil {
-		log.Error(err, "Failed to get proxmox cluster", "region", region)
-
-		return 0, false, err
-	}
 
 	if vmid == 0 {
 		vmid, err = p.pool.Cluster(region).GetNextID(ctx, 1000)
@@ -209,20 +240,14 @@ func (p *DefaultProvider) createTemplate(
 
 	cfg := renderCreateConfig(templateClass, imageID, storageImage.Name, storageTemplate.Name)
 
-	defer func() {
-		if err != nil && vmid != 0 {
-			if delErr := deleteQemuVM(ctx, cl, zone, vmid); delErr != nil {
-				log.Error(delErr, "failed to delete vm", "vmid", vmid, "region", region, "zone", zone)
-			}
-		}
-	}()
-
 	opts := &qemu.CreateOptions{
 		Config: *cfg,
 		VMID:   vmid,
 		Pool:   templateClass.Spec.ResourcePool,
 	}
 
+	// A rejected request created nothing, and its vmid may be another guest's
+	// by now, so only a failed task leaves a VM template to delete.
 	t, err := cl.Nodes(zone).Qemu().Create(ctx, opts)
 	if err != nil {
 		log.Error(err, "Failed to create virtual machine")
@@ -231,10 +256,68 @@ func (p *DefaultProvider) createTemplate(
 	}
 
 	if err = t.Wait(ctx, &task.WaitOptions{Timeout: taskTimeout}); err != nil {
+		if delErr := deleteFailedTemplate(ctx, cl, templateClass, zone, vmid); delErr != nil {
+			log.Error(delErr, "failed to delete vm", "vmid", vmid, "region", region, "zone", zone)
+		}
+
 		return 0, false, fmt.Errorf("unable to create virtual machine: %w", err)
 	}
 
 	return vmid, true, nil
+}
+
+// deleteFailedTemplate deletes the guest a failed create task left at vmid,
+// unless it is not this template's: another launch may have taken the vmid.
+func deleteFailedTemplate(ctx context.Context, cl *proxmoxrest.Client, templateClass *v1alpha1.ProxmoxTemplate, zone string, vmid int) error {
+	cfg, err := cl.Nodes(zone).Qemu().Config(ctx, vmid, nil)
+	if err != nil {
+		if proxmoxrest.IsNotFound(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	if cfg.Name != templateClass.Name {
+		return nil
+	}
+
+	return deleteQemuVM(ctx, cl, zone, vmid)
+}
+
+// placedTemplate reads the VM template at placement straight from Proxmox.
+// cluster/resources lists a new VM template as a template only after its
+// node's next status update, so the cache can miss one created moments ago.
+// It returns nil when the guest at that vmid is no longer this template.
+func placedTemplate(
+	ctx context.Context,
+	cl *proxmoxrest.Client,
+	templateClass *v1alpha1.ProxmoxTemplate,
+	placement v1alpha1.TemplatePlacement,
+) (*InstanceTemplateInfo, error) {
+	vmid := int(placement.TemplateID)
+
+	cfg, err := cl.Nodes(placement.Zone).Qemu().Config(ctx, vmid, nil)
+	if err != nil {
+		if proxmoxrest.IsNotFound(err) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	if !lo.FromPtr(cfg.Template) || cfg.Name != templateClass.Name {
+		return nil, nil
+	}
+
+	return &InstanceTemplateInfo{
+		Name:         cfg.Name,
+		Region:       placement.Region,
+		Zone:         placement.Zone,
+		TemplateID:   placement.TemplateID,
+		TemplateHash: templateHash(vmid, cfg),
+		Status:       InstanceTemplateStatusAvailable,
+	}, nil
 }
 
 func (p *DefaultProvider) deleteTemplate(
