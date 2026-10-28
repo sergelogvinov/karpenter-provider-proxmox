@@ -123,13 +123,14 @@ var templateHashRe = regexp.MustCompile(`Hash:\s*(\d+)`)
 
 // templateHash returns the template hash of the VM template vmid: the hash
 // written into its description, or for templates Karpenter did not create,
-// one derived from vmid and the template's meta.
-func templateHash(vmid int, cfg *qemu.Config) string {
+// one derived from vmid and the template's meta. described reports which:
+// only Karpenter writes the hash into the description.
+func templateHash(vmid int, cfg *qemu.Config) (hash string, described bool) {
 	if matches := templateHashRe.FindStringSubmatch(cfg.Description); len(matches) > 1 {
-		return matches[1]
+		return matches[1], true
 	}
 
-	return fmt.Sprintf("%d-%d", vmid, lo.Must(hashstructure.Hash(cfg.Meta, hashstructure.FormatV2, nil)))
+	return fmt.Sprintf("%d-%d", vmid, lo.Must(hashstructure.Hash(cfg.Meta, hashstructure.FormatV2, nil))), false
 }
 
 // renderTemplateConfig renders the options shared by the create and update

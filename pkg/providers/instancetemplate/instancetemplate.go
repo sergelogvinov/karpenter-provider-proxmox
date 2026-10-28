@@ -84,6 +84,9 @@ type InstanceTemplateInfo struct {
 	TemplateID uint64
 	// TemplateHash is the hash of the template.
 	TemplateHash string
+	// HasTemplateHash reports whether the template's description carries
+	// the template hash, which only Karpenter writes.
+	HasTemplateHash bool
 	// TemplateTags are the tags associated with the template.
 	TemplateTags []string
 	// TemplateStorage is the storage of boot disk for the template.
@@ -111,6 +114,13 @@ type CreateResult struct {
 // Placement returns where the template lives.
 func (info *InstanceTemplateInfo) Placement() v1alpha1.TemplatePlacement {
 	return v1alpha1.TemplatePlacement{Region: info.Region, Zone: info.Zone, TemplateID: info.TemplateID}
+}
+
+// isTemplateOf reports whether Karpenter created the template for
+// templateClass: it has templateClass's name, carries a template hash and
+// keeps its disks on one storage.
+func (info *InstanceTemplateInfo) isTemplateOf(templateClass *v1alpha1.ProxmoxTemplate) bool {
+	return info.Name == templateClass.Name && info.HasTemplateHash && info.Status == InstanceTemplateStatusAvailable
 }
 
 func NewDefaultProvider(ctx context.Context, pool *pxpool.ProxmoxPool, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
@@ -172,7 +182,7 @@ func (p *DefaultProvider) Create(ctx context.Context, templateClass *v1alpha1.Pr
 		}
 
 		existing := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
-			return info.Region == region && info.Name == templateClass.Name
+			return info.Region == region && info.isTemplateOf(templateClass)
 		})
 
 		zones := targetZones(storageImage, storageTemplate, existing)
@@ -335,14 +345,6 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 		templateInfo := make([]InstanceTemplateInfo, 0)
 
 		for _, vm := range vms {
-			info := InstanceTemplateInfo{
-				Name:       vm.Name,
-				Region:     region,
-				Zone:       vm.Node,
-				TemplateID: uint64(vm.VMID),
-				Status:     InstanceTemplateStatusUnknown,
-			}
-
 			cfg, err := cl.Nodes(vm.Node).Qemu().Config(ctx, vm.VMID, nil)
 			if err != nil {
 				log.Error(err, "Failed to get VM resource", "region", region, "node", vm.Node, "vmid", vm.VMID)
@@ -350,29 +352,9 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 				continue
 			}
 
-			if cfg.Tags != nil {
-				info.TemplateTags = *cfg.Tags
-			}
-
-			info.TemplateHash = templateHash(vm.VMID, cfg)
-
-			info.Status = InstanceTemplateStatusAvailable
-
-			for _, disk := range mergeDisks(cfg) {
-				storageID, _, _ := strings.Cut(disk, ":")
-
-				if info.TemplateStorageID == "" {
-					info.TemplateStorageID = storageID
-				}
-
-				if info.TemplateStorageID != storageID {
-					log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "storageID", storageID)
-
-					info.TemplateStorageID = ""
-					info.Status = InstanceTemplateStatusMultipleStorageIDs
-
-					break
-				}
+			info := newInstanceTemplateInfo(region, vm.Node, vm.VMID, cfg)
+			if info.Status == InstanceTemplateStatusMultipleStorageIDs {
+				log.V(1).Info("Multiple storage IDs found for template", "templateID", vm.VMID, "disks", mergeDisks(cfg))
 			}
 
 			templateInfo = append(templateInfo, info)
@@ -385,6 +367,45 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 	log.V(1).Info("Instance templates updated", "instanceTemplates", instanceTemplates)
 
 	return nil
+}
+
+// newInstanceTemplateInfo describes the VM template vmid in zone from its
+// config: its template hash, whether its description carries one, its tags,
+// and the storage of its disks. A template whose disks span several storages
+// gets no storage and the status InstanceTemplateStatusMultipleStorageIDs.
+func newInstanceTemplateInfo(region, zone string, vmid int, cfg *qemu.Config) InstanceTemplateInfo {
+	hash, described := templateHash(vmid, cfg)
+
+	info := InstanceTemplateInfo{
+		Name:            cfg.Name,
+		Region:          region,
+		Zone:            zone,
+		TemplateID:      uint64(vmid),
+		TemplateHash:    hash,
+		HasTemplateHash: described,
+		Status:          InstanceTemplateStatusAvailable,
+	}
+
+	if cfg.Tags != nil {
+		info.TemplateTags = *cfg.Tags
+	}
+
+	for _, disk := range mergeDisks(cfg) {
+		storageID, _, _ := strings.Cut(disk, ":")
+
+		if info.TemplateStorageID == "" {
+			info.TemplateStorageID = storageID
+		}
+
+		if info.TemplateStorageID != storageID {
+			info.TemplateStorageID = ""
+			info.Status = InstanceTemplateStatusMultipleStorageIDs
+
+			break
+		}
+	}
+
+	return info
 }
 
 // mergeDisks collects every attached disk's backing volume ("storage:volume")

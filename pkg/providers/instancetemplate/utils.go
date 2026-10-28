@@ -182,7 +182,7 @@ func (p *DefaultProvider) createTemplate(
 	}
 
 	templates := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
-		return info.Region == region && info.Zone == zone && info.Name == templateClass.Name
+		return info.Region == region && info.Zone == zone && info.isTemplateOf(templateClass)
 	})
 
 	placement, ok := lo.Find(templateClass.TemplatePlacements(), func(p v1alpha1.TemplatePlacement) bool {
@@ -288,7 +288,8 @@ func deleteFailedTemplate(ctx context.Context, cl *proxmoxrest.Client, templateC
 // placedTemplate reads the VM template at placement straight from Proxmox.
 // cluster/resources lists a new VM template as a template only after its
 // node's next status update, so the cache can miss one created moments ago.
-// It returns nil when the guest at that vmid is no longer this template.
+// It returns nil when the guest at that vmid is not a VM template the cache
+// would list for templateClass.
 func placedTemplate(
 	ctx context.Context,
 	cl *proxmoxrest.Client,
@@ -306,22 +307,23 @@ func placedTemplate(
 		return nil, err
 	}
 
-	if !lo.FromPtr(cfg.Template) || cfg.Name != templateClass.Name {
+	if !lo.FromPtr(cfg.Template) {
 		return nil, nil
 	}
 
-	return &InstanceTemplateInfo{
-		Name:         cfg.Name,
-		Region:       placement.Region,
-		Zone:         placement.Zone,
-		TemplateID:   placement.TemplateID,
-		TemplateHash: templateHash(vmid, cfg),
-		Status:       InstanceTemplateStatusAvailable,
-	}, nil
+	info := newInstanceTemplateInfo(placement.Region, placement.Zone, vmid, cfg)
+	if !info.isTemplateOf(templateClass) {
+		return nil, nil
+	}
+
+	return &info, nil
 }
 
+// deleteTemplate deletes the VM template vmid in zone, if the cache lists it
+// as templateClass's: the vmid may hold another guest by now.
 func (p *DefaultProvider) deleteTemplate(
 	ctx context.Context,
+	templateClass *v1alpha1.ProxmoxTemplate,
 	region string,
 	zone string,
 	vmID int,
@@ -334,7 +336,7 @@ func (p *DefaultProvider) deleteTemplate(
 	}
 
 	templates := p.ListWithFilter(ctx, func(info *InstanceTemplateInfo) bool {
-		return info.Region == region && info.Zone == zone && info.TemplateID == uint64(vmID)
+		return info.Region == region && info.Zone == zone && info.TemplateID == uint64(vmID) && info.isTemplateOf(templateClass)
 	})
 	if len(templates) == 0 {
 		return nil
@@ -362,7 +364,7 @@ func (p *DefaultProvider) deletePlacement(ctx context.Context, templateClass *v1
 	p.zoneLocks.Lock(zone)
 	defer p.zoneLocks.Unlock(zone)
 
-	if err := p.deleteTemplate(ctx, region, zone, vmid); err != nil {
+	if err := p.deleteTemplate(ctx, templateClass, region, zone, vmid); err != nil {
 		log.Error(err, "Failed to delete template", "region", region, "zone", zone, "vmid", vmid)
 
 		return fmt.Errorf("failed to delete template %d: %w", vmid, err)

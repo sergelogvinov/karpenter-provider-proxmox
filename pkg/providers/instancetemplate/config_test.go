@@ -282,6 +282,14 @@ func TestTemplateHash(t *testing.T) {
 
 	templateClass := &v1alpha1.ProxmoxTemplate{Spec: v1alpha1.ProxmoxTemplateSpec{Description: "my template"}}
 
-	assert.Equal(t, templateClass.Hash(), templateHash(100, renderTemplateConfig(templateClass)))
-	assert.Regexp(t, `^100-\d+$`, templateHash(100, &qemu.Config{Description: "created by hand"}), "falls back to vmid and meta for templates Karpenter did not create")
+	hash, described := templateHash(100, renderTemplateConfig(templateClass))
+	assert.Equal(t, templateClass.Hash(), hash)
+	assert.True(t, described)
+
+	hash, described = templateHash(100, &qemu.Config{Description: "created by hand"})
+	assert.Regexp(t, `^100-\d+$`, hash, "falls back to vmid and meta for templates Karpenter did not create")
+	assert.False(t, described)
+
+	_, described = templateHash(100, &qemu.Config{Description: "Hash: not a number"})
+	assert.False(t, described)
 }
