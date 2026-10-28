@@ -37,7 +37,6 @@ import (
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -93,15 +92,14 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
 	size := max(nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga), instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
-	opt := &resources.VMResources{
+	opt, err := p.cloudCapacityProvider.Reserve(ctx, region, zone, resources.VMResources{
 		ID:         newID,
 		CPUs:       int(instanceType.Capacity.Cpu().Value()),
 		Memory:     uint64(instanceType.Capacity.Memory().Value()),
 		DiskGBytes: uint64(size),
 		StorageID:  storage,
-	}
-
-	if err := p.cloudCapacityProvider.AllocateCapacityInZone(ctx, region, zone, newID, opt); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("failed to reserve capacity: %v", err)
 	}
 
@@ -121,7 +119,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 			return
 		}
 
-		if relErr := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, newID, opt); relErr != nil {
+		if relErr := p.cloudCapacityProvider.Release(ctx, region, zone, newID); relErr != nil {
 			log.Error(relErr, "failed to release capacity", "vmID", newID)
 		}
 
@@ -139,7 +137,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		description:      strings.Join(comments, ", "),
 		pool:             nodeClass.Spec.ResourcePool,
 		storage:          storage,
-		resources:        opt,
+		resources:        &opt,
 		tags:             nodeClass.Spec.Tags,
 		instanceTypeName: instanceType.Name,
 		vmName:           nodeClaim.Name,
@@ -226,7 +224,6 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 }
 
 func (p *DefaultProvider) instanceDelete(ctx context.Context,
-	nodeClaim *karpv1.NodeClaim,
 	region string,
 	zone string,
 	vmr *cluster.Resource,
@@ -243,19 +240,6 @@ func (p *DefaultProvider) instanceDelete(ctx context.Context,
 		return fmt.Errorf("failed to get vm config for VM %d: %v", vmr.VMID, err)
 	}
 
-	opt, err := vmresources.GetResourceFromVMConfig(vmr, cfg)
-	if err != nil {
-		log.Error(err, "Failed to generate resource request for VM", "vmID", vmr.VMID)
-
-		opt = &resources.VMResources{
-			ID:     vmr.VMID,
-			CPUs:   int(nodeClaim.Status.Capacity.Cpu().Value()),
-			Memory: uint64(nodeClaim.Status.Capacity.Memory().Value()),
-		}
-	}
-
-	opt.DiskGBytes = uint64(nodeClaim.Status.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
-
 	if err := p.cluster.Cluster(region).DeleteVM(ctx, vmr); err != nil {
 		return fmt.Errorf("cannot delete VM with id %d: %w", vmr.VMID, err)
 	}
@@ -270,7 +254,7 @@ func (p *DefaultProvider) instanceDelete(ctx context.Context,
 		}
 	}
 
-	if err := p.cloudCapacityProvider.ReleaseCapacityInZone(ctx, region, zone, vmr.VMID, opt); err != nil {
+	if err := p.cloudCapacityProvider.Release(ctx, region, zone, vmr.VMID); err != nil {
 		log.Error(err, "Failed to release capacity after VM deletion", "vmID", vmr.VMID)
 	}
 

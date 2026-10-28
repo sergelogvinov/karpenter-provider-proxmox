@@ -227,7 +227,7 @@ func (p *DefaultProvider) Delete(ctx context.Context, nodeClaim *karpv1.NodeClai
 
 	log.V(1).Info("Delete instance", "region", region, "zone", zone, "vmID", vmid)
 
-	return p.instanceDelete(ctx, nodeClaim, region, zone, vmr)
+	return p.instanceDelete(ctx, region, zone, vmr)
 }
 
 func (p *DefaultProvider) UpdateFirewallRules(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass) error {
