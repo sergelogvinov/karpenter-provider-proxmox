@@ -68,7 +68,7 @@ func readISOFile(t *testing.T, isoPath string) map[string]string {
 func TestBuildCloudInitISO(t *testing.T) {
 	t.Parallel()
 
-	isoPath, cleanup, err := buildCloudInitISO("build-cloud-init-iso-test.iso", cloudInitFiles{
+	isoPath, cleanup, err := buildCloudInitISO(cloudInitFiles{
 		UserData:      "user-data-content",
 		MetaData:      "meta-data-content",
 		VendorData:    "vendor-data-content",
@@ -89,7 +89,7 @@ func TestBuildCloudInitISO(t *testing.T) {
 func TestBuildCloudInitISOOmitsEmptyOptionalFiles(t *testing.T) {
 	t.Parallel()
 
-	isoPath, cleanup, err := buildCloudInitISO("build-cloud-init-iso-test-minimal.iso", cloudInitFiles{
+	isoPath, cleanup, err := buildCloudInitISO(cloudInitFiles{
 		UserData: "user-data-content",
 		MetaData: "meta-data-content",
 	})

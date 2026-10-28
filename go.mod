@@ -3,6 +3,7 @@ module github.com/sergelogvinov/karpenter-provider-proxmox
 go 1.27.2
 
 // replace github.com/sergelogvinov/go-proxmox-rest => ../../proxmox/go-proxmox-rest
+
 // replace github.com/sergelogvinov/go-proxmox-pool => ../../proxmox/go-proxmox-pool
 // replace github.com/sergelogvinov/go-proxmox-local => ../go-proxmox-local
 
@@ -17,8 +18,8 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.53.0
 	github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261027095356-66bbb88ec28d
-	github.com/sergelogvinov/go-proxmox-pool v0.2.1-0.20261027092409-33ae9bc29983
-	github.com/sergelogvinov/go-proxmox-rest v0.1.2-0.20261027091835-894de17e4888
+	github.com/sergelogvinov/go-proxmox-pool v0.3.0
+	github.com/sergelogvinov/go-proxmox-rest v0.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
@@ -84,7 +85,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
@@ -106,7 +107,7 @@ require (
 	k8s.io/csi-translation-lib v0.36.2 // indirect
 	k8s.io/dynamic-resource-allocation v0.35.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260706235625-cdb1db5517a0 // indirect
-	resty.dev/v3 v3.0.0-rc.4.0.20261004062424-dabdb4c45c53 // indirect
+	resty.dev/v3 v3.0.0-rc.4.0.20261019064827-78dfc5c1dff9 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect

@@ -270,9 +270,11 @@ func buildFirewallRules(securityGroups []v1alpha1.SecurityGroups) []firewall.Rul
 
 // reconcileFirewallRules diffs rules against the guest's current firewall
 // rule list position-by-position: updates a position whose rule changed,
-// creates new positions past the current list's end, and deletes now-extra
+// appends new positions past the current list's end, and deletes now-extra
 // trailing positions — the same reconcile-by-position approach the old
-// goproxmox.APIClient.UpdateVMFirewallRules used. Deletions run from the
+// goproxmox.APIClient.UpdateVMFirewallRules used. Proxmox inserts a new
+// rule at position 0, so appending one creates it and then moves it to
+// the end. Deletions run from the
 // highest position down, since Proxmox renumbers remaining rules after
 // each delete (deleting ascending would target the wrong position after
 // the first removal — a latent bug in the old client's identical ascending
@@ -294,6 +296,10 @@ func reconcileFirewallRules(ctx context.Context, px *proxmoxrest.Client, zone st
 		case i >= len(oldRules) && i < len(rules):
 			if err := rulesClient.Create(ctx, firewallRuleOptions(rules[i])); err != nil {
 				return fmt.Errorf("failed to create new firewall rule for vm %d: %v", vmid, err)
+			}
+
+			if err := rulesClient.Update(ctx, 0, &firewall.RuleOptions{MoveTo: new(i + 1)}); err != nil {
+				return fmt.Errorf("failed to move new firewall rule for vm %d: %v", vmid, err)
 			}
 		}
 	}

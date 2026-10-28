@@ -90,3 +90,13 @@ _Avoid_: static policy
 **CPU overcommit ratio**:
 How many shared vCPUs a zone offers for each unpinned host CPU; 1.0 means no overcommit.
 _Avoid_: oversubscription factor
+
+## Instances
+
+**Launch**:
+Creating one virtual machine for a NodeClaim in one zone, from reserving zone capacity to starting the virtual machine. Creating a node tries launches zone by zone until one succeeds.
+_Avoid_: provision, instance create
+
+**Launch rollback**:
+Undoing every side effect of a failed launch (the zone capacity reservation, the virtual machine, occupied addresses, the cloud-init ISO), newest first, even when the launch was cancelled. The bootstrap token is not undone; it expires on its own.
+_Avoid_: cleanup, revert
