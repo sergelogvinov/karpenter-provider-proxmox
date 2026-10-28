@@ -227,10 +227,8 @@ func TestOmittedZoneKeepsPendingReservation(t *testing.T) {
 
 	require.NotContains(t, p.Zones(region), zone)
 	require.False(t, fits(p, 1, gib), "an omitted zone is not available for placement")
-	require.Empty(t, p.GetAvailableZonesInRegion(region, corev1.ResourceList{
-		corev1.ResourceCPU:    *resource.NewQuantity(1, resource.DecimalSI),
-		corev1.ResourceMemory: *resource.NewQuantity(int64(gib), resource.BinarySI),
-	}))
+	_, _, err := p.ChooseZone(ctx, region, []string{zone}, nil, resources.VMResources{ID: 101, CPUs: 1, Memory: gib})
+	require.ErrorIs(t, err, cloudcapacity.ErrNoZoneFits, "an omitted zone is not a candidate for zone choice")
 	require.Error(t, reserve(ctx, p, resources.VMResources{ID: 101, CPUs: 1, Memory: gib}))
 
 	cluster.RecoverNode(zone)

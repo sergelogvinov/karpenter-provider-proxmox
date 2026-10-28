@@ -17,6 +17,7 @@ limitations under the License.
 package resourcemanager
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -264,6 +265,101 @@ func TestZoneCapacityPinnedPrefersNodeHoldingWholeVM(t *testing.T) {
 	op := &resources.VMResources{ID: 3, CPUs: 4, Memory: 8 * gib}
 	require.NoError(t, zone.Reserve(op))
 	require.True(t, op.CPUSet.IsSubsetOf(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)), "placed on NUMA node 1: %v", op.CPUSet)
+}
+
+func TestZoneCapacityPinnedPacksFullestNUMANode(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Node 1 is half used, node 0 is empty.
+	require.NoError(t, zone.Track(&resources.VMResources{
+		ID: 1, CPUs: 4, Memory: 4 * gib, CPUSet: cpuset.New(4, 5, 12, 13),
+		NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0-3", Memory: 4 * 1024}},
+	}))
+
+	op := &resources.VMResources{ID: 2, CPUs: 2, Memory: 2 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.True(t, op.CPUSet.IsSubsetOf(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)), "placed on NUMA node 1: %v", op.CPUSet)
+}
+
+func TestZoneCapacityPinnedPacksByScarcerResource(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+	// Both nodes keep 7 free CPUs; node 0 keeps 15GiB free and node 1 only 5GiB.
+	trackNUMAMemoryUse(t, zone, 1024, 11*1024)
+
+	// Node 1 is left with 1/16 of its memory, node 0 with 5/8 of its CPUs: node 1 is the tighter fit.
+	op := &resources.VMResources{ID: 1, CPUs: 2, Memory: 4 * gib}
+	require.NoError(t, zone.Reserve(op))
+	require.True(t, op.CPUSet.IsSubsetOf(cpuset.New(4, 5, 6, 7, 12, 13, 14, 15)), "placed on NUMA node 1: %v", op.CPUSet)
+}
+
+func TestZoneCapacityFitShared(t *testing.T) {
+	t.Parallel()
+
+	zone := newTestZone(t, Shared(1))
+
+	fit, err := zone.Fit(resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib})
+	require.NoError(t, err)
+	// 12 of 16 CPUs and 23 of 31GiB stay free; memory is scarcer.
+	require.Equal(t, Fit{NUMANodes: 0, Leftover: 23.0 / 31}, fit)
+	require.Equal(t, Capacity{CPUs: 16, Memory: 31 * gib}, zone.Available(), "fit reserves nothing")
+
+	_, err = zone.Fit(resources.VMResources{ID: 2, CPUs: 17, Memory: gib})
+	require.ErrorContains(t, err, "not enough CPUs")
+}
+
+func TestZoneCapacityFitPinned(t *testing.T) {
+	t.Parallel()
+
+	zone := newPinnedTestZone(t)
+
+	fit, err := zone.Fit(resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib})
+	require.NoError(t, err)
+	require.Equal(t, Fit{NUMANodes: 1, Leftover: 23.0 / 31}, fit)
+
+	// 10 CPUs cannot stay on one 8-CPU node.
+	fit, err = zone.Fit(resources.VMResources{ID: 1, CPUs: 10, Memory: 10 * gib})
+	require.NoError(t, err)
+	require.Equal(t, Fit{NUMANodes: 2, Leftover: 6.0 / 16}, fit)
+	require.Equal(t, Capacity{CPUs: 16, Memory: 31 * gib}, zone.Available(), "fit reserves nothing")
+
+	require.NoError(t, zone.Reserve(&resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib}))
+	_, err = zone.Fit(resources.VMResources{ID: 1, CPUs: 2, Memory: gib})
+	require.ErrorContains(t, err, "already")
+}
+
+func TestZoneCapacityMarksLackOfRoom(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		op     resources.VMResources
+		noRoom bool
+	}{
+		"too many CPUs":        {op: resources.VMResources{ID: 2, CPUs: 13, Memory: gib}, noRoom: true},
+		"too much memory":      {op: resources.VMResources{ID: 2, CPUs: 1, Memory: 24 * gib}, noRoom: true},
+		"too much NUMA memory": {op: resources.VMResources{ID: 2, CPUs: 1, Memory: 17 * gib}, noRoom: true},
+		"already reserved":     {op: resources.VMResources{ID: 1, CPUs: 1, Memory: gib}},
+		"no CPUs":              {op: resources.VMResources{ID: 2, Memory: gib}},
+		"no memory":            {op: resources.VMResources{ID: 2, CPUs: 1}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			zone := newPinnedTestZone(t)
+			require.NoError(t, zone.Reserve(&resources.VMResources{ID: 1, CPUs: 4, Memory: 8 * gib}))
+
+			_, err := zone.Fit(tc.op)
+			require.Error(t, err)
+			require.Equal(t, tc.noRoom, errors.Is(err, ErrNoRoom), "fit: %v", err)
+
+			op := tc.op
+			err = zone.Reserve(&op)
+			require.Error(t, err)
+			require.Equal(t, tc.noRoom, errors.Is(err, ErrNoRoom), "reserve: %v", err)
+		})
+	}
 }
 
 // trackNUMAMemoryUse pins one CPU on each NUMA node with the given memory bound to it.

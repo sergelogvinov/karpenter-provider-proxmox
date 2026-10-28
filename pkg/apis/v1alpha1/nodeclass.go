@@ -32,6 +32,8 @@ const (
 	PlacementStrategyAvailabilityFirst = "AvailabilityFirst"
 	// PlacementStrategyBalanced strategy prioritizes even distribution across zones
 	PlacementStrategyBalanced = "Balanced"
+	// PlacementStrategyBestFit strategy packs nodes into the zones they leave fullest
+	PlacementStrategyBestFit = "BestFit"
 
 	// ResourceZones names for ProxmoxNodeClass status
 	ResourceZones corev1.ResourceName = "zones"
@@ -117,10 +119,12 @@ type ProxmoxNodeClassSpec struct {
 type PlacementStrategy struct {
 	// ZoneBalance determines how nodes are distributed across zones
 	// Valid values are:
-	// - "Balanced" (default) - Nodes are evenly distributed across zones
+	// - "Balanced" (default) - Nodes go to the zone with the most capacity left after them
+	// - "BestFit" - Nodes go to the zone with the least capacity left after them
 	// - "AvailabilityFirst" - Prioritize zone availability over even distribution
+	// A zone where the node stays on one NUMA node is always preferred.
 	// +kubebuilder:default=Balanced
-	// +kubebuilder:validation:Enum=Balanced;AvailabilityFirst
+	// +kubebuilder:validation:Enum=Balanced;BestFit;AvailabilityFirst
 	// +optional
 	ZoneBalance string `json:"zoneBalance,omitempty"`
 }

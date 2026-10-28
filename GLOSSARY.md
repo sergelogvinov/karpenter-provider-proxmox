@@ -91,6 +91,17 @@ _Avoid_: static policy
 How many shared vCPUs a zone offers for each unpinned host CPU; 1.0 means no overcommit.
 _Avoid_: oversubscription factor
 
+**Fit**:
+What placing a virtual machine in a zone would leave the zone with, worked out without reserving: how many NUMA nodes the virtual machine would span, and what share of the zone's scarcer resource, CPU or memory, would stay free. Spanning fewer NUMA nodes is always the better fit.
+_Avoid_: score, load
+
+**Placement strategy**:
+A node class's rule for ordering zones of equal NUMA span by fit: best fit puts the virtual machine where the least is left over, balanced where the most is left over, and availability first in random order.
+
+**Zone choice**:
+Picking, among a launch's candidate zones, the one whose fit best suits the placement strategy, and reserving the virtual machine there in the same step.
+_Avoid_: zone selection, zone sorting, best zone
+
 ## Instances
 
 **Launch**:

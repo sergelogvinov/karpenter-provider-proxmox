@@ -77,6 +77,13 @@ If a VM requires more than 1 vCPU, the plugin tries to:
 * Allocate vCPUs from the same physical core (using hyper-thread siblings) first.
 * Then allocate from the same NUMA node if more cores are needed.
 
+When several NUMA nodes can hold the whole VM (its vCPUs and its memory), the VM goes to the one it leaves fullest,
+judged by whichever of CPU or memory has less left, so that the emptier NUMA nodes stay whole for larger VMs.
+Only when no single NUMA node can hold the VM is it spread across NUMA nodes, with its memory split in proportion to its vCPUs on each.
+
+Across zones, a zone where the VM stays on one NUMA node is always preferred over a zone where it would span several,
+whatever the node class's `placementStrategy` (see [NodeClass](nodeclass.md)).
+
 ## Limitations and notes
 
 `static` mode requires root privileges (`root@pam`) to set CPU pinning for VMs.

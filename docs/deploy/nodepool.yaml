@@ -34,7 +34,7 @@ metadata:
 spec:
   # region: region-2
   # placementStrategy:
-  #   zoneBalance: AvailabilityFirst
+  #   zoneBalance: BestFit # Balanced (default), BestFit or AvailabilityFirst
   instanceTemplateRef:
     kind: ProxmoxUnmanagedTemplate
     # kind: ProxmoxTemplate

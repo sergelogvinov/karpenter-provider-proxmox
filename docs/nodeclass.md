@@ -18,7 +18,7 @@ spec:
   # PlacementStrategy defines how VM should be placed across zones.
   # Optional: if not set, Balanced strategy will be used
   placementStrategy:
-    zoneBalance: Balanced|AvailabilityFirst
+    zoneBalance: Balanced|BestFit|AvailabilityFirst
 
   # InstanceTemplateRef is a reference to a Kubernetes Custom Resource
   # that defines the virtual machine template used for creating instances.
@@ -85,7 +85,14 @@ spec:
 * `region` - The name of the region to use for this NodeClass. If not set, all regions will be used. Optional.
 
 * `placementStrategy` - The strategy to use for placing VMs across zones. Optional.
-  - `zoneBalance` - Balanced or AvailabilityFirst. Defaults to Balanced.
+  - `zoneBalance` - How a zone is chosen among the zones with room for the VM. Defaults to `Balanced`.
+    - `Balanced` - the zone with the most capacity left after the VM, so VMs spread across zones.
+    - `BestFit` - the zone with the least capacity left after the VM, so VMs pack into as few zones as possible.
+    - `AvailabilityFirst` - a random zone.
+
+    Capacity left is the smaller of the free CPU share and the free memory share of the zone, counting VMs that are still being created.
+    With every strategy, a zone where the VM fits on one NUMA node comes before a zone where it would span several,
+    and if the launch fails in the chosen zone, the next one is tried.
 
 * `instanceTemplateRef` - The template to use for creating VMs.
   - `kind` - The kind of the instance template, either [ProxmoxTemplate](nodetemplateclass.md) or [ProxmoxUnmanagedTemplate](nodetemplateclass.md).

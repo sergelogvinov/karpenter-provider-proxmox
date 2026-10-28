@@ -44,6 +44,8 @@ type Placement interface {
 // freeResources is what the zone has left for a new VM.
 type freeResources struct {
 	topo *topology.Topology
+	// usable are the CPUs not reserved for the host.
+	usable cpuset.CPUSet
 	// cpus are the unreserved CPUs no VM is pinned to.
 	cpus cpuset.CPUSet
 	// numaMemory is each NUMA node's free memory, capped by the zone's free memory.
@@ -71,8 +73,9 @@ type pinned struct {
 	log logr.Logger
 }
 
-// Pinned gives each VM its own host CPUs, packed by NUMA node, with its memory
-// split across those NUMA nodes in proportion to its CPUs on each.
+// Pinned gives each VM its own host CPUs, on the one NUMA node it leaves fullest
+// when one can hold it, otherwise packed across NUMA nodes with its memory
+// split across them in proportion to its CPUs on each.
 func Pinned(log logr.Logger) Placement {
 	return pinned{log: log}
 }
@@ -89,6 +92,12 @@ func (p pinned) place(free freeResources, op *resources.VMResources) (cpuset.CPU
 		}
 
 		return p.take(free, nodes, op)
+	}
+
+	for _, node := range tightestNodes(free, op) {
+		if cpus, numaNodes, err := p.take(free, cpuset.New(node), op); err == nil {
+			return cpus, numaNodes, nil
+		}
 	}
 
 	// Keep the VM on nodes that could each hold all of its memory when possible;
@@ -159,6 +168,49 @@ func (p pinned) takeByMemory(free freeResources, nodes cpuset.CPUSet, op *resour
 	}
 
 	return cpus, numaNodes, nil
+}
+
+// tightestNodes returns the NUMA nodes that can each hold all of op's CPUs and memory,
+// the one op would leave fullest first, ties by lowest node.
+func tightestNodes(free freeResources, op *resources.VMResources) []int {
+	type nodeFit struct {
+		node     int
+		leftover float64
+	}
+
+	fits := []nodeFit{}
+
+	for _, i := range free.topo.CPUDetails.NUMANodes().List() {
+		nodeCPUs := free.topo.CPUDetails.CPUsInNUMANodes(i)
+		freeCPUs := nodeCPUs.Intersection(free.cpus).Size()
+
+		if freeCPUs < op.CPUs || free.numaMemory[i] < op.Memory {
+			continue
+		}
+
+		fits = append(fits, nodeFit{
+			node:     i,
+			leftover: scarcerShare(freeCPUs-op.CPUs, nodeCPUs.Intersection(free.usable).Size(), free.numaMemory[i]-op.Memory, free.topo.NUMANodes[i]),
+		})
+	}
+
+	sort.SliceStable(fits, func(a, b int) bool { return fits[a].leftover < fits[b].leftover })
+
+	nodes := make([]int, len(fits))
+	for i, f := range fits {
+		nodes[i] = f.node
+	}
+
+	return nodes
+}
+
+// scarcerShare is the smaller of the free CPU share and the free memory share.
+func scarcerShare(freeCPUs, cpus int, freeMemory, memory uint64) float64 {
+	if cpus <= 0 || memory == 0 {
+		return 0
+	}
+
+	return min(float64(freeCPUs)/float64(cpus), float64(freeMemory)/float64(memory))
 }
 
 // nodesWithMemory returns the NUMA nodes with at least memory bytes free.
