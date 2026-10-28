@@ -32,11 +32,13 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu/firewall"
 	"github.com/sergelogvinov/go-proxmox-rest/pools"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -87,13 +89,21 @@ func NewProvider(
 	}, nil
 }
 
-// Create an instance given the constraints.
+// Create an instance given the constraints. Instance types are tried cheapest
+// first; within a region, zone choice picks the zone, and a failed launch is
+// retried in the zone it picks next. When zone choice found no room and
+// nothing else failed, Create fails with an insufficient capacity error.
 func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ProxmoxNodeClass, instanceTypes []*cloudprovider.InstanceType) (*corev1.Node, error) {
 	log := log.FromContext(ctx).WithName("instance.Create()")
 
 	errs := []error{}
+	// noRoom is set when zone choice finds no zone with room, and otherFailure
+	// when anything else fails, such as a missing template or a failed launch.
+	noRoom, otherFailure := false, false
 
-	instanceTypes = orderInstanceTypesByPrice(instanceTypes, scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...))
+	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
+
+	instanceTypes = orderInstanceTypesByPrice(instanceTypes, requirements)
 	for _, instanceType := range instanceTypes {
 		regions := []string{}
 		if nodeClass.Spec.Region != "" {
@@ -105,9 +115,9 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 		}
 
 		for _, region := range regions {
-			zones := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...).Get(corev1.LabelTopologyZone).Values()
+			zones := requirements.Get(corev1.LabelTopologyZone).Values()
 			if len(zones) == 0 {
-				zones = p.cloudCapacityProvider.GetAvailableZonesInRegion(region, instanceType.Capacity)
+				zones = p.cloudCapacityProvider.Zones(region)
 			}
 
 			zones = getValuesByKey(instanceType, corev1.LabelTopologyZone, zones)
@@ -117,29 +127,65 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				continue
 			}
 
+			templates := map[string]instancetemplate.InstanceTemplateInfo{}
 			placements := nodeClass.TemplatePlacements(region)
 			placementZones := lo.Map(placements, func(placement v1alpha1.TemplatePlacement, _ int) string { return placement.Zone })
 
-			zones = p.sortBestZoneByPlacementStrategy(nodeClass.Spec.PlacementStrategy, region, lo.Intersect(zones, placementZones))
-			for _, zone := range zones {
-				templates := p.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
+			for _, zone := range lo.Intersect(zones, placementZones) {
+				found := p.instanceTemplateProvider.ListWithFilter(ctx, func(c *instancetemplate.InstanceTemplateInfo) bool {
 					return c.Zone == zone && slices.Contains(placements, c.Placement())
 				})
 
-				if len(templates) == 0 {
+				if len(found) == 0 {
 					log.Info("Failed to get instance template", "region", region, "zone", zone, "instanceType", instanceType.Name)
 
 					errs = append(errs, fmt.Errorf("no instance templates found in region %s and zone %s", region, zone))
+					otherFailure = true
 
 					continue
 				}
 
-				template := templates[0]
+				templates[zone] = found[0]
+			}
 
-				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, &template, instanceType, region, zone)
+			candidates := lo.Keys(templates)
+			for len(candidates) > 0 {
+				newID, err := p.cluster.Cluster(region).GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to get next id: %v", err))
+					otherFailure = true
+
+					break
+				}
+
+				zone, reserved, err := p.cloudCapacityProvider.ChooseZone(ctx, region, candidates, nodeClass.Spec.PlacementStrategy, resources.VMResources{
+					ID:     newID,
+					CPUs:   int(instanceType.Capacity.Cpu().Value()),
+					Memory: uint64(instanceType.Capacity.Memory().Value()),
+				})
+				if err != nil {
+					log.Info("No zone has room for instance type", "region", region, "instanceType", instanceType.Name, "reason", err.Error())
+
+					errs = append(errs, err)
+
+					if errors.Is(err, cloudcapacity.ErrNoZoneFits) {
+						noRoom = true
+					} else {
+						otherFailure = true
+					}
+
+					break
+				}
+
+				candidates = lo.Without(candidates, zone)
+				template := templates[zone]
+
+				node, err := p.instanceCreate(ctx, nodeClaim, nodeClass, &template, instanceType, region, zone, reserved)
 				if err != nil {
 					log.Error(err, "Failed to create instance", "region", region, "zone", zone, "instanceType", instanceType.Name)
+
 					errs = append(errs, err)
+					otherFailure = true
 
 					continue
 				}
@@ -153,7 +199,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 		errs = append(errs, fmt.Errorf("no available regions found for instance type %s", instanceType.Name))
 	}
 
-	return nil, fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
+	if len(errs) == 0 {
+		return nil, fmt.Errorf("failed to create instance: no instance types to try")
+	}
+
+	err := fmt.Errorf("failed to create instance after trying all instance types: %w", errors.Join(errs...))
+	if noRoom && !otherFailure {
+		return nil, cloudprovider.NewInsufficientCapacityError(err)
+	}
+
+	return nil, err
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*corev1.Node, error) {

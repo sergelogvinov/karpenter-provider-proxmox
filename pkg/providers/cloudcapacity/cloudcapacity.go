@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -28,10 +27,10 @@ import (
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -41,6 +40,12 @@ type Provider interface {
 	// It returns the reserved resources: req plus, for pinned placement, the host CPUs
 	// and NUMA split the VM got.
 	Reserve(ctx context.Context, region, zone string, req resources.VMResources) (resources.VMResources, error)
+	// ChooseZone is zone choice: it reserves req in the candidate zone of region whose fit
+	// best suits strategy, and returns that zone and the reserved resources, as Reserve does.
+	// The caller releases the reservation like any other.
+	// It fails with ErrNoZoneFits when no candidate zone has room, and with the zone's
+	// error, without ErrNoZoneFits, when the request is invalid there.
+	ChooseZone(ctx context.Context, region string, zones []string, strategy *v1alpha1.PlacementStrategy, req resources.VMResources) (string, resources.VMResources, error)
 	// Release forgets VM id's record and returns what it held to the zone's capacity.
 	// Releasing a VM that has no record changes nothing.
 	Release(ctx context.Context, region, zone string, id int) error
@@ -58,8 +63,6 @@ type Provider interface {
 	// Zones returns a list of zones available in the specified region.
 	Zones(region string) []string
 
-	GetAvailableZonesInRegion(region string, req corev1.ResourceList) []string
-	SortZonesByCPULoad(region string, zones []string) []string
 	FitInZone(region, zone string, req corev1.ResourceList) bool
 
 	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
@@ -474,75 +477,20 @@ func (p *DefaultProvider) Zones(region string) []string {
 	return p.zoneList[region]
 }
 
-// FIXME: optimize this functions
-
-func (p *DefaultProvider) GetAvailableZonesInRegion(region string, req corev1.ResourceList) []string {
-	p.muCapacityInfo.RLock()
-	defer p.muCapacityInfo.RUnlock()
-
-	zones := []string{}
-
-	for _, info := range p.capacityInfo {
-		if info.Region != region || info.Capacity == nil || info.omitted {
-			continue
-		}
-
-		free := info.Capacity.Available()
-
-		allocatable := corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", free.CPUs)),
-			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", free.Memory)),
-		}
-
-		if allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0 {
-			zones = append(zones, info.Name)
-		}
-	}
-
-	return zones
-}
-
+// FitInZone reports whether a VM of req's CPU and memory has a fit in the zone now.
 func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList) bool {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
-	key := fmt.Sprintf("%s/%s", region, zone)
-	if info, ok := p.capacityInfo[key]; ok {
-		if info.Capacity == nil || info.omitted {
-			return false
-		}
-
-		free := info.Capacity.Available()
-
-		allocatable := corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", free.CPUs)),
-			corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", free.Memory)),
-		}
-
-		return allocatable.Cpu().Cmp(*req.Cpu()) >= 0 && allocatable.Memory().Cmp(*req.Memory()) >= 0
+	info, ok := p.capacityInfo[zoneKey(region, zone)]
+	if !ok || info.Capacity == nil || info.omitted {
+		return false
 	}
 
-	return false
-}
-
-func (p *DefaultProvider) SortZonesByCPULoad(region string, zones []string) []string {
-	p.muCapacityInfo.RLock()
-	defer p.muCapacityInfo.RUnlock()
-
-	if len(zones) <= 1 {
-		return zones
-	}
-
-	sortedZones := make([]string, 0, len(zones))
-	for _, zone := range zones {
-		if slices.Contains(p.zoneList[region], zone) {
-			sortedZones = append(sortedZones, zone)
-		}
-	}
-
-	sort.Slice(sortedZones, func(i, j int) bool {
-		return p.capacityInfo[fmt.Sprintf("%s/%s", region, sortedZones[i])].CPULoad < p.capacityInfo[fmt.Sprintf("%s/%s", region, sortedZones[j])].CPULoad
+	_, err := info.Capacity.Fit(resources.VMResources{
+		CPUs:   int(req.Cpu().Value()),
+		Memory: uint64(req.Memory().Value()),
 	})
 
-	return sortedZones
+	return err == nil
 }

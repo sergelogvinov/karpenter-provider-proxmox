@@ -440,6 +440,7 @@ func TestCreateRollsBack(t *testing.T) {
 
 			_, err := f.create(f.ctx, "node-1")
 			require.Error(t, err)
+			assert.False(t, cloudprovider.IsInsufficientCapacityError(err), "a failed launch is not a lack of capacity: %v", err)
 
 			f.requireNothingLeftOver()
 		})
@@ -454,9 +455,89 @@ func TestCreateRefusesFullZone(t *testing.T) {
 
 	_, err = f.create(f.ctx, "node-2")
 	require.Error(t, err)
+	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "no zone has room: %v", err)
 
 	assert.Equal(t, map[string][]int{"pve1": {firstVMID}}, f.guests(), "only the first VM exists")
 	assert.Len(t, f.isos(), 1, "only the first VM's ISO exists")
+}
+
+// TestCreateRefusesFullZoneBesideZoneWithoutTemplate fills the one zone the
+// node class has a template in: the other zone is not a candidate, so the
+// launch still fails for lack of capacity.
+func TestCreateRefusesFullZoneBesideZoneWithoutTemplate(t *testing.T) {
+	t.Parallel()
+
+	f := newLaunchFixture(t, launchSetup{zones: []string{"pve1", "pve2"}})
+	f.nodeClass.Status.SelectedZones = f.nodeClass.Status.SelectedZones[:1]
+
+	node, err := f.create(f.ctx, "node-1")
+	require.NoError(t, err)
+	assert.Equal(t, "pve1", node.Labels[corev1.LabelTopologyZone])
+
+	_, err = f.create(f.ctx, "node-2")
+	require.Error(t, err)
+	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "no zone with a template has room: %v", err)
+}
+
+// TestCreateWithoutCandidateZoneIsNotLackOfCapacity asks for a zone the node
+// class has no template in: zone choice never runs, so the failure is a
+// mismatch, not a lack of capacity.
+func TestCreateWithoutCandidateZoneIsNotLackOfCapacity(t *testing.T) {
+	t.Parallel()
+
+	f := newLaunchFixture(t, launchSetup{zones: []string{"pve1", "pve2"}})
+	f.nodeClass.Status.SelectedZones = f.nodeClass.Status.SelectedZones[:1]
+
+	nodeClaim := f.nodeClaim("node-1")
+	nodeClaim.Spec.Requirements[0].Values = []string{"pve2"}
+
+	_, err := f.provider.Create(f.ctx, nodeClaim, f.nodeClass, []*cloudprovider.InstanceType{f.instanceType})
+	require.Error(t, err)
+	assert.False(t, cloudprovider.IsInsufficientCapacityError(err), "no zone choice ran: %v", err)
+	assert.Empty(t, f.guests())
+}
+
+func TestCreateWithoutInstanceTypes(t *testing.T) {
+	t.Parallel()
+
+	f := newLaunchFixture(t, launchSetup{})
+
+	_, err := f.provider.Create(f.ctx, f.nodeClaim("node-1"), f.nodeClass, nil)
+	require.EqualError(t, err, "failed to create instance: no instance types to try")
+}
+
+// TestCreatePlacesByStrategy launches two small VMs into two empty zones:
+// balanced spreads them, best fit packs them into the first zone.
+func TestCreatePlacesByStrategy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		zoneBalance string
+		want        []string
+	}{
+		{zoneBalance: v1alpha1.PlacementStrategyBalanced, want: []string{"pve1", "pve2"}},
+		{zoneBalance: v1alpha1.PlacementStrategyBestFit, want: []string{"pve1", "pve1"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.zoneBalance, func(t *testing.T) {
+			t.Parallel()
+
+			f := newLaunchFixture(t, launchSetup{zones: []string{"pve1", "pve2"}, cpus: 1, memory: "1Gi"})
+			f.nodeClass.Spec.PlacementStrategy = &v1alpha1.PlacementStrategy{ZoneBalance: tt.zoneBalance}
+
+			zones := []string{}
+
+			for _, name := range []string{"node-1", "node-2"} {
+				node, err := f.create(f.ctx, name)
+				require.NoError(t, err)
+
+				zones = append(zones, node.Labels[corev1.LabelTopologyZone])
+			}
+
+			assert.Equal(t, tt.want, zones)
+		})
+	}
 }
 
 func TestCreateRefusesExhaustedIPPool(t *testing.T) {

@@ -32,7 +32,6 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu/firewall"
 	"github.com/sergelogvinov/go-proxmox-rest/task"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
@@ -54,6 +53,8 @@ const (
 	powerActionTimeout = time.Minute
 )
 
+// instanceCreate launches the VM reserved in zone. A failed launch is
+// rolled back, the reservation included.
 func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	nodeClaim *karpv1.NodeClaim,
 	nodeClass *v1alpha1.ProxmoxNodeClass,
@@ -61,17 +62,29 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
+	reserved resources.VMResources,
 ) (_ *corev1.Node, err error) {
 	log := log.FromContext(ctx).WithName("instance.instanceCreate()").WithValues("region", region, "zone", zone, "instanceType", instanceType.Name)
+
+	newID := reserved.ID
+
+	rollback := &launchRollback{}
+
+	defer func() {
+		if err != nil {
+			rollback.run(ctx)
+		}
+	}()
+
+	rollback.add(func(ctx context.Context) {
+		if err := p.cloudCapacityProvider.Release(ctx, region, zone, newID); err != nil {
+			log.Error(err, "failed to release capacity", "vmID", newID)
+		}
+	})
 
 	px, err := p.cluster.Get(region)
 	if err != nil {
 		return nil, pxpool.ErrClusterNotFound
-	}
-
-	newID, err := p.cluster.Cluster(region).GetNextID(ctx, options.FromContext(ctx).ProxmoxVMID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get next id: %v", err)
 	}
 
 	vmTemplateID := instanceTemplate.TemplateID
@@ -92,30 +105,8 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	// Scheduling uses StorageEphemeral capacity to determine the InstanceType
 	size := max(nodeClass.Spec.BootDevice.Size.ScaledValue(resource.Giga), instanceType.Capacity.StorageEphemeral().ScaledValue(resource.Giga))
 
-	opt, err := p.cloudCapacityProvider.Reserve(ctx, region, zone, resources.VMResources{
-		ID:         newID,
-		CPUs:       int(instanceType.Capacity.Cpu().Value()),
-		Memory:     uint64(instanceType.Capacity.Memory().Value()),
-		DiskGBytes: uint64(size),
-		StorageID:  storage,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to reserve capacity: %v", err)
-	}
-
-	rollback := &launchRollback{}
-
-	defer func() {
-		if err != nil {
-			rollback.run(ctx)
-		}
-	}()
-
-	rollback.add(func(ctx context.Context) {
-		if err := p.cloudCapacityProvider.Release(ctx, region, zone, newID); err != nil {
-			log.Error(err, "failed to release capacity", "vmID", newID)
-		}
-	})
+	reserved.DiskGBytes = uint64(size)
+	reserved.StorageID = storage
 
 	capacityType := getCapacityType(nodeClaim, instanceType, region, zone)
 
@@ -124,8 +115,8 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		fmt.Sprintf("class=%s", nodeClass.Name),
 		fmt.Sprintf("capacity-type=%s", capacityType),
 	}
-	if !opt.CPUSet.IsEmpty() {
-		comments = append(comments, fmt.Sprintf("affinity=%s", opt.CPUSet.String()))
+	if !reserved.CPUSet.IsEmpty() {
+		comments = append(comments, fmt.Sprintf("affinity=%s", reserved.CPUSet.String()))
 	}
 
 	// Added before the clone, which can fail after Proxmox created the VM.
@@ -142,7 +133,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		description:      strings.Join(comments, ", "),
 		pool:             nodeClass.Spec.ResourcePool,
 		storage:          storage,
-		resources:        &opt,
+		resources:        &reserved,
 		tags:             nodeClass.Spec.Tags,
 		instanceTypeName: instanceType.Name,
 		vmName:           nodeClaim.Name,

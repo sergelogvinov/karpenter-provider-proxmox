@@ -17,6 +17,7 @@ limitations under the License.
 package resourcemanager
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -30,6 +31,22 @@ import (
 
 // pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.
 const pendingGracePeriod = 10 * time.Minute
+
+// errInvalidRequest means a VM request lacks the CPUs or memory, or the VM ID Reserve needs.
+var errInvalidRequest = errors.New("cannot reserve resources: a VM ID, CPUs and memory are required")
+
+// ErrNoRoom marks a reservation that fails because the zone has no room for the VM,
+// as opposed to an invalid request.
+var ErrNoRoom = errors.New("no room in zone")
+
+// noRoomError is a lack-of-room failure that keeps err's message.
+type noRoomError struct {
+	err error
+}
+
+func (e noRoomError) Error() string { return e.err.Error() }
+
+func (e noRoomError) Unwrap() []error { return []error{e.err, ErrNoRoom} }
 
 // Capacity is what a new shared VM could still get in a zone.
 type Capacity struct {
@@ -110,50 +127,57 @@ func NewZoneCapacity(topo *topology.Topology, reservedCPUs []int, reservedMemory
 	}, nil
 }
 
-// Reserve admits a new VM if the zone has room for it.
+// Fit is what placing a VM would leave a zone with.
+type Fit struct {
+	// NUMANodes is how many NUMA nodes the VM would span; zero for a shared VM.
+	NUMANodes int
+	// Leftover is the free share of the zone's scarcer resource, CPU or memory,
+	// after placing the VM: 0 when that resource is used up, 1 when the zone is empty.
+	Leftover float64
+}
+
+// Reserve admits a new VM if the zone has room for it. A failure for lack of room is ErrNoRoom.
 func (z *ZoneCapacity) Reserve(op *resources.VMResources) error {
-	if op == nil || op.ID <= 0 || op.CPUs <= 0 || op.Memory == 0 {
-		return fmt.Errorf("cannot reserve resources: a VM ID, CPUs and memory are required")
+	if op == nil || op.ID <= 0 {
+		return errInvalidRequest
 	}
 
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	if _, ok := z.vms[op.ID]; ok {
-		return fmt.Errorf("resources for VM %d are already reserved", op.ID)
-	}
-
-	cpus, numaNodes, err := z.placement.place(z.free(), op)
+	rec, numaNodes, err := z.admit(op)
 	if err != nil {
 		return err
 	}
 
-	rec := newRecord(op.CPUs, cpus, op.Memory, numaNodes)
 	rec.reservedAt = z.now()
-
-	u := z.usageWith(op.ID, rec)
-	if u.memory > z.memory {
-		return fmt.Errorf("not enough memory available: requested=%d, available=%d", op.Memory, z.available(z.usage()).Memory)
-	}
-
-	for i := range rec.numaMemory {
-		if u.numaMemory[i] > z.topo.NUMANodes[i] {
-			return fmt.Errorf("not enough memory available on NUMA node %d", i)
-		}
-	}
-
-	if u.sharedCPUs > z.sharedCapacity(u) {
-		return fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, z.available(z.usage()).CPUs)
-	}
-
 	z.vms[op.ID] = rec
 
-	if !cpus.IsEmpty() {
-		op.CPUSet = cpus.Clone()
+	if !rec.cpuSet.IsEmpty() {
+		op.CPUSet = rec.cpuSet.Clone()
 		op.NUMANodes = numaNodes
 	}
 
 	return nil
+}
+
+// Fit is what reserving op would leave the zone with, without reserving it.
+// It fails exactly when Reserve would, except that op may have no ID yet.
+func (z *ZoneCapacity) Fit(op resources.VMResources) (Fit, error) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	rec, numaNodes, err := z.admit(&op)
+	if err != nil {
+		return Fit{}, err
+	}
+
+	left := z.available(z.usageWith(op.ID, rec))
+
+	return Fit{
+		NUMANodes: len(numaNodes),
+		Leftover:  scarcerShare(left.CPUs, z.sharedCapacity(usage{}), left.Memory, z.memory),
+	}, nil
 }
 
 // Track records a VM that already exists in the zone, replacing any earlier record.
@@ -243,6 +267,42 @@ func (z *ZoneCapacity) String() string {
 		len(z.vms), free.CPUs, u.pinnedCPUs, z.reservedCPUs, free.Memory/1024/1024)
 }
 
+// admit places op and checks the zone has room for it, without recording it.
+func (z *ZoneCapacity) admit(op *resources.VMResources) (record, map[int]resources.NUMANodeState, error) {
+	// A zero ID is a VM that Fit is asked about before it has one; Reserve rejects it.
+	if op.ID < 0 || op.CPUs <= 0 || op.Memory == 0 {
+		return record{}, nil, errInvalidRequest
+	}
+
+	if _, ok := z.vms[op.ID]; ok {
+		return record{}, nil, fmt.Errorf("resources for VM %d are already reserved", op.ID)
+	}
+
+	cpus, numaNodes, err := z.placement.place(z.free(), op)
+	if err != nil {
+		return record{}, nil, noRoomError{err}
+	}
+
+	rec := newRecord(op.CPUs, cpus, op.Memory, numaNodes)
+
+	u := z.usageWith(op.ID, rec)
+	if u.memory > z.memory {
+		return record{}, nil, noRoomError{fmt.Errorf("not enough memory available: requested=%d, available=%d", op.Memory, z.available(z.usage()).Memory)}
+	}
+
+	for i := range rec.numaMemory {
+		if u.numaMemory[i] > z.topo.NUMANodes[i] {
+			return record{}, nil, noRoomError{fmt.Errorf("not enough memory available on NUMA node %d", i)}
+		}
+	}
+
+	if u.sharedCPUs > z.sharedCapacity(u) {
+		return record{}, nil, noRoomError{fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, z.available(z.usage()).CPUs)}
+	}
+
+	return rec, numaNodes, nil
+}
+
 func (z *ZoneCapacity) available(u usage) Capacity {
 	c := Capacity{CPUs: max(0, z.sharedCapacity(u)-u.sharedCPUs)}
 	if u.memory < z.memory {
@@ -274,9 +334,12 @@ func (z *ZoneCapacity) free() freeResources {
 		numaMemory[i] = min(nodeFree, zoneFree)
 	}
 
+	usable := z.allCPUs.Difference(z.reservedCPUs)
+
 	return freeResources{
 		topo:       z.topo,
-		cpus:       z.allCPUs.Difference(z.reservedCPUs).Difference(u.pinnedCPUs),
+		usable:     usable,
+		cpus:       usable.Difference(u.pinnedCPUs),
 		numaMemory: numaMemory,
 	}
 }
