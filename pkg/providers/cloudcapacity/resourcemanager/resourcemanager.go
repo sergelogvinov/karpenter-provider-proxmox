@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
@@ -86,6 +87,10 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 
 			if len(setting.NUMANodes) != 0 {
 				nodeSettings.NUMANodes = setting.NUMANodes
+			}
+
+			if setting.HugePageSize != 0 {
+				nodeSettings.HugePageSize = setting.HugePageSize
 			}
 
 			log.V(1).Info("Loaded node settings from file", "file", name, "settings", nodeSettings)
@@ -184,6 +189,20 @@ func nodeSettingsFromVM(vmr *cluster.Resource, cfg *qemu.Config, nodeSettings *s
 
 	if nodeSettings.NUMANodes == nil {
 		nodeSettings.NUMANodes = make(settings.NUMANodes, len(opt.NUMANodes))
+	}
+
+	// The node-capacity guest names its hugepage pool's page size in MiB
+	// ("2" or "1024"); its NUMA memory is then the pool, not ordinary memory.
+	// The guest is the source of truth, so a pool it no longer has clears
+	// the page size, and a pool takes no host reserve: the host's own
+	// memory lies outside it.
+	nodeSettings.HugePageSize = 0
+
+	if cfg.Hugepages != nil {
+		if pageSizeMB, err := strconv.ParseUint(*cfg.Hugepages, 10, 64); err == nil {
+			nodeSettings.HugePageSize = pageSizeMB * 1024 * 1024
+			nodeSettings.ReservedMemory = 0
+		}
 	}
 
 	cpuList := []int{}
