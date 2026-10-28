@@ -61,7 +61,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	instanceType *cloudprovider.InstanceType,
 	region string,
 	zone string,
-) (*corev1.Node, error) {
+) (_ *corev1.Node, err error) {
 	log := log.FromContext(ctx).WithName("instance.instanceCreate()").WithValues("region", region, "zone", zone, "instanceType", instanceType.Name)
 
 	px, err := p.cluster.Get(region)
@@ -103,6 +103,20 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, fmt.Errorf("failed to reserve capacity: %v", err)
 	}
 
+	rollback := &launchRollback{}
+
+	defer func() {
+		if err != nil {
+			rollback.run(ctx)
+		}
+	}()
+
+	rollback.add(func(ctx context.Context) {
+		if err := p.cloudCapacityProvider.Release(ctx, region, zone, newID); err != nil {
+			log.Error(err, "failed to release capacity", "vmID", newID)
+		}
+	})
+
 	capacityType := getCapacityType(nodeClaim, instanceType, region, zone)
 
 	comments := []string{
@@ -114,24 +128,15 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		comments = append(comments, fmt.Sprintf("affinity=%s", opt.CPUSet.String()))
 	}
 
-	defer func() {
-		if err == nil || newID == 0 {
-			return
+	// Added before the clone, which can fail after Proxmox created the VM.
+	// DeleteVM stops the VM first if it is running (e.g. when creation
+	// fails after Start succeeds), unlike a bare Qemu().Delete which
+	// Proxmox refuses on a running guest and would leave it orphaned.
+	rollback.add(func(ctx context.Context) {
+		if err := p.cluster.Cluster(region).DeleteVM(ctx, &cluster.Resource{Node: zone, VMID: newID}); err != nil && !proxmoxrest.IsNotFound(err) {
+			log.Error(err, "failed to delete vm", "vmID", newID)
 		}
-
-		if relErr := p.cloudCapacityProvider.Release(ctx, region, zone, newID); relErr != nil {
-			log.Error(relErr, "failed to release capacity", "vmID", newID)
-		}
-
-		// DeleteVM stops the VM first if it is running (e.g. when creation
-		// fails after Start succeeds), unlike a bare Qemu().Delete which
-		// Proxmox refuses on a running guest and would leave it orphaned.
-		if delErr := p.cluster.Cluster(region).DeleteVM(ctx, &cluster.Resource{Node: zone, VMID: newID}); delErr != nil {
-			if !proxmoxrest.IsNotFound(delErr) {
-				log.Error(delErr, "failed to delete vm", "vmID", newID)
-			}
-		}
-	}()
+	})
 
 	if err = cloneAndConfigureVM(ctx, px, zone, vmTemplateID, newID, cloneVMParams{
 		description:      strings.Join(comments, ", "),
@@ -145,7 +150,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		return nil, err
 	}
 
-	err = p.instanceNetworkSetup(ctx, region, zone, newID)
+	err = p.instanceNetworkSetup(ctx, rollback, region, zone, newID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to configure networking for vm %d: %v", newID, err)
 	}
@@ -169,7 +174,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 	}
 
 	if nodeClass.Spec.MetadataOptions.Type == "cdrom" {
-		err = p.attachCloudInitISO(ctx, nodeClaim, nodeClass, instanceType, region, zone, newID)
+		err = p.attachCloudInitISO(ctx, rollback, nodeClaim, nodeClass, instanceType, region, zone, newID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to attach cloud-init ISO to vm %d: %v", newID, err)
 		}
