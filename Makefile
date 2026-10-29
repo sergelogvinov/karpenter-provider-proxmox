@@ -131,6 +131,10 @@ build-all: build build-scheduler build-instancetypes ## Build all binaries
 run: ## Run
 	go run ./cmd/controller -cloud-config=cloud.yaml -disable-leader-election -log-level=debug -health-probe-port=8081 -metrics-port=8080
 
+.PHONY: instancetypes
+instancetypes: ## Generate instance types
+	go run ./cmd/instancetypes generate --cpus 2,4,8 --memfactor 2,4 --cpushare 2,3 --storage 50 --kubelet --system --eviction > docs/deploy/instancetypes.json
+
 .PHONY: lint
 lint: ## Lint Code
 	golangci-lint run --config .golangci.yml

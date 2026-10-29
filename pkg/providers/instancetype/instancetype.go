@@ -170,13 +170,24 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	defer p.muInstanceTypes.Unlock()
 
 	offers := 0
+	available := make(map[string]int, len(p.instanceTypesInfo))
+	unavailable := []string{}
 
 	for _, item := range p.instanceTypesInfo {
 		p.createOfferings(item, p.cloudCapacityProvider.Regions(), item.CapacityType)
-		offers += len(item.Offerings.Available())
+
+		n := len(item.Offerings.Available())
+		offers += n
+
+		if n > 0 {
+			available[item.Name] = n
+		} else {
+			unavailable = append(unavailable, item.Name)
+		}
 	}
 
 	log.V(1).Info("Instance type offerings updated", "instanceTypes", len(p.instanceTypesInfo), "offers", offers)
+	log.V(1).Info("Instance type offerings report", "available", available, "unavailable", unavailable)
 
 	return nil
 }

@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,18 +70,15 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 	if len(guests) > 0 {
 		vmID := guests[0].VMID
 
-		// Update never sends an option the desired config leaves unset, so
-		// a hugepage pool the host no longer has must be deleted explicitly.
-		if cfg.Hugepages == nil {
-			current, err := client.Qemu().Get(ctx, vmID)
-			if err != nil {
-				return fmt.Errorf("failed to get existing VM %d config: %w", vmID, err)
-			}
-
-			if current.Hugepages != nil {
-				cfg.Delete = []string{"hugepages"}
-			}
+		current, err := client.Qemu().Get(ctx, vmID)
+		if err != nil {
+			return fmt.Errorf("failed to get existing VM %d config: %w", vmID, err)
 		}
+
+		cfg.Delete = staleOptions(current, cfg)
+
+		logger.V(1).Info("Updating Proxmox VM for Karpenter discovery service", "vmID", vmID,
+			"memory", memoryMB(current), "desiredMemory", memoryMB(cfg), "delete", cfg.Delete)
 
 		if err := client.Qemu().Update(ctx, vmID, cfg); err != nil {
 			return fmt.Errorf("failed to update existing VM %d: %w", vmID, err)
@@ -105,6 +103,30 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 	}
 
 	return nil
+}
+
+// staleOptions returns the options the node-capacity guest has but desired
+// no longer sets: Update never sends an option the desired config leaves
+// unset, so a hugepage pool or a NUMA node the host no longer reports must
+// be deleted explicitly. memory, numaX and hugepages are independent here:
+// memory is the memory available to allocate, numaX each node's hugepage
+// pool, and the guest is never started, so they need not agree.
+func staleOptions(current, desired *qemu.Config) []string {
+	var stale []string
+
+	if current.Hugepages != nil && desired.Hugepages == nil {
+		stale = append(stale, "hugepages")
+	}
+
+	for idx := range current.NUMA {
+		if _, ok := desired.NUMA[idx]; !ok {
+			stale = append(stale, fmt.Sprintf("numa%d", idx))
+		}
+	}
+
+	slices.Sort(stale)
+
+	return stale
 }
 
 // Hugepage sizes, in KiB, that Proxmox's hugepages option accepts.
@@ -170,8 +192,9 @@ func poolMB(pools []info.HugePagesInfo, pageSize uint64) int {
 }
 
 // buildVMConfig builds the node-capacity guest's desired configuration
-// as a typed *qemu.Config. On a host with a hugepage pool the memory it
-// reports is the pool's, per NUMA node, not the host's ordinary memory.
+// as a typed *qemu.Config. Its memory is always the host's ordinary memory
+// less the host reserve; on a host with a hugepage pool each NUMA node's
+// memory is the node's pool instead.
 func buildVMConfig(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
 	totalCores := serverInfo.NumCores
 	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))
@@ -190,7 +213,6 @@ func buildVMConfig(logger logr.Logger, serverInfo *info.MachineInfo, tp *topolog
 
 	if pageSize > 0 {
 		cfg.Hugepages = new(strconv.FormatUint(pageSize/1024, 10))
-		totalMemoryMB = poolMB(serverInfo.HugePages, pageSize)
 	}
 
 	if len(serverInfo.Topology) > 0 {
@@ -215,19 +237,19 @@ func buildVMConfig(logger logr.Logger, serverInfo *info.MachineInfo, tp *topolog
 			}
 
 			memoryInNode *= 1024
+			totalMemoryMB += memoryInNode
 
+			numaMemory := memoryInNode
 			if pageSize > 0 {
 				// A node without pages of this size reports 0, but keeps
 				// its CPUs.
-				memoryInNode = poolMB(nodeInfo.HugePages, pageSize)
+				numaMemory = poolMB(nodeInfo.HugePages, pageSize)
 			}
-
-			totalMemoryMB += memoryInNode
 
 			numa[idx] = qemu.NUMA{
 				CPUIDs:    []string{fmt.Sprintf("%d-%d", cpush, cpush+cpus.Size()-1)},
 				HostNodes: []string{strconv.Itoa(nodeInfo.Id)},
-				Memory:    &memoryInNode,
+				Memory:    &numaMemory,
 			}
 
 			cpush += cpus.Size()

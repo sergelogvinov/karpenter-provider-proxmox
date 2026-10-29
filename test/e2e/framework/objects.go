@@ -212,7 +212,7 @@ func NewNodePool(opts NodePoolOptions) *karpv1.NodePool {
 						{
 							Key:      corev1.LabelInstanceTypeStable,
 							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"c1.2VCPU-4GB", "t1.2VCPU-6GB", "c1.4VCPU-8GB"},
+							Values:   []string{"e2.2VCPU-4GB", "c1.2VCPU-4GB", "t1.2VCPU-6GB", "c1.4VCPU-8GB"},
 						},
 					},
 				},
