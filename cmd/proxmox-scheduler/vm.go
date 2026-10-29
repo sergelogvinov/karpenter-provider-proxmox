@@ -81,11 +81,11 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 	r.logger.Info("VM config loaded", "vmID", vmID, "name", vmConfig.Name,
 		"memoryMB", memoryMB(vmConfig), "cores", lo.FromPtr(vmConfig.Cores))
 
+	r.applyMu.Lock()
+
 	if err := r.trackVM(vmID, pid, vmConfig, true); err != nil {
 		r.logger.Error(err, "Failed to track VM", "vmID", vmID)
 	}
-
-	r.applyMu.Lock()
 
 	plan := r.plan()
 	r.logNotes(plan)
@@ -191,6 +191,7 @@ func (r *SchedulerHandler) handleVMStop(ctx context.Context, vmID int) {
 // trackVM records a running VM's process and config. A fresh track (a start), or a
 // VM restarted with a new PID, forgets what was applied: it held for the old process.
 // An error means the zone could not read the config; the VM is still tracked.
+// Callers hold applyMu, so a rebalance never interleaves with tracking.
 func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config, fresh bool) error {
 	if r.tracker.track(vmID, pid, fresh) {
 		r.zone.Release(vmID)
@@ -199,7 +200,7 @@ func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config, fresh b
 	return r.zone.Track(vmFromConfig(vmID, vmConfig))
 }
 
-// forgetVM drops a stopped VM, returning what was tracked for it.
+// forgetVM drops a stopped VM, returning what was tracked for it. Callers hold applyMu.
 func (r *SchedulerHandler) forgetVM(vmID int) (trackedVM, bool) {
 	vm, ok := r.tracker.forget(vmID)
 	r.zone.Release(vmID)

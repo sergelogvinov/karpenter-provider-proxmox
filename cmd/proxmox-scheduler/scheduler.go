@@ -230,9 +230,13 @@ func (r *SchedulerHandler) handleSyncEvent(ctx context.Context) error {
 // syncRunning tracks exactly the VMs in running (VM ID to PID). It never runs taskset
 // itself: a pinned VM's affinity is taken as applied, as Proxmox started it with it.
 func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int) {
+	r.applyMu.Lock()
+
 	for _, vmID := range r.tracker.notIn(running) {
 		r.forgetVM(vmID)
 	}
+
+	r.applyMu.Unlock()
 
 	for vmID, pid := range running {
 		vmConfig, err := loadVMConfig(ctx, r.client, vmID)
@@ -243,7 +247,11 @@ func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int)
 			continue
 		}
 
-		if err := r.trackVM(vmID, pid, vmConfig, false); err != nil {
+		r.applyMu.Lock()
+		err = r.trackVM(vmID, pid, vmConfig, false)
+		r.applyMu.Unlock()
+
+		if err != nil {
 			r.logger.Error(err, "Failed to track VM", "vmID", vmID, "pid", pid)
 		}
 	}
@@ -367,6 +375,15 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 		return
 	}
 
+	// A dead VM's CPUs were still in this plan; plan again without it.
+	if r.applyPlan(ctx) {
+		r.scheduleRebalance(ctx)
+	}
+}
+
+// applyPlan plans and applies the partition under applyMu. It reports whether it
+// dropped a VM whose process had died.
+func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
 
@@ -380,7 +397,7 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 		}
 
 		if ctx.Err() != nil {
-			return
+			return droppedDead
 		}
 
 		vm, ok := r.tracker.get(vmID)
@@ -391,7 +408,12 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 		if !utilsys.ProcessExists(vm.pid) {
 			// Its stop event is on the way; until then it must not hold CPUs nor be retried.
 			r.logger.V(1).Info("Shared VM process no longer exists, skipping", "vmID", vmID, "pid", vm.pid)
-			r.forgetVM(vmID)
+
+			if r.tracker.forgetPID(vmID, vm.pid) {
+				r.zone.Release(vmID)
+
+				droppedDead = true
+			}
 
 			continue
 		}
@@ -409,6 +431,8 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 	busy := plan.Busy.Intersection(plan.Unpinned)
 	r.setGovernor(0, busy, *cpuGovernorBusy)
 	r.setGovernor(0, plan.Unpinned.Difference(busy), *cpuGovernorFree)
+
+	return droppedDead
 }
 
 // applyCPUs sets a's CPUs on VM vmID's threads and records them as applied once
@@ -421,7 +445,7 @@ func (r *SchedulerHandler) applyCPUs(ctx context.Context, vmID, pid int, a zonec
 	}
 
 	if a.OneToOne() {
-		if err := utilsys.PinThreadsToCores(ctx, vmID, pid, threads, a.CPUs.UnsortedList()); err != nil {
+		if err := utilsys.PinThreadsToCores(ctx, vmID, pid, threads, a.CPUs.List()); err != nil {
 			return fmt.Errorf("failed to pin VM %d threads to cores: %w", vmID, err)
 		}
 	} else {
