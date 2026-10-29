@@ -133,7 +133,7 @@ run: ## Run
 
 .PHONY: instancetypes
 instancetypes: ## Generate instance types
-	go run ./cmd/instancetypes generate --cpus 2,4,8 --memfactor 2,4 --cpushare 2,3 --storage 50 --kubelet --system --eviction > docs/deploy/instancetypes.json
+	go run ./cmd/instancetypes generate --cpus 2,4,8 --memfactor 2,4 --cpushare 2,3 --numa 1,2 --storage 50 --kubelet --system --eviction > docs/deploy/instancetypes.json
 
 .PHONY: lint
 lint: ## Lint Code

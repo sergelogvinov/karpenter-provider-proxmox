@@ -123,3 +123,29 @@ func TestGenerateRejectsInvalidLists(t *testing.T) {
 		require.ErrorContains(t, err, tc.want, "%v", tc.args)
 	}
 }
+
+func TestGenerateNUMA(t *testing.T) {
+	t.Parallel()
+
+	instanceTypes, err := runGenerateCLI("--cpus", "2", "--memfactor", "2", "--cpushare", "2", "--numa", " 1,2, 4,2")
+	require.NoError(t, err)
+
+	got := map[string]int{}
+	for _, it := range instanceTypes {
+		got[it.Name] = it.NUMA
+	}
+
+	require.Equal(t, map[string]int{"c1.2VCPU-4GB": 0, "e2.2VCPU-4GB": 0, "n1": 1, "n2": 2, "n4": 4}, got)
+}
+
+func TestGenerateRejectsInvalidNUMA(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{"0", "3", "1,8"} {
+		_, err := runGenerateCLI("--numa", value)
+		require.ErrorContains(t, err, zonecapacity.SlotFractions, "--numa %s", value)
+	}
+
+	_, err := runGenerateCLI("--numa", "one")
+	require.ErrorContains(t, err, "--numa")
+}

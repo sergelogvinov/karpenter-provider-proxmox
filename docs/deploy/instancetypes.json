@@ -424,5 +424,23 @@
       }
     },
     "cpushare": 3
+  },
+  {
+    "name": "n1",
+    "capacity": {
+      "ephemeral-storage": "50Gi",
+      "pods": "110"
+    },
+    "capacitytype": "on-demand",
+    "numa": 1
+  },
+  {
+    "name": "n2",
+    "capacity": {
+      "ephemeral-storage": "50Gi",
+      "pods": "110"
+    },
+    "capacitytype": "on-demand",
+    "numa": 2
   }
 ]
