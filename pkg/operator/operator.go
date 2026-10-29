@@ -99,6 +99,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		cloudCapacityProvider,
 		nodeIpamController,
 		instanceTemplateProvider,
+		instanceTypeProvider,
 	)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")

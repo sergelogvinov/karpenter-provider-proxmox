@@ -30,8 +30,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -63,7 +61,9 @@ type Provider interface {
 	// Zones returns a list of zones available in the specified region.
 	Zones(region string) []string
 
-	FitInZone(region, zone string, req corev1.ResourceList) bool
+	// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
+	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, any other error otherwise.
+	FitInZone(region, zone string, req resources.VMResources) error
 
 	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
 	GetNetwork(region string, node string, filter ...func(*NodeNetworkIfaceInfo) bool) *NodeNetworkIfaceInfo
@@ -477,20 +477,18 @@ func (p *DefaultProvider) Zones(region string) []string {
 	return p.zoneList[region]
 }
 
-// FitInZone reports whether a VM of req's CPU and memory has a fit in the zone now.
-func (p *DefaultProvider) FitInZone(region, zone string, req corev1.ResourceList) bool {
+// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
+// zonecapacity.ErrNotOffered when the zone's node policy never offers it, any other error otherwise.
+func (p *DefaultProvider) FitInZone(region, zone string, req resources.VMResources) error {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
 	info, ok := p.capacityInfo[zoneKey(region, zone)]
 	if !ok || info.Capacity == nil || info.omitted {
-		return false
+		return fmt.Errorf("zone %s/%s is unavailable", region, zone)
 	}
 
-	_, err := info.Capacity.Fit(resources.VMResources{
-		CPUs:   int(req.Cpu().Value()),
-		Memory: uint64(req.Memory().Value()),
-	})
+	_, err := info.Capacity.Fit(req)
 
-	return err == nil
+	return err
 }

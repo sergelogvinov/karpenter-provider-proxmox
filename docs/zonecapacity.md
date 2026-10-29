@@ -71,13 +71,15 @@ type VM struct {
     Description string         // `affinity=` fallback and `cpushare=N` tokens
     Tags        []string       // `karpenter` on the `node-capacity` VM marks the node-capacity guest, which is ignored
     NUMAMemory  map[int]uint64 // host NUMA node -> bound bytes, from numaN hostnodes
+    CPUShare    int            // Reserve/Fit: ask for a CPU share VM of N seats (2, 3 or 4); wins over the token
     Slot        *SlotShape     // Reserve/Fit only: ask for a strict NUMA slot of this shape
 }
 
 // Policy is the node policy, passed only where the controller needs it.
 type Policy struct {
-    Pinned bool    // static
-    Ratio  float64 // CPU overcommit ratio for shared placement; 0 means 1
+    Pinned     bool    // static
+    Overcommit bool    // simple-with-cpu-overcommit: no CPU share VMs; one made by hand counts as shared
+    Ratio      float64 // CPU overcommit ratio for shared placement; 0 means 1
 }
 
 // Bookkeeping, both binaries.

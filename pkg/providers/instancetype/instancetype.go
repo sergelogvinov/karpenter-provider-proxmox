@@ -19,6 +19,7 @@ package instancetype
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -30,8 +31,11 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -43,6 +47,9 @@ type Provider interface {
 	List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error)
 	ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType
 	Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error)
+	// CPUShare is the number of VMs that share the CPUs of instance type name: 2, 3 or 4.
+	// Zero means dedicated CPUs, or an unknown instance type.
+	CPUShare(name string) int
 
 	UpdateInstanceTypes(context.Context) error
 	UpdateInstanceTypeOfferings(context.Context) error
@@ -119,6 +126,19 @@ func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.
 	return filtered[0], nil
 }
 
+func (p *DefaultProvider) CPUShare(name string) int {
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
+
+	for _, item := range p.instanceTypesInfo {
+		if item.Name == name {
+			return item.CPUShare
+		}
+	}
+
+	return 0
+}
+
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
@@ -169,13 +189,34 @@ func priceFromResources(resources corev1.ResourceList) float64 {
 	return price
 }
 
+// priceOf is the price of an instance type: a CPU share type pays for vCPU/N CPUs and its full memory.
+func priceOf(opts *InstanceTypeStatic) float64 {
+	if opts.CPUShare == 0 {
+		return priceFromResources(opts.Capacity)
+	}
+
+	capacity := opts.Capacity.DeepCopy()
+	capacity[corev1.ResourceCPU] = *resource.NewMilliQuantity(opts.Capacity.Cpu().MilliValue()/int64(opts.CPUShare), resource.DecimalSI)
+
+	return priceFromResources(capacity)
+}
+
 func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []string, capacityType string) {
 	opts.Offerings = []*cloudprovider.Offering{}
-	price := priceFromResources(opts.Capacity)
+	price := priceOf(opts)
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
-			available := p.cloudCapacityProvider.FitInZone(region, zone, opts.Capacity)
+			err := p.cloudCapacityProvider.FitInZone(region, zone, resources.VMResources{
+				CPUs:     int(opts.Capacity.Cpu().Value()),
+				Memory:   uint64(opts.Capacity.Memory().Value()),
+				CPUShare: opts.CPUShare,
+			})
+			if errors.Is(err, zonecapacity.ErrNotOffered) {
+				continue
+			}
+
+			available := err == nil
 
 			// We use capacityType array to allow multiple capacity types per instance type in the future
 			for _, ct := range lo.Uniq([]string{capacityType}) {
@@ -233,6 +274,10 @@ func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {
 	}
 
 	for _, i := range instanceTypeStatic {
+		if i.CPUShare != 0 && !zonecapacity.ValidCPUShare(i.CPUShare) {
+			return nil, fmt.Errorf("instance type %s in %s: cpushare %d must be 0, 2, 3 or 4", i.Name, name, i.CPUShare)
+		}
+
 		if i.CapacityType == "" {
 			i.CapacityType = karpv1.CapacityTypeOnDemand
 		}

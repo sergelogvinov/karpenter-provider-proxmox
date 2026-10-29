@@ -37,6 +37,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
@@ -68,6 +69,7 @@ type DefaultProvider struct {
 	cloudCapacityProvider       cloudcapacity.Provider
 	nodeIpamProvider            nodeipam.Provider
 	instanceTemplateProvider    instancetemplate.Provider
+	instanceTypeProvider        instancetype.Provider
 }
 
 func NewProvider(
@@ -78,6 +80,7 @@ func NewProvider(
 	cloudCapacityProvider cloudcapacity.Provider,
 	nodeIpamController nodeipam.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
+	instanceTypeProvider instancetype.Provider,
 ) (*DefaultProvider, error) {
 	return &DefaultProvider{
 		kubernetesInterface:         kubernetesInterface,
@@ -86,6 +89,7 @@ func NewProvider(
 		cloudCapacityProvider:       cloudCapacityProvider,
 		nodeIpamProvider:            nodeIpamController,
 		instanceTemplateProvider:    instanceTemplateProvider,
+		instanceTypeProvider:        instanceTypeProvider,
 	}, nil
 }
 
@@ -159,9 +163,10 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				}
 
 				zone, reserved, err := p.cloudCapacityProvider.ChooseZone(ctx, region, candidates, nodeClass.Spec.PlacementStrategy, resources.VMResources{
-					ID:     newID,
-					CPUs:   int(instanceType.Capacity.Cpu().Value()),
-					Memory: uint64(instanceType.Capacity.Memory().Value()),
+					ID:       newID,
+					CPUs:     int(instanceType.Capacity.Cpu().Value()),
+					Memory:   uint64(instanceType.Capacity.Memory().Value()),
+					CPUShare: p.instanceTypeProvider.CPUShare(instanceType.Name),
 				})
 				if err != nil {
 					log.Info("No zone has room for instance type", "region", region, "instanceType", instanceType.Name, "reason", err.Error())

@@ -82,6 +82,9 @@ func TestZoneErrorContract(t *testing.T) {
 		"ratio below one":      {policy: zonecapacity.Policy{CPUOvercommitRatio: 0.5}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
 		"ratio not a number":   {policy: zonecapacity.Policy{CPUOvercommitRatio: math.NaN()}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
 		"ratio infinite":       {policy: zonecapacity.Policy{CPUOvercommitRatio: math.Inf(1)}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
+		"CPU share overcommit": {policy: zonecapacity.Policy{Overcommit: true}, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, CPUShare: 2}, want: zonecapacity.ErrNotOffered},
+		"CPU share bad seats":  {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, CPUShare: 5}, want: zonecapacity.ErrInvalid},
+		"too many share CPUs":  {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 14, Memory: gib, CPUShare: 2}, want: zonecapacity.ErrNoRoom},
 		"fits":                 {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -132,6 +135,7 @@ func TestZoneReserveRequiresID(t *testing.T) {
 // vmFromGrant is the VM a launch writes from a Grant, as the zone later reads it back:
 // the description tokens and the NUMA memory bound to each host node.
 func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
+	vm.CPUShare = 0
 	vm.Description = strings.Join(append([]string{"Karpenter managed instance"}, grant.DescriptionTokens...), ", ")
 
 	if len(grant.NUMA) > 0 {
@@ -149,7 +153,7 @@ func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
 func TestZoneRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range []zonecapacity.Policy{static, shared, {CPUOvercommitRatio: 1.5}} {
+	for _, p := range []zonecapacity.Policy{static, shared, {Overcommit: true, CPUOvercommitRatio: 1.5}} {
 		rng := rand.New(rand.NewPCG(269, 1))
 
 		reserved := newZone(t, pinnedHost, 0)
@@ -157,6 +161,10 @@ func TestZoneRoundTrip(t *testing.T) {
 
 		for id := 1; id <= 40; id++ {
 			vm := zonecapacity.VM{ID: id, CPUs: 1 + rng.IntN(6), Memory: uint64(1+rng.IntN(8)) * gib / 2}
+			if seats := rng.IntN(5); !p.Overcommit && seats >= 2 {
+				vm.CPUShare = seats
+				vm.CPUs = 2 * (1 + rng.IntN(2))
+			}
 
 			grant, err := reserved.Reserve(p, vm)
 			if err != nil {

@@ -30,9 +30,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // twoZones are two 8-CPU, 16GiB zones on one NUMA node each, 15GiB of each allocatable.
@@ -242,15 +239,12 @@ func TestFitInZoneAgreesWithReserve(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	request := func(memory uint64) corev1.ResourceList {
-		return corev1.ResourceList{
-			corev1.ResourceCPU:    *resource.NewQuantity(1, resource.DecimalSI),
-			corev1.ResourceMemory: *resource.NewQuantity(int64(memory), resource.BinarySI),
-		}
+	request := func(memory uint64) resources.VMResources {
+		return resources.VMResources{CPUs: 1, Memory: memory}
 	}
 
-	require.True(t, p.FitInZone(region, "pve-1", request(3*gib)))
-	require.False(t, p.FitInZone(region, "pve-1", request(4*gib)), "one CPU cannot take 4GiB from a NUMA node with 3GiB free")
+	require.NoError(t, p.FitInZone(region, "pve-1", request(3*gib)))
+	require.Error(t, p.FitInZone(region, "pve-1", request(4*gib)), "one CPU cannot take 4GiB from a NUMA node with 3GiB free")
 
 	_, err := p.Reserve(ctx, region, "pve-1", resources.VMResources{ID: 102, CPUs: 1, Memory: 4 * gib})
 	require.Error(t, err)

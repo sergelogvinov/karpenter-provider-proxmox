@@ -32,12 +32,16 @@ type InstanceTypeStatic struct {
 	CapacityType string                              `json:"capacitytype,omitempty"`
 	Overhead     *cloudprovider.InstanceTypeOverhead `json:"overhead,omitempty"`
 	Offerings    cloudprovider.Offerings             `json:"offerings,omitempty"`
+	// CPUShare is the number of VMs that share the instance's CPUs: 2, 3 or 4. Zero means dedicated CPUs.
+	CPUShare int `json:"cpushare,omitempty"`
 }
 
 type InstanceTypeOptions struct {
 	CPUs       []int
 	MemFactors []int
 	Storage    int
+	// CPUShares adds a CPU share family e<N> of the same sizes for each N (2, 3 or 4).
+	CPUShares []int
 
 	KubeletOverhead   bool
 	SystemOverhead    bool
@@ -45,6 +49,17 @@ type InstanceTypeOptions struct {
 }
 
 func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
+	instanceTypes := o.generate(0)
+
+	for _, share := range o.CPUShares {
+		instanceTypes = append(instanceTypes, o.generate(share)...)
+	}
+
+	return instanceTypes
+}
+
+// generate returns the instance types of every size, CPU share types of share seats unless share is 0.
+func (o *InstanceTypeOptions) generate(share int) []*InstanceTypeStatic {
 	instanceTypes := []*InstanceTypeStatic{}
 
 	for _, cpu := range o.CPUs {
@@ -70,10 +85,16 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 				capacity[corev1.ResourceEphemeralStorage] = resource.MustParse(fmt.Sprintf("%dGi", o.Storage))
 			}
 
+			name := makeGenericInstanceTypeName(cpu, memFactor)
+			if share > 0 {
+				name = fmt.Sprintf("e%d.%dVCPU-%dGB", share, cpu, cpu*memFactor)
+			}
+
 			instanceType := InstanceTypeStatic{
-				Name:         makeGenericInstanceTypeName(cpu, memFactor),
+				Name:         name,
 				Capacity:     capacity,
 				CapacityType: karpv1.CapacityTypeOnDemand,
+				CPUShare:     share,
 			}
 
 			if o.KubeletOverhead || o.SystemOverhead || o.EvictionThreshold {

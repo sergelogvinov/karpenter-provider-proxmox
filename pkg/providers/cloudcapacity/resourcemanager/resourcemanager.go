@@ -109,7 +109,7 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 	case policyStatic:
 		policy = zonecapacity.Policy{Pinned: true}
 	case policySimpleWithCPUOvercommit:
-		policy = zonecapacity.Policy{CPUOvercommitRatio: opts.CPUOvercommitRatio}
+		policy = zonecapacity.Policy{Overcommit: true, CPUOvercommitRatio: opts.CPUOvercommitRatio}
 	}
 
 	capacity, err := NewZoneCapacity(zonecapacity.Host{

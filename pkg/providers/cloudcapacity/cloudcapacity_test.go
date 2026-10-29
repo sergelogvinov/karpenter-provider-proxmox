@@ -30,9 +30,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
@@ -91,10 +88,7 @@ func reserve(ctx context.Context, p *cloudcapacity.DefaultProvider, req resource
 }
 
 func fits(p *cloudcapacity.DefaultProvider, cpus int64, memory uint64) bool {
-	return p.FitInZone(region, zone, corev1.ResourceList{
-		corev1.ResourceCPU:    *resource.NewQuantity(cpus, resource.DecimalSI),
-		corev1.ResourceMemory: *resource.NewQuantity(int64(memory), resource.BinarySI),
-	})
+	return p.FitInZone(region, zone, resources.VMResources{CPUs: int(cpus), Memory: memory}) == nil
 }
 
 func TestReserveReturnsSharedPlacement(t *testing.T) {
