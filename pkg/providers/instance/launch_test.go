@@ -54,6 +54,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 
+	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -230,7 +231,7 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	)
 	kube.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.34.0"}
 
-	instanceTypes := instancetype.NewDefaultProvider(ctx, capacity)
+	instanceTypes := instancetype.NewDefaultProvider(ctx, capacity, crfake.NewClientBuilder().Build())
 	require.NoError(t, instanceTypes.UpdateInstanceTypes(ctx))
 
 	p, err := instance.NewProvider(ctx, kube, bootstrap.NewProvider(ctx, kube), pool, capacity,

@@ -19,6 +19,7 @@ package instancetype
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/samber/lo"
 
@@ -167,6 +168,22 @@ func makeGenericInstanceTypeName(cpu, memFactor, share int) string {
 // instanceTypeName is the name <family>.<vCPU>VCPU-<memory>GB of every generated instance type (see ADR 0002).
 func instanceTypeName(family string, cpu, memoryGB int) string {
 	return fmt.Sprintf("%s.%dVCPU-%dGB", family, cpu, memoryGB)
+}
+
+// parseInstanceTypeName is the inverse of instanceTypeName: the family, vCPUs and memory in GB of name, and whether
+// name is exactly what instanceTypeName makes of them, with at least one vCPU and one GB.
+func parseInstanceTypeName(name string) (family string, cpu, memoryGB int, ok bool) {
+	family, shape, found := strings.Cut(name, ".")
+	if !found || family == "" {
+		return "", 0, 0, false
+	}
+
+	if _, err := fmt.Sscanf(shape, "%dVCPU-%dGB", &cpu, &memoryGB); err != nil || cpu < 1 || memoryGB < 1 ||
+		instanceTypeName(family, cpu, memoryGB) != name {
+		return "", 0, 0, false
+	}
+
+	return family, cpu, memoryGB, true
 }
 
 func systemReservedResources(_ *corev1.ResourceList) corev1.ResourceList {

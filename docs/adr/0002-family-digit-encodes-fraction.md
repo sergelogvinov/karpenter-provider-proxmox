@@ -10,3 +10,5 @@ The NUMA families are `n1`, `n2` and `n4` (a whole, half or quarter NUMA slot), 
 ## Consequences
 
 Instance type names are stamped on nodes and compared by drift detection, so renaming a family later replaces every node of it. The digit means two different things across families (`c1` a generation, `n2` a fraction); readers have to know which family they are looking at.
+
+A kept NUMA type whose slot shape is gone from every zone (docs/scheduler-numa.md §6.1) is rebuilt from its name: its CPUs and memory are read back from the `<family>.<vCPU>VCPU-<memory>GB` format this provider generates, while its slot fraction still comes from the family's NUMA template, never from the name. This reads a name, which the rejected option above avoids, but only the part this provider writes itself and never an operator's family name; nothing else records a NodeClaim's slot shape once the host no longer offers it, and the alternative is rolling those nodes.

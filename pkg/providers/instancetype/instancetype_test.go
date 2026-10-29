@@ -31,6 +31,9 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -60,6 +63,32 @@ func newProvider(t *testing.T, policy, file string) (*instancetype.DefaultProvid
 // newProviderOn is newProvider on the zones of region, described by the node settings file nodes,
 // with the VMs setup adds to the cluster, if any, before the sync.
 func newProviderOn(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cluster), zones ...string) (*instancetype.DefaultProvider, error) {
+	t.Helper()
+
+	f, err := newFixture(t, policy, nodes, file, setup, zones...)
+	if err != nil {
+		return nil, err
+	}
+
+	return f.p, nil
+}
+
+// fixture is an instance type provider on fake Proxmox zones, with the node settings file and the
+// NodeClaims of the cluster it sees.
+type fixture struct {
+	t         *testing.T
+	ctx       context.Context //nolint:containedctx
+	nodesFile string
+	typesFile string
+	capacity  *cloudcapacity.DefaultProvider
+	kube      client.Client
+	p         *instancetype.DefaultProvider
+	// listErr, when set, fails the provider's listing of the NodeClaims.
+	listErr error
+}
+
+// newFixture is newProviderOn, keeping what a test needs to change the hosts or the NodeClaims later.
+func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cluster), zones ...string) (*fixture, error) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -97,14 +126,50 @@ func newProviderOn(t *testing.T, policy, nodes, file string, setup func(*fakeapi
 	capacity := cloudcapacity.NewProvider(ctx, pool)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
 
-	p := instancetype.NewDefaultProvider(ctx, capacity)
-	if err := p.UpdateInstanceTypes(ctx); err != nil {
+	f := &fixture{t: t, ctx: ctx, nodesFile: settingsFile, typesFile: typesFile, capacity: capacity}
+	f.kube = fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if f.listErr != nil {
+				return f.listErr
+			}
+
+			return c.List(ctx, list, opts...)
+		},
+	}).Build()
+
+	f.p = instancetype.NewDefaultProvider(ctx, capacity, f.kube)
+	if err := f.p.UpdateInstanceTypes(ctx); err != nil {
 		return nil, err
 	}
 
-	require.NoError(t, p.UpdateInstanceTypeOfferings(ctx))
+	require.NoError(t, f.p.UpdateInstanceTypeOfferings(ctx))
 
-	return p, nil
+	return f, nil
+}
+
+// setHosts replaces the node settings file with nodes, then syncs the zones and refreshes the offerings.
+func (f *fixture) setHosts(nodes string) {
+	f.t.Helper()
+
+	f.syncHosts(nodes)
+	require.NoError(f.t, f.p.UpdateInstanceTypeOfferings(f.ctx))
+}
+
+// syncHosts replaces the node settings file with nodes and syncs the zones, without refreshing the offerings.
+func (f *fixture) syncHosts(nodes string) {
+	f.t.Helper()
+
+	require.NoError(f.t, os.WriteFile(f.nodesFile, []byte(nodes), 0o600))
+	require.NoError(f.t, f.capacity.SyncNodeCapacity(f.ctx))
+}
+
+// setTypes replaces the instance types file with file, then reloads the instance types and refreshes the offerings.
+func (f *fixture) setTypes(file string) {
+	f.t.Helper()
+
+	require.NoError(f.t, os.WriteFile(f.typesFile, []byte(file), 0o600))
+	require.NoError(f.t, f.p.UpdateInstanceTypes(f.ctx))
+	require.NoError(f.t, f.p.UpdateInstanceTypeOfferings(f.ctx))
 }
 
 func offerings(t *testing.T, p *instancetype.DefaultProvider, name string) cloudprovider.Offerings {
