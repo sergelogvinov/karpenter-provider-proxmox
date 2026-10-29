@@ -79,10 +79,10 @@ func TestZoneErrorContract(t *testing.T) {
 		"already reserved":     {policy: static, vm: zonecapacity.VM{ID: 1, CPUs: 1, Memory: gib}, want: zonecapacity.ErrExists},
 		"no CPUs":              {policy: static, vm: zonecapacity.VM{ID: 2, Memory: gib}, want: zonecapacity.ErrInvalid},
 		"no memory":            {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 1}, want: zonecapacity.ErrInvalid},
-		"ratio below one":      {policy: zonecapacity.Policy{CPUOvercommitRatio: 0.5}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
-		"ratio not a number":   {policy: zonecapacity.Policy{CPUOvercommitRatio: math.NaN()}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
-		"ratio infinite":       {policy: zonecapacity.Policy{CPUOvercommitRatio: math.Inf(1)}, vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
-		"CPU share overcommit": {policy: zonecapacity.Policy{Overcommit: true}, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, CPUShare: 2}, want: zonecapacity.ErrNotOffered},
+		"ratio below one":      {policy: overcommitAt(0.5), vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
+		"ratio not a number":   {policy: overcommitAt(math.NaN()), vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
+		"ratio infinite":       {policy: overcommitAt(math.Inf(1)), vm: zonecapacity.VM{ID: 2, CPUs: 1, Memory: gib}, want: zonecapacity.ErrInvalid},
+		"CPU share overcommit": {policy: overcommitAt(0), vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, CPUShare: 2}, want: zonecapacity.ErrNotOffered},
 		"CPU share bad seats":  {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, CPUShare: 5}, want: zonecapacity.ErrInvalid},
 		"too many share CPUs":  {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 14, Memory: gib, CPUShare: 2}, want: zonecapacity.ErrNoRoom},
 		"fits":                 {policy: static, vm: zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib}},
@@ -117,7 +117,7 @@ func TestZoneAvailableRejectsHugeRatio(t *testing.T) {
 	t.Parallel()
 
 	z := newZone(t, sharedHost)
-	require.Equal(t, zonecapacity.Capacity{}, z.Available(zonecapacity.Policy{CPUOvercommitRatio: math.MaxFloat64}))
+	require.Equal(t, zonecapacity.Capacity{}, z.Available(overcommitAt(math.MaxFloat64)))
 }
 
 func TestZoneReserveRequiresID(t *testing.T) {
@@ -153,7 +153,7 @@ func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
 func TestZoneRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range []zonecapacity.Policy{static, shared, {Overcommit: true, CPUOvercommitRatio: 1.5}} {
+	for _, p := range []zonecapacity.Policy{static, shared, overcommitAt(1.5)} {
 		rng := rand.New(rand.NewPCG(269, 1))
 
 		reserved := newZone(t, pinnedHost, 0)
@@ -161,7 +161,7 @@ func TestZoneRoundTrip(t *testing.T) {
 
 		for id := 1; id <= 40; id++ {
 			vm := zonecapacity.VM{ID: id, CPUs: 1 + rng.IntN(6), Memory: uint64(1+rng.IntN(8)) * gib / 2}
-			if seats := rng.IntN(5); !p.Overcommit && seats >= 2 {
+			if seats := rng.IntN(5); p.Kind != zonecapacity.PolicyOvercommit && seats >= 2 {
 				vm.CPUShare = seats
 				vm.CPUs = 2 * (1 + rng.IntN(2))
 			}

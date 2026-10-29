@@ -103,13 +103,13 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", zone, err)
 	}
 
-	policy := zonecapacity.Policy{CPUOvercommitRatio: 1}
+	policy := zonecapacity.Policy{Kind: zonecapacity.PolicySimple}
 
 	switch opts.NodePolicy {
 	case policyStatic:
-		policy = zonecapacity.Policy{Pinned: true}
+		policy = zonecapacity.Policy{Kind: zonecapacity.PolicyStatic}
 	case policySimpleWithCPUOvercommit:
-		policy = zonecapacity.Policy{Overcommit: true, CPUOvercommitRatio: opts.CPUOvercommitRatio}
+		policy = zonecapacity.Policy{Kind: zonecapacity.PolicyOvercommit, CPUOvercommitRatio: opts.CPUOvercommitRatio}
 	}
 
 	capacity, err := NewZoneCapacity(zonecapacity.Host{

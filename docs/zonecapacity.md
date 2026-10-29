@@ -77,10 +77,14 @@ type VM struct {
 
 // Policy is the node policy, passed only where the controller needs it.
 type Policy struct {
-    Pinned     bool    // static
-    Overcommit bool    // simple-with-cpu-overcommit: no CPU share VMs; one made by hand counts as shared
-    Ratio      float64 // CPU overcommit ratio for shared placement; 0 means 1
+    Kind               PolicyKind // PolicySimple, PolicyStatic or PolicyOvercommit
+    CPUOvercommitRatio float64    // PolicyOvercommit only: shared vCPUs per unpinned CPU; 0 means 1
 }
+
+// PolicySimple:     shared placement, one shared vCPU per unpinned CPU (`simple`).
+// PolicyStatic:     pinned placement (`static`).
+// PolicyOvercommit: shared placement at CPUOvercommitRatio (`simple-with-cpu-overcommit`). No CPU share VM is
+//                   offered; one created by hand gets shared placement instead of a seat in a CPU share group.
 
 // Bookkeeping, both binaries.
 func (z *Zone) Track(vm VM) error
@@ -146,7 +150,8 @@ type Plan struct {
   1. the node-capacity guest (named `node-capacity` and tagged `karpenter`): ignored, never counted. Workload VMs
      often carry the `karpenter` tag too, so the tag alone is not enough,
   2. an affinity (option, or `affinity=` token) with `cores == |affinity|`: pinned,
-  3. any other affinity: constrained (a `cpushare` token next to an affinity is ignored, with a note),
+  3. any other affinity: constrained (a `cpushare` token next to an affinity is ignored, and `Track` returns
+     `ErrTokenIgnored` as a warning),
   4. a `cpushare=N` token: CPU share VM,
   5. otherwise: floating.
 - **One count.** `eCPUs = Σ ceil(count/N) × vCPU` over each `(N, vCPU)` class is computed by one internal function.
@@ -177,6 +182,7 @@ type Plan struct {
 | `ErrNotOffered` | a CPU share VM under overcommit, or a slot under shared placement | the type has no offering here; permanent for the policy |
 | `ErrExists` | `Reserve` on an ID that has a record | bug in the caller |
 | `ErrInvalid` | no ID, no CPUs/memory for `Reserve`/`Fit`, unparseable affinity or token, bad ratio | bug or bad config |
+| `ErrTokenIgnored` | `Track`: a `cpushare` token next to an affinity; the VM is recorded and holds its affinity | log a warning |
 
 `Release` of an unknown ID is a no-op. `Plan` never fails; problems come back in `Notes`.
 

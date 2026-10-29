@@ -34,8 +34,8 @@ import (
 const gib = uint64(1 << 30)
 
 var (
-	sharedPolicy = zonecapacity.Policy{CPUOvercommitRatio: 1}
-	staticPolicy = zonecapacity.Policy{Pinned: true}
+	sharedPolicy = zonecapacity.Policy{Kind: zonecapacity.PolicySimple}
+	staticPolicy = zonecapacity.Policy{Kind: zonecapacity.PolicyStatic}
 )
 
 // pinnedTestSettings is one socket, 8 cores with 2 threads, NUMA node 0 on cores 0-3 and node 1 on cores 4-7.
@@ -220,6 +220,20 @@ func TestZoneCapacityHasPending(t *testing.T) {
 
 	require.NoError(t, zone.Track(zonecapacity.VM{ID: 1, CPUs: 1, Memory: gib}))
 	require.False(t, zone.HasPending(), "a VM seen running is no longer pending")
+}
+
+// TestZoneCapacityTrackIgnoredToken checks that a VM whose cpushare token is ignored for its affinity
+// is still tracked: the warning does not keep its reservation pending.
+func TestZoneCapacityTrackIgnoredToken(t *testing.T) {
+	t.Parallel()
+
+	zone := newTestZone(t, staticPolicy)
+	require.NoError(t, zone.Reserve(&resources.VMResources{ID: 1, CPUs: 2, Memory: gib}))
+
+	err := zone.Track(zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Affinity: "0-1", Description: "cpushare=2"})
+	require.ErrorIs(t, err, zonecapacity.ErrTokenIgnored)
+	require.False(t, zone.HasPending(), "the VM is tracked")
+	require.Equal(t, 14, zone.Available().CPUs)
 }
 
 func TestZoneCapacityKeepPendingPinned(t *testing.T) {

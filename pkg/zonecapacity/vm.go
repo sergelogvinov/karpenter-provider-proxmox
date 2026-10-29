@@ -39,6 +39,9 @@ const affinityToken = "affinity="
 // cpuShareToken is the description token that seats a VM in a CPU share group of N seats.
 const cpuShareToken = "cpushare="
 
+// CPUShareSeats names the numbers of seats a CPU share group can have, for messages.
+const CPUShareSeats = "2, 3 or 4"
+
 // ValidCPUShare reports whether n is a number of seats a CPU share group can have: 2, 3 or 4.
 func ValidCPUShare(n int) bool {
 	return n >= 2 && n <= 4
@@ -109,11 +112,21 @@ func (vm VM) classify() (classified, error) {
 			return shared, fmt.Errorf("%w: VM %d affinity %q: %v", ErrInvalid, vm.ID, raw, err)
 		}
 
+		var c classified
+
 		switch {
 		case cpus.Size() == vm.CPUs:
-			return classified{class: classPinned, cpus: cpus}, nil
+			c = classified{class: classPinned, cpus: cpus}
 		case !cpus.IsEmpty():
-			return classified{class: classConstrained, cpus: cpus}, nil
+			c = classified{class: classConstrained, cpus: cpus}
+		}
+
+		if !cpus.IsEmpty() {
+			if vm.CPUShare != 0 || cpuShareTokenOf(vm.Description) != "" {
+				return c, fmt.Errorf("%w: VM %d holds its affinity %s", ErrTokenIgnored, vm.ID, cpus)
+			}
+
+			return c, nil
 		}
 	}
 
@@ -129,27 +142,34 @@ func (vm VM) classify() (classified, error) {
 func (vm VM) cpuShare() (int, error) {
 	if vm.CPUShare != 0 {
 		if !ValidCPUShare(vm.CPUShare) {
-			return 0, fmt.Errorf("%w: VM %d CPU share %d must be 2, 3 or 4", ErrInvalid, vm.ID, vm.CPUShare)
+			return 0, fmt.Errorf("%w: VM %d CPU share %d must be %s", ErrInvalid, vm.ID, vm.CPUShare, CPUShareSeats)
 		}
 
 		return vm.CPUShare, nil
 	}
 
-	for part := range strings.SplitSeq(vm.Description, ",") {
-		value, ok := strings.CutPrefix(strings.TrimSpace(part), cpuShareToken)
-		if !ok {
-			continue
-		}
-
-		share, err := strconv.Atoi(value)
-		if err != nil || !ValidCPUShare(share) {
-			return 0, fmt.Errorf("%w: VM %d token %q must be cpushare=2, 3 or 4", ErrInvalid, vm.ID, strings.TrimSpace(part))
-		}
-
-		return share, nil
+	token := cpuShareTokenOf(vm.Description)
+	if token == "" {
+		return 0, nil
 	}
 
-	return 0, nil
+	share, err := strconv.Atoi(strings.TrimPrefix(token, cpuShareToken))
+	if err != nil || !ValidCPUShare(share) {
+		return 0, fmt.Errorf("%w: VM %d token %q must be %s%s", ErrInvalid, vm.ID, token, cpuShareToken, CPUShareSeats)
+	}
+
+	return share, nil
+}
+
+// cpuShareTokenOf returns the description's `cpushare=` token, "" when it has none.
+func cpuShareTokenOf(description string) string {
+	for part := range strings.SplitSeq(description, ",") {
+		if part = strings.TrimSpace(part); strings.HasPrefix(part, cpuShareToken) {
+			return part
+		}
+	}
+
+	return ""
 }
 
 // affinityFromDescription returns the CPU list of the description's `affinity=` token.

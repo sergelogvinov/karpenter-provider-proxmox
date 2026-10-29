@@ -18,6 +18,7 @@ package cloudcapacity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/network"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -86,7 +88,11 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 		}
 
 		err = i.Capacity.Track(vm)
-		if err != nil {
+
+		switch {
+		case errors.Is(err, zonecapacity.ErrTokenIgnored):
+			log.Info("Warning: VM has an affinity, its cpushare token is ignored", "vmID", vmr.VMID, "reason", err.Error())
+		case err != nil:
 			log.Error(err, "Failed to track resources for VM", "vmID", vmr.VMID)
 		}
 	}
