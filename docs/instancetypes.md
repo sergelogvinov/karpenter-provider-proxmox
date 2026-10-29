@@ -298,7 +298,12 @@ bin/instancetypes-amd64 generate --cpus 2,4,8 --memfactor 2,4 --kubelet --system
 * `--storage`: Boot disk size in GiB, omitted if zero (default `30`).
 * `--cpushare`: Comma-separated list of CPU share group seats, each `2`, `3` or `4`.
   For each value N it adds the `eN` family of the same sizes, with `cpushare` set.
+* `--numa`: Comma-separated list of NUMA slot fractions, each `1`, `2` or `4`.
+  For each value N it adds the `nN` [NUMA template](#numa-templates), with `numa` set,
+  the `--storage` size and no `cpu`, `memory` or `overhead`: those come from each slot.
 * `--kubelet`, `--system`, `--eviction`: Add the `overhead` for the kubelet, the OS system daemons and the eviction threshold.
 
 For example, `--cpus 2,4,8 --memfactor 2,4 --cpushare 2,3,4` generates the `c1` and `s1` families and the
 `e2`, `e3` and `e4` families with 2, 4 and 8 vCPUs and 1:2 and 1:4 memory ratios, e.g. `e3.4VCPU-16GB`.
+Adding `--numa 1,2,4` also adds the `n1`, `n2` and `n4` NUMA templates; their NUMA types, e.g. `n2.16VCPU-63GB`,
+are named by the controller from the NUMA topology of the hosts.

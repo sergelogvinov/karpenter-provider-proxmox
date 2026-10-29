@@ -102,6 +102,7 @@ func buildGenerateCmd() *cobra.Command {
 	flags.StringP("memfactor", "m", "2,3,4", "comma-separated list of memory multipliers per vCPU")
 	flags.IntP("storage", "s", 30, "storage size in GiB, omitted if zero")
 	flags.StringP("cpushare", "", "", "comma-separated list of CPU share group seats ("+zonecapacity.CPUShareSeats+"); adds the e<N> family for each")
+	flags.StringP("numa", "", "", "comma-separated list of NUMA slot fractions ("+zonecapacity.SlotFractions+"); adds the n<N> NUMA template for each")
 
 	flags.BoolP("kubelet", "", false, "add resources allocated to kubernetes kubelet")
 	flags.BoolP("system", "", false, "add resources allocated to the OS system daemons")
@@ -122,6 +123,10 @@ func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 	}
 
 	if c.options.CPUShares, err = parseIntList(flags, "cpushare"); err != nil {
+		return err
+	}
+
+	if c.options.NUMA, err = parseIntList(flags, "numa"); err != nil {
 		return err
 	}
 

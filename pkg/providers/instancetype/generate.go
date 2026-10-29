@@ -35,6 +35,9 @@ import (
 // cpuShareFamily is the family letter of the CPU share types; the digit after it is the number of seats (ADR 0002).
 const cpuShareFamily = "e"
 
+// numaFamily is the family letter of the generated NUMA templates; the digit after it is the slot fraction.
+const numaFamily = "n"
+
 // dedicatedFamilies are the family letters of the dedicated types, by memory factor (memory GiB per vCPU).
 var dedicatedFamilies = map[int]string{
 	2:  "c", // cpu
@@ -62,15 +65,17 @@ type InstanceTypeOptions struct {
 	Storage    int
 	// CPUShares adds the CPU share family e<N> of the same sizes for each N (2, 3 or 4).
 	CPUShares []int
+	// NUMA adds the NUMA template of the n<N> family for each slot fraction N (1, 2 or 4).
+	NUMA []int
 
 	KubeletOverhead   bool
 	SystemOverhead    bool
 	EvictionThreshold bool
 }
 
-// Generate returns the instance types of every size, followed by the CPU share types of each of CPUShares.
-// Repeated values are generated once. It fails for a memory factor without a dedicated family, and for
-// a CPU share that is not a valid number of seats.
+// Generate returns the instance types of every size, followed by the CPU share types of each of CPUShares and
+// the NUMA templates of each of NUMA. Repeated values are generated once. It fails for a memory factor without
+// a dedicated family, for a CPU share that is not a valid number of seats, and for an invalid slot fraction.
 func (o *InstanceTypeOptions) Generate() ([]*InstanceTypeStatic, error) {
 	for _, memFactor := range o.MemFactors {
 		if _, ok := dedicatedFamilies[memFactor]; !ok {
@@ -87,13 +92,42 @@ func (o *InstanceTypeOptions) Generate() ([]*InstanceTypeStatic, error) {
 		}
 	}
 
+	for _, fraction := range o.NUMA {
+		if !zonecapacity.ValidSlotFraction(fraction) {
+			return nil, fmt.Errorf("numa %d must be %s", fraction, zonecapacity.SlotFractions)
+		}
+	}
+
 	instanceTypes := o.generate(0)
 
 	for _, share := range lo.Uniq(o.CPUShares) {
 		instanceTypes = append(instanceTypes, o.generate(share)...)
 	}
 
+	for _, fraction := range lo.Uniq(o.NUMA) {
+		instanceTypes = append(instanceTypes, o.numaTemplate(fraction))
+	}
+
 	return instanceTypes, nil
+}
+
+// numaTemplate returns the NUMA template of the n<fraction> family. It has no cpu, memory or overhead: the
+// controller takes the CPUs and memory from each slot shape and computes the overhead of each NUMA type.
+func (o *InstanceTypeOptions) numaTemplate(fraction int) *InstanceTypeStatic {
+	capacity := corev1.ResourceList{
+		corev1.ResourcePods: resource.MustParse("110"),
+	}
+
+	if o.Storage > 0 {
+		capacity[corev1.ResourceEphemeralStorage] = resource.MustParse(fmt.Sprintf("%dGi", o.Storage))
+	}
+
+	return &InstanceTypeStatic{
+		Name:         fmt.Sprintf("%s%d", numaFamily, fraction),
+		Capacity:     capacity,
+		CapacityType: karpv1.CapacityTypeOnDemand,
+		NUMA:         fraction,
+	}
 }
 
 // generate returns the instance types of every size: CPU share types of share seats, or dedicated ones if share is 0.
