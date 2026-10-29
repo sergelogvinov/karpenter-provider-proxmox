@@ -176,6 +176,16 @@ it**, with its offerings marked unavailable. Core drift checks only for a *compa
 one, so those nodes stay and age out normally. Once no NodeClaim references the type, it is dropped. Rolling them
 anyway is an explicit operator action.
 
+The same holds per zone: when one host loses a shape that other hosts still have, the type gets an unavailable
+offering in the zone of each NodeClaim that uses it there. The NodeClaims are listed on every offerings refresh; a
+type that left the generated list takes its slot shape from its name and the rest from its family's NUMA template.
+Each kept offering carries the capacity type the NodeClaim is labelled with, so changing a template's capacity type
+does not roll its nodes either.
+
+Removing a NUMA template drops its types, kept or not, so their nodes drift: that is the explicit operator action.
+If the NodeClaims cannot be listed at startup, the operator exits rather than start without the kept types and let
+drift roll the nodes; on a later refresh it keeps the types of the last successful listing and reports the error.
+
 ## 7. Launch
 
 When Karpenter launches a NUMA type in a zone:
@@ -268,7 +278,7 @@ to the existing types.
    (§9).
 3. Capacity provider: expose per-zone slot shapes and availability for `static` zones.
 4. Instance type provider: generate `<family>.<cpu>VCPU-<mem>GB` types and offerings on every offerings refresh,
-   and retain stale types referenced by live NodeClaims (§6.1).
+   and keep the NUMA types live NodeClaims still use (kept NUMA types) (§6.1).
 5. Instance provider: strict slot allocation on launch, `InsufficientCapacityError` on failure, guest NUMA config,
    hugepages when the zone has a pool.
 6. Pinned placement: soft packing for regular VMs.

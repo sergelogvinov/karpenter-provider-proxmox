@@ -127,6 +127,10 @@ _Avoid_: numa instance type, slot template
 An instance type generated from a NUMA template for one slot shape, named `<family>.<vCPU>VCPU-<memory>GB` and sized exactly as the slot.
 _Avoid_: slot type, NUMA instance
 
+**Kept NUMA type**:
+A NUMA type that stays listed, with unavailable offerings, in a zone or capacity type it is no longer generated for, because a NodeClaim there still uses it; when its slot shape is gone from every zone it is rebuilt from its name and its family's NUMA template. It is dropped with its last NodeClaim.
+_Avoid_: stale type, orphan type
+
 **Slot offer**:
 A zone's slot shape together with how many free NUMA slots of that shape it has; a NUMA type is available in a zone when its slot offer has at least one.
 _Avoid_: slot availability, free slots (for the pair)

@@ -78,7 +78,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	instanceTemplateProvider := instancetemplate.NewDefaultProvider(ctx, pxPool, cloudCapacityProvider)
 	instanceTemplateProvider.SyncInstanceTemplates(ctx)
 
-	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider)
+	instanceTypeProvider := instancetype.NewDefaultProvider(ctx, cloudCapacityProvider, operator.GetAPIReader())
 	if err = instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
 		log.FromContext(ctx).Error(err, "failed to update instance types")
 

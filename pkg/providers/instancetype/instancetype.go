@@ -38,6 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -62,9 +63,12 @@ type Provider interface {
 
 type DefaultProvider struct {
 	cloudCapacityProvider cloudcapacity.Provider
+	// kubeClient reads the NodeClaims, whose NUMA types are kept while they use them.
+	kubeClient client.Reader
 
 	muInstanceTypes sync.RWMutex
-	// instanceTypesInfo are the static types followed by the NUMA types generated on the last offerings refresh.
+	// instanceTypesInfo are the static types followed by the NUMA types generated on the last offerings refresh
+	// and the kept NUMA types, those the NodeClaims still use.
 	instanceTypesInfo []*InstanceTypeStatic
 	// staticTypes are the instance types as configured.
 	staticTypes []*InstanceTypeStatic
@@ -76,15 +80,18 @@ type DefaultProvider struct {
 	cpuShares map[string]int
 	// slotFractions are the slot fractions of the NUMA templates, by family.
 	slotFractions map[string]int
+	// nodeClaimUses are the instance types the NodeClaims used when they were last listed.
+	nodeClaimUses []nodeClaimUse
 
 	log logr.Logger
 }
 
-func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
+func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider, kubeClient client.Reader) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("instancetype")
 
 	p := &DefaultProvider{
 		cloudCapacityProvider: cloudCapacityProvider,
+		kubeClient:            kubeClient,
 		log:                   log,
 	}
 	p.setInstanceTypes(loadDefaultInstanceTypes())
@@ -209,8 +216,15 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
 	log := p.log.WithName("UpdateInstanceTypeOfferings()")
 
+	// When the NodeClaims cannot be listed, the refresh still runs on the uses last listed, and returns the error.
+	uses, listErr := p.listNodeClaimUses(ctx)
+
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
+
+	if listErr == nil {
+		p.nodeClaimUses = uses
+	}
 
 	regions := p.cloudCapacityProvider.Regions()
 
@@ -218,8 +232,9 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 		p.createOfferings(item, regions)
 	}
 
-	// The NUMA types are rebuilt from the current slot shapes; the static types are kept as they are.
-	p.instanceTypesInfo = append(slices.Clone(p.staticTypes), p.numaTypes(regions)...)
+	// The NUMA types are rebuilt from the current slot shapes, and kept where NodeClaims still use them;
+	// the static types are kept as they are.
+	p.instanceTypesInfo = append(slices.Clone(p.staticTypes), p.keepNUMATypesInUse(p.numaTypes(regions), p.nodeClaimUses)...)
 
 	offers := 0
 	available := make(map[string]int, len(p.instanceTypesInfo))
@@ -239,7 +254,7 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	log.V(1).Info("Instance type offerings updated", "instanceTypes", len(p.instanceTypesInfo), "offers", offers)
 	log.V(1).Info("Instance type offerings report", "available", available, "unavailable", unavailable)
 
-	return nil
+	return listErr
 }
 
 // setInstanceTypes replaces the instance types and NUMA templates, with the lookups of the static names,
@@ -317,24 +332,30 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 // zoneOfferings are the offerings of instance type it in one zone, one per capacity type.
 func zoneOfferings(it *InstanceTypeStatic, region, zone string, available bool) []*cloudprovider.Offering {
 	offerings := []*cloudprovider.Offering{}
-	name, price := it.Name, priceOf(it)
 
 	// We use capacityType array to allow multiple capacity types per instance type in the future
 	for _, ct := range lo.Uniq([]string{it.CapacityType}) {
-		offerings = append(offerings, &cloudprovider.Offering{
-			Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
-			Available: available,
-			Requirements: scheduling.NewRequirements(
-				scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, name),
-				scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
-				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
-				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
-				scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(name, ".")[0]),
-			),
-		})
+		offerings = append(offerings, zoneOffering(it, region, zone, ct, available))
 	}
 
 	return offerings
+}
+
+// zoneOffering is the offering of instance type it in one zone for capacity type ct.
+func zoneOffering(it *InstanceTypeStatic, region, zone, ct string, available bool) *cloudprovider.Offering {
+	price := priceOf(it)
+
+	return &cloudprovider.Offering{
+		Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
+		Available: available,
+		Requirements: scheduling.NewRequirements(
+			scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, it.Name),
+			scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
+			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, instanceFamily(it.Name)),
+		),
+	}
 }
 
 func computeRequirements(instanceTypeName string, offerings cloudprovider.Offerings, regions []string) scheduling.Requirements {
