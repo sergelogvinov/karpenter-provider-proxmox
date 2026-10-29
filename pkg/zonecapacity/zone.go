@@ -38,6 +38,9 @@ var (
 	ErrInvalid = errors.New("invalid VM or policy")
 )
 
+// errRequired is the reason a request without a VM ID, CPUs or memory is ErrInvalid.
+const errRequired = "a VM ID, CPUs and memory are required"
+
 // noRoomError is a lack-of-room failure that keeps err's message.
 type noRoomError struct {
 	err error
@@ -59,10 +62,11 @@ type Host struct {
 
 // Policy is the node policy.
 type Policy struct {
-	// Pinned gives each VM its own host CPUs (the static node policy).
+	// Pinned selects pinned placement: each VM gets its own host CPUs.
 	Pinned bool
-	// Ratio is the CPU overcommit ratio for shared placement; 0 means 1.
-	Ratio float64
+	// CPUOvercommitRatio is how many shared vCPUs the zone offers per unpinned host CPU
+	// under shared placement; 0 means 1.
+	CPUOvercommitRatio float64
 }
 
 // Capacity is what a new shared VM could still get in a zone.
@@ -90,12 +94,26 @@ type NUMABinding struct {
 
 // Grant is what Reserve gave a VM, ready to write into its config at launch.
 type Grant struct {
-	// CPUSet is the VM's host CPUs; empty for a floating VM.
+	// CPUSet is the VM's host CPUs; empty for a shared VM.
 	CPUSet cpuset.CPUSet
 	// NUMA maps host NUMA nodes to the guest vCPUs and memory bound to them.
 	NUMA map[int]NUMABinding
 	// DescriptionTokens are written into the VM description, e.g. "affinity=8-15".
 	DescriptionTokens []string
+}
+
+// NUMAMemory is the memory the grant binds to each host NUMA node, in bytes; nil without a binding.
+func (g Grant) NUMAMemory() map[int]uint64 {
+	if len(g.NUMA) == 0 {
+		return nil
+	}
+
+	mem := make(map[int]uint64, len(g.NUMA))
+	for node, b := range g.NUMA {
+		mem[node] = b.Memory
+	}
+
+	return mem
 }
 
 // Zone is the capacity of one zone: a record per VM, and the rules to place new ones.
@@ -113,7 +131,7 @@ type Zone struct {
 	vms map[int]record
 }
 
-// record is what one VM holds: floating vCPUs or host CPUs, and its memory. It holds no policy.
+// record is what one VM holds: shared vCPUs or host CPUs, and its memory. It holds no policy.
 type record struct {
 	cpus   int
 	cpuSet cpuset.CPUSet
@@ -197,7 +215,7 @@ func (z *Zone) Release(id int) {
 // A failure for lack of room is ErrNoRoom.
 func (z *Zone) Reserve(p Policy, vm VM) (Grant, error) {
 	if vm.ID <= 0 {
-		return Grant{}, fmt.Errorf("%w: a VM ID, CPUs and memory are required", ErrInvalid)
+		return Grant{}, fmt.Errorf("%w: %s", ErrInvalid, errRequired)
 	}
 
 	z.mu.Lock()
@@ -232,7 +250,11 @@ func (z *Zone) Fit(p Policy, vm VM) (Fit, error) {
 		return Fit{}, err
 	}
 
-	ratio, _ := p.ratio()
+	ratio, err := z.ratio(p)
+	if err != nil {
+		return Fit{}, err
+	}
+
 	left := z.available(z.usageWith(vm.ID, rec), ratio)
 
 	return Fit{
@@ -244,7 +266,7 @@ func (z *Zone) Fit(p Policy, vm VM) (Fit, error) {
 // Available is what a new shared VM could still get under p, clamped at zero.
 // A bad CPU overcommit ratio offers nothing.
 func (z *Zone) Available(p Policy) Capacity {
-	ratio, err := p.ratio()
+	ratio, err := z.ratio(p)
 	if err != nil {
 		return Capacity{}
 	}
@@ -255,33 +277,34 @@ func (z *Zone) Available(p Policy) Capacity {
 	return z.available(z.usage(), ratio)
 }
 
-// ratio is how many shared vCPUs p offers per unpinned host CPU.
-func (p Policy) ratio() (float64, error) {
-	if p.Pinned || p.Ratio == 0 {
+// ratio is how many shared vCPUs the zone offers per unpinned host CPU under p.
+func (z *Zone) ratio(p Policy) (float64, error) {
+	ratio := p.CPUOvercommitRatio
+	if p.Pinned || ratio == 0 {
 		return 1, nil
 	}
 
-	if math.IsNaN(p.Ratio) || math.IsInf(p.Ratio, 0) || p.Ratio < 1 {
-		return 0, fmt.Errorf("%w: CPU overcommit ratio %v must be a finite number greater than or equal to 1", ErrInvalid, p.Ratio)
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 1 {
+		return 0, fmt.Errorf("%w: CPU overcommit ratio %v must be a finite number greater than or equal to 1", ErrInvalid, ratio)
 	}
 
-	return p.Ratio, nil
+	if float64(z.topo.NumCPUs)*ratio >= float64(math.MaxInt) {
+		return 0, fmt.Errorf("%w: CPU overcommit ratio %v exceeds the supported CPU budget", ErrInvalid, ratio)
+	}
+
+	return ratio, nil
 }
 
 // admit places vm under p and checks the zone has room for it, without recording it.
 func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 	// A zero ID is a VM that Fit is asked about before it has one; Reserve rejects it.
 	if vm.ID < 0 || vm.CPUs <= 0 || vm.Memory == 0 {
-		return record{}, nil, fmt.Errorf("%w: a VM ID, CPUs and memory are required", ErrInvalid)
+		return record{}, nil, fmt.Errorf("%w: %s", ErrInvalid, errRequired)
 	}
 
-	ratio, err := p.ratio()
+	ratio, err := z.ratio(p)
 	if err != nil {
 		return record{}, nil, err
-	}
-
-	if float64(z.topo.NumCPUs)*ratio >= float64(math.MaxInt) {
-		return record{}, nil, fmt.Errorf("%w: CPU overcommit ratio exceeds the supported CPU budget", ErrInvalid)
 	}
 
 	if _, ok := z.vms[vm.ID]; ok {
@@ -298,10 +321,7 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 			return record{}, nil, noRoomError{err}
 		}
 
-		rec.numaMemory = make(map[int]uint64, len(numa))
-		for i, b := range numa {
-			rec.numaMemory[i] = b.Memory
-		}
+		rec.numaMemory = Grant{NUMA: numa}.NUMAMemory()
 	}
 
 	u := z.usageWith(vm.ID, rec)
@@ -323,12 +343,19 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 }
 
 func (z *Zone) available(u usage, ratio float64) Capacity {
-	c := Capacity{CPUs: max(0, z.sharedCapacity(u, ratio)-u.sharedCPUs)}
+	return Capacity{
+		CPUs:   max(0, z.sharedCapacity(u, ratio)-u.sharedCPUs),
+		Memory: z.freeMemory(u),
+	}
+}
+
+// freeMemory is the zone memory u leaves free, clamped at zero.
+func (z *Zone) freeMemory(u usage) uint64 {
 	if u.memory < z.memory {
-		c.Memory = z.memory - u.memory
+		return z.memory - u.memory
 	}
 
-	return c
+	return 0
 }
 
 // sharedCapacity is how many shared vCPUs the unpinned, unreserved CPUs offer.
@@ -342,10 +369,7 @@ func (z *Zone) sharedCapacity(u usage, ratio float64) int {
 func (z *Zone) free() freeResources {
 	u := z.usage()
 
-	var zoneFree uint64
-	if u.memory < z.memory {
-		zoneFree = z.memory - u.memory
-	}
+	zoneFree := z.freeMemory(u)
 
 	numaMemory := make(map[int]uint64, len(z.topo.NUMANodes))
 	for i, mem := range z.topo.NUMANodes {

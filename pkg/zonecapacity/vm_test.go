@@ -33,7 +33,7 @@ func TestZoneTrackClassifiesVMs(t *testing.T) {
 		want zonecapacity.Capacity
 	}{
 		{
-			name: "floating VM uses shared vCPUs",
+			name: "shared VM uses shared vCPUs",
 			vm:   zonecapacity.VM{ID: 1, CPUs: 4, Memory: 2 * gib},
 			want: zonecapacity.Capacity{CPUs: 12, Memory: 29 * gib},
 		},

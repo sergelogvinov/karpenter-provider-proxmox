@@ -32,7 +32,7 @@ import (
 const gib = uint64(1 << 30)
 
 var (
-	shared = zonecapacity.Policy{Ratio: 1}
+	shared = zonecapacity.Policy{CPUOvercommitRatio: 1}
 	static = zonecapacity.Policy{Pinned: true}
 )
 
@@ -142,7 +142,7 @@ func TestZoneTrackOverlappingPinnedVMs(t *testing.T) {
 func TestZoneSharedOvercommit(t *testing.T) {
 	t.Parallel()
 
-	overcommit := zonecapacity.Policy{Ratio: 1.5}
+	overcommit := zonecapacity.Policy{CPUOvercommitRatio: 1.5}
 
 	z := newZone(t, sharedHost, 0, 1)
 	// 14 unreserved CPUs x 1.5.
