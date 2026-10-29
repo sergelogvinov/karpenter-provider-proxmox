@@ -44,6 +44,8 @@ func dualNodeTopology() *topology.Topology {
 		NumCores:     4,
 		NumSockets:   2,
 		NumNUMANodes: 2,
+		TotalMemory:  16 << 30,
+		NUMANodes:    map[int]uint64{0: 8 << 30, 1: 8 << 30},
 		CPUDetails: topology.CPUDetails{
 			0: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
 			1: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
@@ -83,6 +85,8 @@ func liveTopology(t *testing.T) *topology.Topology {
 		NumCores:     len(ids),
 		NumSockets:   1,
 		NumNUMANodes: 1,
+		TotalMemory:  16 << 30,
+		NUMANodes:    map[int]uint64{0: 16 << 30},
 		CPUDetails:   details,
 	}
 }
@@ -119,112 +123,61 @@ func spawnFakeQemuThread(t *testing.T) int {
 	return pid
 }
 
-func TestClassifyVM(t *testing.T) {
-	tests := []struct {
-		name     string
-		cores    int
-		affinity cpuset.CPUSet
-		tags     []string
-		want     VMClass
-	}{
-		{"no affinity is shared", 4, cpuset.New(), nil, ClassShared},
-		{"1:1 affinity is pinned", 4, cpuset.New(0, 1, 2, 3), nil, ClassPinned},
-		{"narrower affinity is constrained", 4, cpuset.New(0, 1), nil, ClassConstrained},
-		{"wider affinity is constrained", 2, cpuset.New(0, 1, 2, 3), nil, ClassConstrained},
-		{"karpenter tag is always ignored, even with 1:1 affinity", 8, cpuset.New(0, 1, 2, 3, 4, 5, 6, 7), []string{"karpenter"}, ClassIgnored},
-		{"unrelated tags do not change classification", 4, cpuset.New(), []string{"env-prod"}, ClassShared},
-	}
+// track records a running VM with its config, as a start or a sync does.
+func track(t *testing.T, h *SchedulerHandler, vmID, pid int, cfg *qemu.Config) {
+	t.Helper()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, classifyVM(tt.cores, tt.affinity, tt.tags))
-		})
-	}
+	require.NoError(t, h.trackVM(vmID, pid, cfg))
 }
 
-func TestNumaHint(t *testing.T) {
-	tp := dualNodeTopology()
-
-	assert.True(t, numaHint(&tp.CPUTopology, cpuset.New()).IsEmpty(), "no current cpuset yields no hint")
-
-	hint := numaHint(&tp.CPUTopology, cpuset.New(1, 5))
-	assert.True(t, hint.Equals(cpuset.New(0, 1, 4, 5)), "hint must be the whole NUMA node, not just the cpus passed in: got %v", hint)
-
-	// A cpuset spanning both nodes hints at both.
-	spanning := numaHint(&tp.CPUTopology, cpuset.New(1, 2))
-	assert.True(t, spanning.Equals(tp.CPUDetails.CPUs()))
+// busyCPUs are the CPUs the handler's plan holds for some VM.
+func busyCPUs(h *SchedulerHandler) cpuset.CPUSet {
+	return h.plan().Busy
 }
 
-func TestSharedPoolExcludesReservedAndExclusive(t *testing.T) {
-	tp := dualNodeTopology()
-
-	h := NewHandler(nil, tp, logr.Discard(),
-		WithReservedCPUs(cpuset.New(0)),
-		WithSharedPolicy(SharedPolicyNone),
-	)
-
-	h.tracker.vms[100] = &VMInfo{VMID: 100, Class: ClassPinned, AffinitySet: cpuset.New(1, 5)}
-	h.tracker.usedCPUs = cpuset.New(1, 5)
-
-	pool := h.sharedPool()
-	assert.True(t, pool.Equals(cpuset.New(2, 3, 4, 6, 7)), "got %v", pool)
-}
-
-// TestHandleVMStopRecomputesTrackerPools drives the fix for the bug:
-// stopping one pinned VM must
-// not leave another VM's still-exclusive CPUs looking free, and must not
-// leave the stopped VM's own CPUs looking used.
-func TestHandleVMStopRecomputesTrackerPools(t *testing.T) {
+// TestHandleVMStopReleasesVM checks that a stopped VM's CPUs are freed while
+// another VM's, even overlapping ones, stay held.
+func TestHandleVMStopReleasesVM(t *testing.T) {
 	tp := dualNodeTopology()
 
 	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
 
-	h.tracker.vms[100] = &VMInfo{VMID: 100, Class: ClassPinned, AffinitySet: cpuset.New(0, 4)}
-	h.tracker.vms[101] = &VMInfo{VMID: 101, Class: ClassPinned, AffinitySet: cpuset.New(1, 5)}
-	h.tracker.usedCPUs = cpuset.New(0, 1, 4, 5)
-	h.tracker.sharedCPUs = tp.CPUDetails.CPUs().Difference(h.tracker.usedCPUs)
+	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,1"})
+	track(t, h, 101, 2, &qemu.Config{Cores: new(2), Affinity: "1,5"})
+	require.True(t, busyCPUs(h).Equals(cpuset.New(0, 1, 5)), "got %v", busyCPUs(h))
 
 	h.handleVMStop(t.Context(), 100)
 
 	assert.NotContains(t, h.tracker.vms, 100)
-	assert.True(t, h.tracker.usedCPUs.Equals(cpuset.New(1, 5)), "VM 101's CPUs must still be marked used, got %v", h.tracker.usedCPUs)
-	assert.True(t, h.tracker.sharedCPUs.Equals(cpuset.New(0, 2, 3, 4, 6, 7)), "VM 100's CPUs must be freed back into the shared pool, got %v", h.tracker.sharedCPUs)
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(1, 5)), "CPU 1 is still VM 101's, CPU 0 is free: got %v", busyCPUs(h))
 }
 
-// TestHandleVMStopKeepsCPUsUsedByAnotherVM covers the case where two
-// tracked VMs happen to reference overlapping CPUs (e.g. a stale/racy
-// tracker entry): stopping one must never free a CPU another VM still
-// exclusively owns.
-func TestHandleVMStopKeepsCPUsUsedByAnotherVM(t *testing.T) {
+// TestTrackIgnoresOnlyNodeCapacityGuest checks that the node-capacity guest never holds CPUs,
+// while a workload VM that also carries the karpenter tag does.
+func TestTrackIgnoresOnlyNodeCapacityGuest(t *testing.T) {
 	tp := dualNodeTopology()
 
 	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
 
-	h.tracker.vms[100] = &VMInfo{VMID: 100, Class: ClassPinned, AffinitySet: cpuset.New(0, 1)}
-	h.tracker.vms[101] = &VMInfo{VMID: 101, Class: ClassConstrained, AffinitySet: cpuset.New(1, 5)}
-	h.tracker.usedCPUs = cpuset.New(0, 1, 5)
+	track(t, h, 999, 1, &qemu.Config{Name: "node-capacity", Cores: new(8), Affinity: "0-7", Tags: &qemu.Tags{"karpenter"}})
+	assert.True(t, busyCPUs(h).IsEmpty(), "the node-capacity guest's affinity is never counted: got %v", busyCPUs(h))
 
-	h.handleVMStop(t.Context(), 100)
-
-	assert.True(t, h.tracker.usedCPUs.Contains(1), "CPU 1 is still used by VM 101 and must remain in the exclusive pool")
-	assert.False(t, h.tracker.usedCPUs.Contains(0), "CPU 0 was only used by the stopped VM and must be freed")
+	track(t, h, 100, 2, &qemu.Config{Name: "worker-1", Cores: new(2), Affinity: "2,6", Tags: &qemu.Tags{"karpenter"}})
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(2, 6)), "a tagged workload VM is counted: got %v", busyCPUs(h))
 }
 
-func TestUpdateVMInfoNeverCountsIgnoredVMTowardExclusivePool(t *testing.T) {
+// TestTrackReadsMultiRangeDescriptionAffinity checks that an affinity= description token
+// with several ranges is read whole, not cut at its first comma.
+func TestTrackReadsMultiRangeDescriptionAffinity(t *testing.T) {
 	tp := dualNodeTopology()
 
 	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
 
-	cfg := &qemu.Config{
-		Cores:    new(8),
-		Affinity: "0-7",
-		Tags:     &qemu.Tags{"karpenter"},
-	}
+	track(t, h, 100, 1, &qemu.Config{Cores: new(4), Description: "Karpenter managed, affinity=1-2,5-6, class=default"})
 
-	require.NoError(t, h.updateVMInfo(999, 1, cfg, cpuset.New()))
-
-	assert.Equal(t, ClassIgnored, h.tracker.vms[999].Class)
-	assert.True(t, h.tracker.usedCPUs.IsEmpty(), "the discovery VM's affinity must never shrink the exclusive/shared pools")
+	plan := h.plan()
+	assert.True(t, plan.Changed[100].Equals(cpuset.New(1, 2, 5, 6)), "got %v", plan.Changed[100])
+	assert.True(t, plan.OneToOne[100], "4 cores on 4 CPUs are pinned 1:1")
 }
 
 // TestRebalanceSharedSkipsDeadProcess drives rebalanceShared's apply
@@ -242,11 +195,13 @@ func TestRebalanceSharedSkipsDeadProcess(t *testing.T) {
 
 	const deadPID = 1<<31 - 1 // never a real PID
 
-	h.tracker.vms[200] = &VMInfo{VMID: 200, PID: deadPID, Class: ClassShared, Cores: 2}
+	track(t, h, 200, deadPID, &qemu.Config{Cores: new(2)})
+	require.Contains(t, h.plan().Changed, 200, "the floating VM is planned")
 
 	h.scheduleRebalance(t.Context())
 
-	assert.True(t, h.tracker.vms[200].AssignedSet.IsEmpty(), "apply must be skipped for a dead process, not recorded as done")
+	assert.True(t, h.tracker.vms[200].applied.IsEmpty(), "apply must be skipped for a dead process, not recorded as done")
+	assert.Contains(t, h.plan().Changed, 200, "the next rebalance retries it")
 }
 
 // TestScheduleRebalanceNoopWhenPolicyNone confirms the escape hatch:
@@ -260,11 +215,12 @@ func TestScheduleRebalanceNoopWhenPolicyNone(t *testing.T) {
 		WithRebalanceDebounce(0),
 	)
 
-	h.tracker.vms[200] = &VMInfo{VMID: 200, PID: 1, Class: ClassShared, Cores: 2}
+	track(t, h, 200, 1, &qemu.Config{Cores: new(2)})
 
 	h.scheduleRebalance(t.Context())
 
-	assert.True(t, h.tracker.vms[200].AssignedSet.IsEmpty())
+	assert.True(t, h.tracker.vms[200].applied.IsEmpty())
+	assert.Empty(t, h.plan().Changed)
 }
 
 // TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity drives
@@ -329,29 +285,39 @@ func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 
 	assert.True(t, after.Intersection(reserved).IsEmpty(), "the reserved CPU must never be handed to a shared VM, got %v", after)
 	assert.True(t, after.IsSubsetOf(tp.CPUDetails.CPUs().Difference(reserved)), "expected the thread masked to the shared pool, got %v", after)
+	assert.True(t, after.Equals(h.tracker.vms[100].applied), "the applied cpuset is what taskset set: %v vs %v", after, h.tracker.vms[100].applied)
 }
 
-// TestUpdateVMInfoReentrantStartDoesNotLeakStaleAffinity covers a
-// duplicate/re-entrant call to updateVMInfo for a VMID already in the
-// tracker (e.g. a non-Remove fsnotify event racing a start): the VM's
-// previous affinity must not remain counted in usedCPUs once its config
-// has changed, or those CPUs leak out of the shared pool forever.
-func TestUpdateVMInfoReentrantStartDoesNotLeakStaleAffinity(t *testing.T) {
+// TestTrackReentrantStartDoesNotLeakStaleAffinity covers a duplicate start event for a VM
+// already tracked: its previous affinity must not stay held once its config has changed.
+func TestTrackReentrantStartDoesNotLeakStaleAffinity(t *testing.T) {
 	tp := dualNodeTopology()
 
 	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
 
-	first := &qemu.Config{Cores: new(2), Affinity: "0,4"}
-	require.NoError(t, h.updateVMInfo(100, 1, first, cpuset.New()))
-	assert.True(t, h.tracker.usedCPUs.Equals(cpuset.New(0, 4)), "got %v", h.tracker.usedCPUs)
+	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,4"})
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(0, 4)), "got %v", busyCPUs(h))
 
-	// The VM is reconfigured to a different, disjoint affinity and the
-	// daemon observes another start event for the same VMID without an
-	// intervening stop.
-	second := &qemu.Config{Cores: new(2), Affinity: "1,5"}
-	require.NoError(t, h.updateVMInfo(100, 1, second, cpuset.New()))
+	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "1,5"})
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(1, 5)), "the old affinity (0,4) must be dropped: got %v", busyCPUs(h))
+}
 
-	assert.True(t, h.tracker.usedCPUs.Equals(cpuset.New(1, 5)), "the VM's old affinity (0,4) must be dropped, not left stacked on top of the new one: got %v", h.tracker.usedCPUs)
+// TestTrackNewPIDForgetsAppliedCPUs checks that a VM restarted with a new PID is planned
+// afresh: the cpuset applied to its old process says nothing about the new one.
+func TestTrackNewPIDForgetsAppliedCPUs(t *testing.T) {
+	tp := dualNodeTopology()
+
+	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+
+	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,4"})
+	h.tracker.setApplied(100, 1, cpuset.New(0, 4))
+	assert.Empty(t, h.plan().Changed)
+
+	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,4"})
+	assert.Empty(t, h.plan().Changed, "the same process keeps its applied cpuset")
+
+	track(t, h, 100, 2, &qemu.Config{Cores: new(2), Affinity: "0,4"})
+	assert.Contains(t, h.plan().Changed, 100, "a new process must be pinned again")
 }
 
 // TestWithSharedPolicyRejectsUnknownValue confirms a typo'd or otherwise
