@@ -36,6 +36,9 @@ type VMResources struct {
 	Affinity string
 	// Memory is the amount of memory in bytes assigned to the VM.
 	Memory uint64
+	// CPUShare is the number of VMs that share the VM's CPUs in a CPU share group: 2, 3 or 4.
+	// Zero means the VM does not sit in a CPU share group.
+	CPUShare int
 	// DiskGBytes is the amount of system disk in gigabytes assigned to the VM.
 	DiskGBytes uint64
 	// StorageID is the ID of the storage where the VM's disk is located.
@@ -45,6 +48,6 @@ type VMResources struct {
 	CPUSet cpuset.CPUSet
 	// NUMANodes represents the topology on the Host assigned to the VM.
 	NUMANodes map[int]NUMANodeState
-	// DescriptionTokens are written into the VM description at launch, e.g. "affinity=8-15".
+	// DescriptionTokens are written into the VM description at launch, e.g. "affinity=8-15" or "cpushare=2".
 	DescriptionTokens []string
 }

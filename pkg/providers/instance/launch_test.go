@@ -19,6 +19,8 @@ package instance_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -41,6 +43,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 
 	corev1 "k8s.io/api/core/v1"
@@ -80,6 +83,8 @@ type launchSetup struct {
 	manualTasks bool
 	// nodePolicy is the node CPU policy; default "simple".
 	nodePolicy string
+	// cpuShare makes the instance type a CPU share type of that many seats, family e<N>.
+	cpuShare int
 }
 
 // launchFixture is an instance provider launching into a fake Proxmox
@@ -161,7 +166,19 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	client := cl.Client(t)
 	pool.Set(testRegion, client)
 
-	ctx := options.ToContext(t.Context(), &options.Options{ProxmoxVMID: firstVMID, NodePolicy: setup.nodePolicy})
+	family := "c1"
+	if setup.cpuShare > 0 {
+		family = fmt.Sprintf("e%d", setup.cpuShare)
+	}
+
+	instanceTypeName := fmt.Sprintf("%s.%dVCPU-%s", family, setup.cpus, setup.memory)
+
+	typesFile := filepath.Join(t.TempDir(), "instancetypes.json")
+	require.NoError(t, os.WriteFile(typesFile, fmt.Appendf(nil,
+		`[{"name": %q, "cpushare": %d, "capacity": {"cpu": "%d", "memory": %q}}]`,
+		instanceTypeName, setup.cpuShare, setup.cpus, setup.memory), 0o600))
+
+	ctx := options.ToContext(t.Context(), &options.Options{ProxmoxVMID: firstVMID, NodePolicy: setup.nodePolicy, InstanceTypesFilePath: typesFile})
 
 	capacity := cloudcapacity.NewProvider(ctx, pool)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
@@ -183,8 +200,11 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	)
 	kube.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.34.0"}
 
+	instanceTypes := instancetype.NewDefaultProvider(ctx, capacity)
+	require.NoError(t, instanceTypes.UpdateInstanceTypes(ctx))
+
 	p, err := instance.NewProvider(ctx, kube, bootstrap.NewProvider(ctx, kube), pool, capacity,
-		nodeipam.NewDefaultProvider(ctx, capacity), templates)
+		nodeipam.NewDefaultProvider(ctx, capacity), templates, instanceTypes)
 	require.NoError(t, err)
 
 	size := resource.MustParse("10G")
@@ -218,7 +238,7 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	}
 
 	instanceType := &cloudprovider.InstanceType{
-		Name: fmt.Sprintf("c1.%dVCPU-%s", setup.cpus, setup.memory),
+		Name: instanceTypeName,
 		Capacity: corev1.ResourceList{
 			corev1.ResourceCPU:    *resource.NewQuantity(int64(setup.cpus), resource.DecimalSI),
 			corev1.ResourceMemory: resource.MustParse(setup.memory),
@@ -419,6 +439,33 @@ func TestCreateWritesGrantTokensIntoDescription(t *testing.T) {
 
 			require.NotEmpty(t, cfg.Affinity, "a pinned VM gets its own host CPUs")
 			assert.True(t, strings.HasSuffix(cfg.Description, ", affinity="+cfg.Affinity), "description %q carries the affinity token", cfg.Description)
+		})
+	}
+}
+
+// TestCreateCPUShare checks that a CPU share type launches with its token, no affinity and no NUMA
+// binding, and that a second node of the class takes the open seat of the first one's group.
+func TestCreateCPUShare(t *testing.T) {
+	for _, policy := range []string{"simple", "static"} {
+		t.Run(policy, func(t *testing.T) {
+			// The zone has 4 CPUs and 7GiB: two 4-vCPU nodes fit only by sharing one group.
+			f := newLaunchFixture(t, launchSetup{nodePolicy: policy, cpus: 4, memory: "2Gi", cpuShare: 2})
+
+			for _, name := range []string{"node-1", "node-2"} {
+				node, err := f.create(f.ctx, name)
+				require.NoError(t, err, name)
+				assert.Equal(t, "e2", node.Labels[v1alpha1.LabelInstanceFamily])
+
+				cfg := f.vmConfig(node)
+				assert.Equal(t, 4, *cfg.Cores)
+				assert.Empty(t, cfg.Affinity, "no affinity")
+				assert.Empty(t, cfg.NUMA, "no NUMA binding")
+				assert.True(t, strings.HasSuffix(cfg.Description, ", cpushare=2"), "description %q carries the cpushare token", cfg.Description)
+				assert.NotContains(t, cfg.Description, "affinity=")
+			}
+
+			_, err := f.create(f.ctx, "node-3")
+			require.Error(t, err, "a third node needs a second group")
 		})
 	}
 }

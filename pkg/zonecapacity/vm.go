@@ -19,6 +19,7 @@ package zonecapacity
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"k8s.io/utils/cpuset"
@@ -35,6 +36,14 @@ const (
 // affinityToken is the description token that carries a VM's host CPUs when the affinity option is unset.
 const affinityToken = "affinity="
 
+// cpuShareToken is the description token that seats a VM in a CPU share group of N seats.
+const cpuShareToken = "cpushare="
+
+// ValidCPUShare reports whether n is a number of seats a CPU share group can have: 2, 3 or 4.
+func ValidCPUShare(n int) bool {
+	return n >= 2 && n <= 4
+}
+
 // VM is one virtual machine as read from its config. The module parses the raw fields.
 type VM struct {
 	ID int
@@ -44,8 +53,11 @@ type VM struct {
 	Memory uint64
 	// Affinity is the `affinity` option, "" when unset.
 	Affinity string
-	// Description holds the `affinity=` fallback token, comma separated from other text.
+	// Description holds the `affinity=` fallback and `cpushare=N` tokens, comma separated from other text.
 	Description string
+	// CPUShare asks Reserve and Fit for a CPU share VM of that many seats (2, 3 or 4); 0 asks for none.
+	// A tracked VM is read from its `cpushare=N` token instead, unless this is set.
+	CPUShare int
 	// Tags are the VM's tags; `karpenter` on a VM named `node-capacity` marks the node-capacity guest, which is ignored.
 	Tags []string
 	// NUMAMemory is the memory bound to each host NUMA node, in bytes, from numaN hostnodes.
@@ -63,14 +75,27 @@ const (
 	classPinned
 	// constrained VMs have an affinity of a different size than their vCPUs.
 	classConstrained
+	// CPU share VMs sit in a CPU share group with others of the same seats and vCPUs.
+	classCPUShare
 	// ignored VMs are never counted.
 	classIgnored
 )
 
-// classify returns vm's class and its host CPUs.
-func (vm VM) classify() (class, cpuset.CPUSet, error) {
+// classified is what classify found out about a VM.
+type classified struct {
+	class class
+	// cpus are the host CPUs of a pinned or constrained VM.
+	cpus cpuset.CPUSet
+	// share is the seats of a CPU share VM's group.
+	share int
+}
+
+// classify returns vm's class with its host CPUs or seats. An affinity wins over a `cpushare` token.
+func (vm VM) classify() (classified, error) {
+	shared := classified{class: classShared, cpus: cpuset.New()}
+
 	if vm.Name == NodeCapacityName && slices.Contains(vm.Tags, NodeCapacityTag) {
-		return classIgnored, cpuset.New(), nil
+		return classified{class: classIgnored, cpus: cpuset.New()}, nil
 	}
 
 	raw := vm.Affinity
@@ -78,24 +103,53 @@ func (vm VM) classify() (class, cpuset.CPUSet, error) {
 		raw = affinityFromDescription(vm.Description)
 	}
 
-	if raw == "" {
-		return classShared, cpuset.New(), nil
+	if raw != "" {
+		cpus, err := cpuset.Parse(raw)
+		if err != nil {
+			return shared, fmt.Errorf("%w: VM %d affinity %q: %v", ErrInvalid, vm.ID, raw, err)
+		}
+
+		switch {
+		case cpus.Size() == vm.CPUs:
+			return classified{class: classPinned, cpus: cpus}, nil
+		case !cpus.IsEmpty():
+			return classified{class: classConstrained, cpus: cpus}, nil
+		}
 	}
 
-	cpus, err := cpuset.Parse(raw)
-	if err != nil {
-		return classShared, cpuset.New(), fmt.Errorf("%w: VM %d affinity %q: %v", ErrInvalid, vm.ID, raw, err)
+	share, err := vm.cpuShare()
+	if err != nil || share == 0 {
+		return shared, err
 	}
 
-	if cpus.IsEmpty() {
-		return classShared, cpus, nil
+	return classified{class: classCPUShare, cpus: cpuset.New(), share: share}, nil
+}
+
+// cpuShare is the seats vm asks for, or reads from its `cpushare=N` token; 0 for none.
+func (vm VM) cpuShare() (int, error) {
+	if vm.CPUShare != 0 {
+		if !ValidCPUShare(vm.CPUShare) {
+			return 0, fmt.Errorf("%w: VM %d CPU share %d must be 2, 3 or 4", ErrInvalid, vm.ID, vm.CPUShare)
+		}
+
+		return vm.CPUShare, nil
 	}
 
-	if cpus.Size() == vm.CPUs {
-		return classPinned, cpus, nil
+	for part := range strings.SplitSeq(vm.Description, ",") {
+		value, ok := strings.CutPrefix(strings.TrimSpace(part), cpuShareToken)
+		if !ok {
+			continue
+		}
+
+		share, err := strconv.Atoi(value)
+		if err != nil || !ValidCPUShare(share) {
+			return 0, fmt.Errorf("%w: VM %d token %q must be cpushare=2, 3 or 4", ErrInvalid, vm.ID, strings.TrimSpace(part))
+		}
+
+		return share, nil
 	}
 
-	return classConstrained, cpus, nil
+	return 0, nil
 }
 
 // affinityFromDescription returns the CPU list of the description's `affinity=` token.

@@ -84,4 +84,36 @@ func TestNodePolicySelection(t *testing.T) {
 			}
 		})
 	}
+
+	// CPU share VMs are offered under static and simple only, and launch with their token.
+	for _, tc := range []struct {
+		policy  string
+		offered bool
+	}{
+		{policy: "simple", offered: true},
+		{policy: "static", offered: true},
+		{policy: "simple-with-cpu-overcommit"},
+	} {
+		t.Run("cpushare/"+tc.policy, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := options.ToContext(context.Background(), &options.Options{NodePolicy: tc.policy, CPUOvercommitRatio: 1})
+			capacity, err := ZoneCapacityFromCluster(ctx, client, "test", "test")
+			require.NoError(t, err)
+
+			request := &resources.VMResources{ID: 1, CPUs: 2, Memory: 1 << 30, CPUShare: 2}
+			err = capacity.Reserve(request)
+			if !tc.offered {
+				require.ErrorIs(t, err, zonecapacity.ErrNotOffered)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, []string{"cpushare=2"}, request.DescriptionTokens)
+			require.True(t, request.CPUSet.IsEmpty(), "no affinity")
+			require.Empty(t, request.NUMANodes, "no NUMA binding")
+			require.Equal(t, 10, capacity.Available().CPUs)
+		})
+	}
 }
