@@ -369,6 +369,24 @@ func TestTrackNewPIDForgetsAppliedCPUs(t *testing.T) {
 	assert.Contains(t, h.plan().Changed, 100, "a new process must be pinned again")
 }
 
+// TestTrackerForgetPIDKeepsRestartedVM checks that dropping a dead process never drops
+// the process that replaced it: a rebalance may still hold the old PID.
+func TestTrackerForgetPIDKeepsRestartedVM(t *testing.T) {
+	tr := newVMTracker()
+	tr.track(100, 1, true)
+	tr.track(100, 2, true)
+
+	assert.False(t, tr.forgetPID(100, 1), "the old process is already gone")
+
+	vm, ok := tr.get(100)
+	require.True(t, ok, "the new process stays tracked")
+	assert.Equal(t, 2, vm.pid)
+
+	assert.True(t, tr.forgetPID(100, 2))
+	_, ok = tr.get(100)
+	assert.False(t, ok)
+}
+
 // TestWithSharedPolicyRejectsUnknownValue confirms a typo'd or otherwise
 // unrecognized --shared-policy value never silently activates
 // shared-pool placement: it must be ignored, keeping the safe default.

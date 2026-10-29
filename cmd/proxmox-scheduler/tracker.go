@@ -74,6 +74,21 @@ func (t *VMTracker) forget(id int) (trackedVM, bool) {
 	return vm, ok
 }
 
+// forgetPID drops VM id only while it still runs as process pid, so a caller holding
+// a stale PID never drops the process that replaced it. It reports whether it dropped.
+func (t *VMTracker) forgetPID(id, pid int) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if vm, ok := t.vms[id]; !ok || vm.pid != pid {
+		return false
+	}
+
+	delete(t.vms, id)
+
+	return true
+}
+
 // get returns what is tracked for VM id.
 func (t *VMTracker) get(id int) (trackedVM, bool) {
 	t.mu.RLock()
