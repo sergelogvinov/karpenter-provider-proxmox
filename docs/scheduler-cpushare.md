@@ -68,8 +68,8 @@ Sizes: vCPU in `{2, 4, 8}`, always even so that a group covers whole physical co
 Names follow the existing convention `<family>.<vCPU>VCPU-<memory>GB`, e.g. `e2.2VCPU-4GB`, `e3.4VCPU-16GB`,
 `e4.8VCPU-16GB`.
 
-The `"e"` fallback in `makeGenericInstanceTypeName` (`pkg/providers/instancetype/generate.go`) produces `e1.*` names
-for unknown memory ratios. It does not collide with `e2`–`e4` and stays as it is.
+The letter `e` belongs to the CPU share families only. The generator (`pkg/providers/instancetype/generate.go`) rejects
+a memory ratio without a dedicated family (`c`, `t`, `s`, `m`, `x` for 2, 3, 4, 8, 16) instead of naming it `e1.*`.
 
 ## 4. Configuration
 

@@ -25,8 +25,8 @@ import (
 const (
 	TerminationFinalizer = apis.Group + "/termination"
 
-	// LabelInstanceFamily is the instance family, e.g. c1, s1, m1, e1
-	LabelInstanceFamily = apis.Group + "/instance-family" // c1, s1, m1, e1
+	// LabelInstanceFamily is the instance family, e.g. c1, s1, m1, e2
+	LabelInstanceFamily = apis.Group + "/instance-family" // c1, s1, m1, e2
 	// LabelInstanceCPUType is the CPU type, e.g. host, kvm64, Broadwell, Skylake
 	LabelInstanceCPUType = apis.Group + "/instance-cpu-type" // host, kvm64, Broadwell, Skylake
 	// LabelInstanceImageID is the image ID

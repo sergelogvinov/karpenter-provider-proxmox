@@ -18,6 +18,11 @@ package instancetype
 
 import (
 	"fmt"
+	"slices"
+
+	"github.com/samber/lo"
+
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -25,6 +30,18 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
+
+// cpuShareFamily is the family letter of the CPU share types; the digit after it is the number of seats (ADR 0002).
+const cpuShareFamily = "e"
+
+// dedicatedFamilies are the family letters of the dedicated types, by memory factor (memory GiB per vCPU).
+var dedicatedFamilies = map[int]string{
+	2:  "c", // cpu
+	3:  "t",
+	4:  "s", // standard
+	8:  "m", // memory
+	16: "x", // in-memory applications
+}
 
 type InstanceTypeStatic struct {
 	Name         string                              `json:"name,omitempty"`
@@ -49,22 +66,39 @@ type InstanceTypeOptions struct {
 }
 
 // Generate returns the instance types of every size, followed by the CPU share types of each of CPUShares.
-func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
-	instanceTypes := o.generate(0)
+// Repeated values are generated once. It fails for a memory factor without a dedicated family, and for
+// a CPU share that is not a valid number of seats.
+func (o *InstanceTypeOptions) Generate() ([]*InstanceTypeStatic, error) {
+	for _, memFactor := range o.MemFactors {
+		if _, ok := dedicatedFamilies[memFactor]; !ok {
+			factors := lo.Keys(dedicatedFamilies)
+			slices.Sort(factors)
+
+			return nil, fmt.Errorf("memory factor %d has no instance family, must be one of %v", memFactor, factors)
+		}
+	}
 
 	for _, share := range o.CPUShares {
+		if !zonecapacity.ValidCPUShare(share) {
+			return nil, fmt.Errorf("cpushare %d must be %s", share, zonecapacity.CPUShareSeats)
+		}
+	}
+
+	instanceTypes := o.generate(0)
+
+	for _, share := range lo.Uniq(o.CPUShares) {
 		instanceTypes = append(instanceTypes, o.generate(share)...)
 	}
 
-	return instanceTypes
+	return instanceTypes, nil
 }
 
 // generate returns the instance types of every size: CPU share types of share seats, or dedicated ones if share is 0.
 func (o *InstanceTypeOptions) generate(share int) []*InstanceTypeStatic {
 	instanceTypes := []*InstanceTypeStatic{}
 
-	for _, cpu := range o.CPUs {
-		for _, memFactor := range o.MemFactors {
+	for _, cpu := range lo.Uniq(o.CPUs) {
+		for _, memFactor := range lo.Uniq(o.MemFactors) {
 			mem := cpu * memFactor
 			pods := 110
 
@@ -117,28 +151,12 @@ func (o *InstanceTypeOptions) generate(share int) []*InstanceTypeStatic {
 }
 
 // makeGenericInstanceTypeName names the instance type <family><digit>.<vCPU>VCPU-<memory>GB. A dedicated type's
-// family letter comes from its memory ratio and its digit is the generation, 1. A CPU share type's family letter
-// is e and its digit is the number of seats (see ADR 0002).
+// family letter comes from its memory factor, one of dedicatedFamilies, and its digit is the generation, 1.
+// A CPU share type's family letter is e and its digit is the number of seats (see ADR 0002).
 func makeGenericInstanceTypeName(cpu, memFactor, share int) string {
-	var family string
-
-	digit := 1
-
-	switch {
-	case share > 0:
-		family, digit = "e", share
-	case memFactor == 2:
-		family = "c" // cpu
-	case memFactor == 3:
-		family = "t"
-	case memFactor == 4:
-		family = "s" // standard
-	case memFactor == 8:
-		family = "m" // memory
-	case memFactor == 16:
-		family = "x" // in-memory applications
-	default:
-		family = "e"
+	family, digit := dedicatedFamilies[memFactor], 1
+	if share > 0 {
+		family, digit = cpuShareFamily, share
 	}
 
 	return fmt.Sprintf("%s%d.%dVCPU-%dGB", family, digit, cpu, cpu*memFactor)

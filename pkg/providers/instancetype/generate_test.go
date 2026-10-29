@@ -34,7 +34,10 @@ func TestGeneratedCPUShareTypesLoad(t *testing.T) {
 
 	opts := instancetype.InstanceTypeOptions{CPUs: []int{2}, MemFactors: []int{2}, Storage: 30, CPUShares: []int{2, 3, 4}}
 
-	file, err := json.Marshal(opts.Generate())
+	instanceTypes, err := opts.Generate()
+	require.NoError(t, err)
+
+	file, err := json.Marshal(instanceTypes)
 	require.NoError(t, err)
 
 	p, err := newProvider(t, "simple", string(file))
@@ -62,4 +65,28 @@ func TestGeneratedCPUShareTypesLoad(t *testing.T) {
 		"e3.2VCPU-4GB": {family: "e3", cpuShare: 3},
 		"e4.2VCPU-4GB": {family: "e4", cpuShare: 4},
 	}, got)
+}
+
+// TestGenerateRejectsUnsupportedMemFactor checks that a memory ratio without a family is rejected, so that a
+// dedicated type never lands in the e family of the CPU share types.
+func TestGenerateRejectsUnsupportedMemFactor(t *testing.T) {
+	t.Parallel()
+
+	for _, memFactor := range []int{0, 1, 5, 6, 32} {
+		opts := instancetype.InstanceTypeOptions{CPUs: []int{2}, MemFactors: []int{memFactor}}
+
+		_, err := opts.Generate()
+		require.ErrorContains(t, err, "memory factor", "memFactor %d", memFactor)
+	}
+}
+
+func TestGenerateRejectsInvalidCPUShare(t *testing.T) {
+	t.Parallel()
+
+	for _, share := range []int{-1, 1, 5} {
+		opts := instancetype.InstanceTypeOptions{CPUs: []int{2}, MemFactors: []int{2}, CPUShares: []int{share}}
+
+		_, err := opts.Generate()
+		require.ErrorContains(t, err, "cpushare", "cpushare %d", share)
+	}
 }

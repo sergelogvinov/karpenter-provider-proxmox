@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	cobra "github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
@@ -100,7 +101,7 @@ func buildGenerateCmd() *cobra.Command {
 	flags.StringP("cpus", "c", "1,2,4", "comma-separated list of vCPU counts")
 	flags.StringP("memfactor", "m", "2,3,4", "comma-separated list of memory multipliers per vCPU")
 	flags.IntP("storage", "s", 30, "storage size in GiB, omitted if zero")
-	flags.StringP("cpushare", "", "", "comma-separated list of CPU share seats ("+zonecapacity.CPUShareSeats+"); adds the e<N> family for each")
+	flags.StringP("cpushare", "", "", "comma-separated list of CPU share group seats ("+zonecapacity.CPUShareSeats+"); adds the e<N> family for each")
 
 	flags.BoolP("kubelet", "", false, "add resources allocated to kubernetes kubelet")
 	flags.BoolP("system", "", false, "add resources allocated to the OS system daemons")
@@ -112,34 +113,16 @@ func buildGenerateCmd() *cobra.Command {
 func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 	flags := cmd.Flags()
 
-	c.options.CPUs = []int{}
-	if cpusStr, err := flags.GetString("cpus"); err == nil {
-		for s := range strings.SplitSeq(cpusStr, ",") {
-			if i, err := strconv.Atoi(s); err == nil {
-				c.options.CPUs = append(c.options.CPUs, i)
-			}
-		}
+	if c.options.CPUs, err = parseIntList(flags, "cpus"); err != nil {
+		return err
 	}
 
-	c.options.MemFactors = []int{}
-	if memFactorsStr, err := flags.GetString("memfactor"); err == nil {
-		for s := range strings.SplitSeq(memFactorsStr, ",") {
-			if i, err := strconv.Atoi(s); err == nil {
-				c.options.MemFactors = append(c.options.MemFactors, i)
-			}
-		}
+	if c.options.MemFactors, err = parseIntList(flags, "memfactor"); err != nil {
+		return err
 	}
 
-	c.options.CPUShares = []int{}
-	if sharesStr, err := flags.GetString("cpushare"); err == nil && sharesStr != "" {
-		for s := range strings.SplitSeq(sharesStr, ",") {
-			i, err := strconv.Atoi(strings.TrimSpace(s))
-			if err != nil || !zonecapacity.ValidCPUShare(i) {
-				return fmt.Errorf("invalid --cpushare value %q: must be %s", s, zonecapacity.CPUShareSeats)
-			}
-
-			c.options.CPUShares = append(c.options.CPUShares, i)
-		}
+	if c.options.CPUShares, err = parseIntList(flags, "cpushare"); err != nil {
+		return err
 	}
 
 	c.options.Storage = 0
@@ -166,7 +149,10 @@ func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 }
 
 func (c *generateCmd) runGenerate(cmd *cobra.Command, args []string) error {
-	instanceTypes := c.options.Generate()
+	instanceTypes, err := c.options.Generate()
+	if err != nil {
+		return err
+	}
 
 	jsonData, err := json.MarshalIndent(instanceTypes, "", "  ")
 	if err != nil {
@@ -176,4 +162,28 @@ func (c *generateCmd) runGenerate(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(cmd.OutOrStdout(), string(jsonData))
 
 	return nil
+}
+
+// parseIntList parses the comma-separated integers of flag name; an empty value is an empty list.
+func parseIntList(flags *pflag.FlagSet, name string) ([]int, error) {
+	value, err := flags.GetString(name)
+	if err != nil {
+		return nil, err
+	}
+
+	list := []int{}
+	if strings.TrimSpace(value) == "" {
+		return list, nil
+	}
+
+	for s := range strings.SplitSeq(value, ",") {
+		i, err := strconv.Atoi(strings.TrimSpace(s))
+		if err != nil {
+			return nil, fmt.Errorf("invalid --%s value %q: must be a comma-separated list of integers", name, s)
+		}
+
+		list = append(list, i)
+	}
+
+	return list, nil
 }
