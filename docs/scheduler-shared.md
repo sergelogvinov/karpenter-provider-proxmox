@@ -14,8 +14,9 @@ below:
 - §4.3's mode-transition hysteresis (the 0.9× dead band) is not implemented; only sticky retention of
   still-valid assignments is. In practice this only matters right at the fitting/oversubscribed boundary.
 
-`--shared-policy` defaults to `none` — the pre-existing behavior, unchanged for anyone who upgrades without
-touching config (§13 step 4, "ship dark"). Set it to `partition` to turn the shared-pool placement in §4 on.
+`--shared-policy` defaults to `partition`, the placement in §4. Set it to `none` to leave VMs under shared placement
+as Proxmox started them while no CPU share group exists; CPU share VMs are confined to their groups either way, and
+VMs under shared placement are kept off the groups ([scheduler-cpushare.md](scheduler-cpushare.md) §8).
 
 ## 1. Problem
 
@@ -261,7 +262,8 @@ New flags/env vars, in the style of the existing ones:
 | `--shared-min-width` | `SHARED_MIN_WIDTH` | `0` | Minimum CPUs per shared VM; `0` = one physical core. |
 | `--rebalance-debounce` | `REBALANCE_DEBOUNCE` | `2s` | Event coalescing window. |
 
-`--shared-policy=none` must remain a supported escape hatch: it restores exactly today's semantics.
+`--shared-policy=none` must remain a supported escape hatch: VMs under shared placement keep their pre-existing
+semantics while no CPU share group exists.
 
 ## 10. Worked example
 

@@ -199,14 +199,14 @@ sharedPool    = groupPool − ∪ group cpusets
 Priority: pinned > `cpushare` groups > floating. Groups keep their full width; only floating VMs absorb
 oversubscription (`PlanShared` oversubscribed mode). If even the groups do not fit in `groupPool` (e.g. a VM created
 by hand), the groups that do not fit are masked to the remaining `groupPool` and the scheduler logs it, instead of
-failing.
+failing (§8.3, step 5).
 
 ### 8.3 Group planner
 
 A pure function next to `PlanShared`:
 
 ```go
-// pkg/providers/cloudcapacity/cpumanager/planner_cpushare.go
+// pkg/zonecapacity/internal/cpumanager/planner_cpushare.go
 type CPUShareRequest struct {
     VMID    int
     CPUs    int           // cores from the VM config
@@ -214,11 +214,20 @@ type CPUShareRequest struct {
     Current cpuset.CPUSet // currently applied set, for stability
 }
 
-type CPUSharePlan map[int]cpuset.CPUSet // VMID -> group cpuset
+type CPUShareGroup struct {
+    CPUs    cpuset.CPUSet // every member is masked to it; empty: not seated, left as is
+    Members []int         // VMIDs, in order
+}
 
+// pinned orders the NUMA nodes for new groups; the notes are the spills and groups that did not fit.
 func PlanCPUShare(logger logr.Logger, topo *topology.CPUTopology,
-    pool cpuset.CPUSet, reqs []CPUShareRequest) (CPUSharePlan, error)
+    pool, pinned cpuset.CPUSet, reqs []CPUShareRequest) ([]CPUShareGroup, []string, error)
 ```
+
+`Zone.Plan` calls it on the unpinned CPUs, returns the groups' CPUs in `Plan.Groups` and the ungrouped CPUs
+(`sharedPool`) in `Plan.Ungrouped`, and turns the notes into `Plan.Notes`. It adds a drift note when the CPUs the
+groups use differ from what `static` accounting charges for them (§6); the scheduler is built for the `static`
+node policy.
 
 1. **Classes.** Requests are grouped by `(Share, CPUs)`. Each class needs `ceil(count / Share)` groups, the same
    number Karpenter counts (§6).
@@ -229,9 +238,13 @@ func PlanCPUShare(logger logr.Logger, topo *topology.CPUTopology,
    matches Karpenter's count. Moving a member is only an affinity change.
 4. **Place.** New groups go to the NUMA node with the most pinned CPUs first, so they rarely sit on whole free
    NUMA slots and rarely have to move when a NUMA VM launches. Within that order they take `CPUs` CPUs from the remaining pool with `takeByTopologyNUMAPacked`
-   (`CPUSortingStrategyPacked`, whole physical cores with their siblings, aligned by uncore cache). A group prefers a
-   single NUMA node and keeps it once placed; when no node has room it spills across nodes and the planner logs the
-   spill.
+   (`CPUSortingStrategyPacked`, whole physical cores with their siblings, aligned by uncore cache). Ties go to the
+   lowest node, and a node with no whole cores left is skipped. A group prefers a single NUMA node and keeps it once
+   placed; when no node has room it spills across nodes, still on whole cores, and the planner notes the spill. A
+   group with an odd width takes any CPUs; an even-width group never falls back to half cores.
+5. **Do not fit.** A group with no room left (no whole cores for an even width) is masked to what the other groups
+   left of `pool`, up to its width, after every group that fits is placed, so it never overlaps another group. When
+   nothing is left its members are not seated and stay as they are; the note says so.
 
 Determinism: classes are processed by `(CPUs desc, Share asc)`, members by VMID, so the same input always yields
 the same plan.
@@ -269,9 +282,12 @@ group A (301, 302) → 16,48
 group B (303)      → 17,49       one free seat
 group C (401)      → 18-21,50-53 three free seats
 
-sharedPool = 1-7,22-31,33-39,54-63
-VM 200     → 22,23,54,55 (partition) or sharedPool (none)
+sharedPool = 1-7,22-31,33-47,54-63   (40-47 are the siblings of VM 100's CPUs)
+VM 200     → its partition of sharedPool (partition) or all of sharedPool (none)
 ```
+
+The groups above are as already applied, which the planner keeps. Planned from scratch, they go to node 0 instead:
+node 1 has the most pinned CPUs but no whole core left, and node 0 is the lowest of the rest.
 
 VM 302 stops: class `(2, 2)` now has 2 VMs and needs 1 group. Groups A and B have one member each; the tie goes
 to the group with the lower CPU IDs, so B is dissolved: VM 303 moves to 16,48 and 17,49 returns to the shared pool.
@@ -283,7 +299,7 @@ A new `e2.2VCPU` VM in this zone is free on CPU for Karpenter as long as a seat 
 - **Odd core count.** A VM created by hand with `cpushare` and an odd `cores` is allowed; its group is `cores` CPUs
   wide and may share a physical core with something else.
 - **`cpushare` VM in a `simple-with-cpu-overcommit` cluster.** Created by hand only. Karpenter accounts it as a
-  regular unpinned VM; the scheduler still groups it.
+  regular unpinned VM; the scheduler, built for `static`, still groups it and does not report the difference (§8.3).
 - **Pinned VM lands on a group.** In a `static` cluster Karpenter may pick CPUs a group holds (§6). The group is no
   longer inside `groupPool` and the next rebalance moves it.
 - **Fragmented NUMA nodes.** Karpenter counts at host level, so a group can be "free" in total but have no single

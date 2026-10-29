@@ -80,7 +80,7 @@ _Avoid_: in-flight reservation, carry-over
 To forget a virtual machine's record and return what it held to the zone's capacity. Releasing a virtual machine that has no record changes nothing.
 
 **Shared placement**:
-A virtual machine's vCPUs run on any of the zone's unpinned CPUs, together with other virtual machines.
+A virtual machine's vCPUs run on any of the zone's ungrouped CPUs, together with other virtual machines.
 _Avoid_: simple policy
 
 **Pinned placement**:
@@ -92,11 +92,11 @@ A virtual machine whose affinity has a different number of host CPUs than it has
 _Avoid_: masked VM
 
 **Unpinned CPUs**:
-A zone's CPUs that are neither reserved for the host nor held by a pinned or constrained virtual machine; where virtual machines under shared placement run.
+A zone's CPUs that are neither reserved for the host nor held by a pinned or constrained virtual machine; where the CPU share groups and the virtual machines under shared placement run.
 _Avoid_: shared pool, shared CPUs, free CPUs
 
 **Partition**:
-The scheduler's division of the unpinned CPUs among the virtual machines under shared placement, one cpuset each (`--shared-policy=partition`). Cpusets are disjoint while the unpinned CPUs suffice; when oversubscribed they overlap, but only within one NUMA node.
+The scheduler's division of the ungrouped CPUs among the virtual machines under shared placement, one cpuset each (`--shared-policy=partition`). Cpusets are disjoint while the ungrouped CPUs suffice; when oversubscribed they overlap, but only within one NUMA node.
 _Avoid_: shared pool, slice
 
 **Plan**:
@@ -122,6 +122,10 @@ _Avoid_: size class
 **CPU share group**:
 A set of host CPUs with a fixed number of seats, used only by the virtual machines seated in it; every member has the same vCPU count and sees all of the group's CPUs.
 _Avoid_: shared pool, shared placement, share group
+
+**Ungrouped CPUs**:
+A zone's unpinned CPUs that no CPU share group holds; where virtual machines under shared placement run.
+_Avoid_: shared pool, shared CPUs, floating CPUs
 
 **CPU share VM**:
 A virtual machine that sits in a CPU share group instead of holding CPUs of its own.

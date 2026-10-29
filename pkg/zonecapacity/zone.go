@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/internal/cpumanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
@@ -309,6 +310,15 @@ func (z *Zone) Available(p Policy) Capacity {
 	return z.available(z.usage(p), ratio)
 }
 
+// CPUShareCPUs is how many host CPUs accounting charges for the zone's CPU share groups
+// under p: none under CPU overcommit, which gives CPU share VMs shared placement.
+func (z *Zone) CPUShareCPUs(p Policy) int {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	return z.usage(p).cpuShareCPUs
+}
+
 // ratio is how many shared vCPUs the zone offers per unpinned host CPU under p.
 func (z *Zone) ratio(p Policy) (float64, error) {
 	ratio := p.CPUOvercommitRatio
@@ -438,12 +448,12 @@ func (z *Zone) free(u usage) freeResources {
 func (z *Zone) usage(p Policy) usage {
 	u := usage{pinnedCPUs: cpuset.New(), numaMemory: map[int]uint64{}}
 
-	seated := map[cpuShareClass]int{}
+	seated := map[cpumanager.CPUShareClass]int{}
 
 	for _, rec := range z.vms {
 		switch {
 		case rec.share > 0 && p.cpuShareGroups():
-			seated[cpuShareClass{seats: rec.share, vcpus: rec.cpus}]++
+			seated[cpumanager.CPUShareClass{Seats: rec.share, VCPUs: rec.cpus}]++
 		case rec.cpuSet.IsEmpty():
 			u.sharedCPUs += rec.cpus
 		default:
@@ -458,27 +468,9 @@ func (z *Zone) usage(p Policy) usage {
 	}
 
 	u.pinnedCPUs = u.pinnedCPUs.Intersection(z.allCPUs).Difference(z.reservedCPUs)
-	u.cpuShareCPUs = cpuShareGroupCPUs(seated)
+	u.cpuShareCPUs = cpumanager.CPUShareCPUs(seated)
 
 	return u
-}
-
-// cpuShareClass is the shape every member of a CPU share group has.
-type cpuShareClass struct {
-	seats int
-	vcpus int
-}
-
-// cpuShareGroupCPUs is the one count of host CPUs the CPU share groups take: each class of
-// count seated VMs needs ceil(count/seats) groups of vcpus host CPUs.
-func cpuShareGroupCPUs(seated map[cpuShareClass]int) int {
-	cpus := 0
-
-	for c, count := range seated {
-		cpus += (count + c.seats - 1) / c.seats * c.vcpus
-	}
-
-	return cpus
 }
 
 // usageWith is the usage under p if VM id held rec instead of its current record.

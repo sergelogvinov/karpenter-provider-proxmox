@@ -205,9 +205,13 @@ func TestPlanDeterministic(t *testing.T) {
 
 		for id := 1; id <= n; id++ {
 			vm := zonecapacity.VM{ID: id, CPUs: 1 + rng.IntN(8), Memory: gib}
-			if id%5 == 0 {
+			switch {
+			case id%5 == 0:
 				vm.CPUs = 2
 				vm.Affinity = fmt.Sprintf("%d,%d", 8+id/5, 40+id/5)
+			case id%3 == 0:
+				vm.CPUs = 2 * (1 + id%2)
+				vm.Description = fmt.Sprintf("cpushare=%d", 2+id/3%3)
 			}
 
 			vms = append(vms, vm)

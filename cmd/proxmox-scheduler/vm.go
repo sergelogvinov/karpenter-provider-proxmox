@@ -91,25 +91,26 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 	r.logNotes(plan)
 
 	if a, ok := plan.Changed[vmID]; ok {
-		r.placeStartedVM(ctx, vmID, pid, threads, vmConfig, a, plan.Unpinned)
+		r.placeStartedVM(ctx, vmID, pid, threads, vmConfig, a, plan.Ungrouped)
 	}
 
 	r.applyMu.Unlock()
 
 	// A VM starting always changes the unpinned CPUs: its own partition if under
-	// shared placement, or the CPUs it takes from them otherwise.
+	// shared placement, its CPU share group, or the CPUs it takes from them otherwise.
 	r.scheduleRebalance(ctx)
 
 	return nil
 }
 
 // placeStartedVM puts a starting VM's threads where a says. A pinned VM is pinned one
-// vCPU per CPU and a constrained VM masked to its affinity, both with the busy governor
-// and their devices' IRQs on those CPUs. A VM under shared placement is masked to all
-// unpinned CPUs until the next rebalance gives it its partition.
-func (r *SchedulerHandler) placeStartedVM(ctx context.Context, vmID, pid int, threads []int, vmConfig *qemu.Config, a zonecapacity.Assignment, unpinned cpuset.CPUSet) {
+// vCPU per CPU, a constrained VM masked to its affinity and a CPU share VM to its
+// group, all with the busy governor and their devices' IRQs on those CPUs. A VM under
+// shared placement is masked to all the ungrouped CPUs until the next rebalance gives
+// it its partition.
+func (r *SchedulerHandler) placeStartedVM(ctx context.Context, vmID, pid int, threads []int, vmConfig *qemu.Config, a zonecapacity.Assignment, ungrouped cpuset.CPUSet) {
 	switch a.Placement {
-	case zonecapacity.PlacementPinned, zonecapacity.PlacementConstrained:
+	case zonecapacity.PlacementPinned, zonecapacity.PlacementConstrained, zonecapacity.PlacementCPUShare:
 		r.logger.Info("VM placing CPU threads", "vmID", vmID, "threadCount", len(threads), "cores", a.CPUs.String(), "oneToOne", a.OneToOne())
 
 		if err := r.applyCPUs(ctx, vmID, pid, a); err != nil {
@@ -120,21 +121,21 @@ func (r *SchedulerHandler) placeStartedVM(ctx context.Context, vmID, pid int, th
 		r.steerDeviceIRQs(vmID, vmConfig, a.CPUs)
 
 	case zonecapacity.PlacementShared:
-		if unpinned.IsEmpty() {
+		if ungrouped.IsEmpty() {
 			return
 		}
 
-		r.logger.Info("VM masking CPU threads to the unpinned CPUs", "vmID", vmID, "threadCount", len(threads), "cpus", unpinned.String())
+		r.logger.Info("VM masking CPU threads to the ungrouped CPUs", "vmID", vmID, "threadCount", len(threads), "cpus", ungrouped.String())
 
-		if err := utilsys.SetThreadsAffinity(ctx, vmID, pid, threads, unpinned); err != nil {
+		if err := utilsys.SetThreadsAffinity(ctx, vmID, pid, threads, ungrouped); err != nil {
 			r.logger.Error(err, "Failed to apply provisional shared CPU mask", "vmID", vmID)
 		}
 
-		if err := utilsys.SetProcessAffinity(ctx, vmID, pid, unpinned); err != nil {
+		if err := utilsys.SetProcessAffinity(ctx, vmID, pid, ungrouped); err != nil {
 			r.logger.Error(err, "Failed to mask shared VM process", "vmID", vmID)
 		}
 
-		r.steerDeviceIRQs(vmID, vmConfig, unpinned)
+		r.steerDeviceIRQs(vmID, vmConfig, ungrouped)
 	}
 }
 

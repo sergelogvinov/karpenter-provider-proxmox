@@ -123,7 +123,7 @@ type PlanOptions struct {
     MinWidth  int  // --shared-min-width
 }
 
-type Placement int // PlacementShared, PlacementPinned (1:1), PlacementConstrained (masked)
+type Placement int // PlacementShared, PlacementPinned (1:1), PlacementConstrained (masked), PlacementCPUShare (masked to its group)
 
 type Assignment struct {
     CPUs      cpuset.CPUSet
@@ -131,13 +131,17 @@ type Assignment struct {
 }
 
 type Plan struct {
-    Changed  map[int]Assignment // VMs whose cpuset must change; absent = leave as is
-    Pinned   cpuset.CPUSet      // CPUs pinned and constrained VMs hold
-    Unpinned cpuset.CPUSet      // usable CPUs no pinned or constrained VM holds
-    Busy     cpuset.CPUSet      // CPUs some VM's cpuset holds, for the busy governor
-    Idle     cpuset.CPUSet      // the rest of the usable CPUs
-    Notes    []string           // spills, groups that did not fit, accounting drift
+    Changed   map[int]Assignment // VMs whose cpuset must change; absent = leave as is
+    Pinned    cpuset.CPUSet      // CPUs pinned and constrained VMs hold
+    Unpinned  cpuset.CPUSet      // usable CPUs no pinned or constrained VM holds
+    Groups    cpuset.CPUSet      // unpinned CPUs the CPU share groups hold
+    Ungrouped cpuset.CPUSet      // unpinned CPUs no group holds: where VMs under shared placement run
+    Busy      cpuset.CPUSet      // CPUs some VM's cpuset holds, for the busy governor
+    Idle      cpuset.CPUSet      // the rest of the usable CPUs
+    Notes     []string           // spills, groups that did not fit, accounting drift
 }
+
+func (z *Zone) CPUShareCPUs(p Policy) int // eCPUs accounting charges under p; 0 under CPU overcommit
 ```
 
 ### 3.1 Invariants
@@ -156,6 +160,11 @@ type Plan struct {
   5. otherwise: floating.
 - **One count.** `eCPUs = Σ ceil(count/N) × vCPU` over each `(N, vCPU)` class is computed by one internal function.
   Accounting subtracts it in `Reserve`, `Fit`, `Available` and `Slots`; `Plan` builds exactly that many groups.
+  `Plan` notes drift when the CPUs its groups use differ from `CPUShareCPUs` under the `static` policy, which the
+  scheduler is built for: when groups do not fit.
+- **A group that does not fit** takes what the other groups left of the unpinned CPUs, up to its width, never
+  overlapping another group. An even-width group needs whole cores, on one NUMA node or spilled across nodes; without
+  them it does not fit. When nothing is left its members are not seated and are left as they are, with a note.
 - **Round trip.** Tracking a VM whose config was written from a `Grant` yields exactly the record `Reserve` created.
 - **Slot free** iff its CPUs are unpinned, its NUMA node has the slot's memory, and `|usable − pinned| − eCPUs ≥ slot
   CPUs`. Strict slot allocation takes the lowest NUMA node, then the lowest slot index.
@@ -163,7 +172,8 @@ type Plan struct {
 - **`Plan` is deterministic** in the records, `current` and the options, and does not depend on map order.
   Priority: pinned > CPU share groups > floating.
 - **`Plan` with `Partition: false`** only touches floating VMs when at least one CPU share group exists (to keep them
-  off the groups); with no groups it is the pre-existing no-op.
+  off the groups), masking each to all of `Plan.Ungrouped`, and keeps a VM it masked so on the ungrouped CPUs after
+  the groups are gone; a VM it never masked is the pre-existing no-op.
 
 ### 3.2 Ordering
 
@@ -228,20 +238,28 @@ _ = z.Track(zonecapacity.VM{                // start / sync
 z.Release(id)                               // stop
 
 plan := z.Plan(tracker.applied(), zonecapacity.PlanOptions{Partition: partition, MinWidth: w})
-for id, a := range plan.Changed {           // debounced rebalance, partition only
-    if a.Placement == zonecapacity.PlacementShared && apply(id, a) == nil {
+for id, a := range plan.Changed {           // debounced rebalance
+    if (a.Placement == zonecapacity.PlacementCPUShare || a.Placement == zonecapacity.PlacementShared) &&
+        apply(id, a) == nil {
         tracker.setApplied(id, a.CPUs)
     }
 }
-setGovernors(plan.Busy.Intersection(plan.Unpinned), plan.Unpinned)
+if partition {
+    setGovernors(plan.Busy.Intersection(plan.Unpinned), plan.Unpinned)
+} else {
+    setGovernors(plan.Groups, previousGroups.Intersection(plan.Unpinned).Difference(plan.Groups)) // busy, free
+}
 logNotes(plan.Notes)
 ```
 
 The scheduler keeps its pre-module behaviour: a starting VM's own entry in `plan.Changed` is applied at once
-(pinned 1:1 or masked to its affinity, with the busy governor and its IRQs; a VM under shared placement is masked to
-all of `plan.Unpinned` until the rebalance gives it its partition). A stop frees the governor of
-`before.Pinned − after.Pinned`. A sync never runs `taskset`; it takes a pinned VM's affinity as applied. The rebalance
-runs only under `--shared-policy=partition` and touches only VMs under shared placement.
+(pinned 1:1, or masked to its affinity or CPU share group, with the busy governor and its IRQs; a VM under shared
+placement is masked to all of `plan.Ungrouped` until the rebalance gives it its partition). A stop frees the governor
+of `before.Pinned − after.Pinned`. A sync never runs `taskset`; it takes a pinned VM's affinity as applied. The
+rebalance touches only CPU share VMs and VMs under shared placement; with `--shared-policy=none` it still seats CPU
+share VMs in their groups, keeps VMs under shared placement off them, and governs only the group CPUs (busy on the
+groups, free on the CPUs groups gave up). On a sync after a restart, a CPU share
+VM's current thread mask is taken as applied, so members with equal masks form their group again.
 
 `classifyVM`, `sharedPool`, `numaHint`, the `usedCPUs`/`sharedCPUs` bookkeeping and the direct `cpumanager.PlanShared`
 call are deleted.
