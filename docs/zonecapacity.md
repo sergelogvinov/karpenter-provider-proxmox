@@ -64,11 +64,12 @@ func New(h Host) (*Zone, error)
 // VM is one virtual machine as either binary reads it from its config. The module parses the raw fields.
 type VM struct {
     ID          int
+    Name        string         // `node-capacity` with the `karpenter` tag marks the node-capacity guest
     CPUs        int
     Memory      uint64
     Affinity    string         // the `affinity` option, "" when unset
     Description string         // `affinity=` fallback and `cpushare=N` tokens
-    Tags        []string       // `karpenter` marks the node-capacity guest, which is ignored
+    Tags        []string       // `karpenter` on the `node-capacity` VM marks the node-capacity guest, which is ignored
     NUMAMemory  map[int]uint64 // host NUMA node -> bound bytes, from numaN hostnodes
     Slot        *SlotShape     // Reserve/Fit only: ask for a strict NUMA slot of this shape
 }
@@ -132,7 +133,8 @@ type Plan struct {
 - **Usage is recomputed from the records** on every query, so tracking, reserving or releasing the same VM any number
   of times never drifts (as `ZoneCapacity` does today).
 - **Classification**, in order:
-  1. a `karpenter` tag: ignored, never counted,
+  1. the node-capacity guest (named `node-capacity` and tagged `karpenter`): ignored, never counted. Workload VMs
+     often carry the `karpenter` tag too, so the tag alone is not enough,
   2. an affinity (option, or `affinity=` token) with `cores == |affinity|`: pinned,
   3. any other affinity: constrained (a `cpushare` token next to an affinity is ignored, with a note),
   4. a `cpushare=N` token: CPU share VM,

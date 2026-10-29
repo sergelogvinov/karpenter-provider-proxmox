@@ -185,12 +185,16 @@ func (z *Zone) Track(vm VM) error {
 	}
 
 	c, cpus, err := vm.classify()
-	if err != nil {
-		return err
-	}
 
 	z.mu.Lock()
 	defer z.mu.Unlock()
+
+	if err != nil {
+		// An unreadable affinity still runs: hold its vCPUs and memory as shared so the zone is not overcommitted.
+		z.vms[vm.ID] = record{cpus: vm.CPUs, cpuSet: cpuset.New(), memory: vm.Memory, numaMemory: maps.Clone(vm.NUMAMemory)}
+
+		return err
+	}
 
 	if c == classIgnored {
 		delete(z.vms, vm.ID)

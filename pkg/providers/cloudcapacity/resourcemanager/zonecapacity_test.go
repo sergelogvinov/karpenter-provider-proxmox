@@ -93,6 +93,7 @@ func TestVMFromConfig(t *testing.T) {
 	tags := qemu.Tags{"karpenter"}
 
 	vm, err := VMFromConfig(&cluster.Resource{VMID: 7, MaxCPU: 4, MaxMem: int64(8 * gib)}, &qemu.Config{
+		Name:        "worker-7",
 		Affinity:    "0-3",
 		Description: "Karpenter managed instance, affinity=0-3",
 		Tags:        &tags,
@@ -102,7 +103,7 @@ func TestVMFromConfig(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, zonecapacity.VM{
-		ID: 7, CPUs: 4, Memory: 8 * gib,
+		ID: 7, Name: "worker-7", CPUs: 4, Memory: 8 * gib,
 		Affinity:    "0-3",
 		Description: "Karpenter managed instance, affinity=0-3",
 		Tags:        []string{"karpenter"},

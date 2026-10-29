@@ -24,22 +24,29 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-// NodeCapacityTag marks the node-capacity guest, which describes the host and is never a workload.
-const NodeCapacityTag = "karpenter"
+// NodeCapacityName and NodeCapacityTag together identify the node-capacity guest, which describes
+// the host and is never a workload. Workload VMs often carry the `karpenter` tag too, so the tag
+// alone is not enough.
+const (
+	NodeCapacityName = "node-capacity"
+	NodeCapacityTag  = "karpenter"
+)
 
 // affinityToken is the description token that carries a VM's host CPUs when the affinity option is unset.
 const affinityToken = "affinity="
 
 // VM is one virtual machine as read from its config. The module parses the raw fields.
 type VM struct {
-	ID     int
+	ID int
+	// Name is the VM name; with the `karpenter` tag it marks the node-capacity guest.
+	Name   string
 	CPUs   int
 	Memory uint64
 	// Affinity is the `affinity` option, "" when unset.
 	Affinity string
 	// Description holds the `affinity=` fallback token, comma separated from other text.
 	Description string
-	// Tags are the VM's tags; `karpenter` marks the node-capacity guest, which is ignored.
+	// Tags are the VM's tags; `karpenter` on a VM named `node-capacity` marks the node-capacity guest, which is ignored.
 	Tags []string
 	// NUMAMemory is the memory bound to each host NUMA node, in bytes, from numaN hostnodes.
 	NUMAMemory map[int]uint64
@@ -62,7 +69,7 @@ const (
 
 // classify returns vm's class and its host CPUs.
 func (vm VM) classify() (class, cpuset.CPUSet, error) {
-	if slices.Contains(vm.Tags, NodeCapacityTag) {
+	if vm.Name == NodeCapacityName && slices.Contains(vm.Tags, NodeCapacityTag) {
 		return classIgnored, cpuset.New(), nil
 	}
 
