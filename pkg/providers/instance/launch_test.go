@@ -78,6 +78,8 @@ type launchSetup struct {
 	// manualTasks leaves every Proxmox task running until the test
 	// completes it.
 	manualTasks bool
+	// nodePolicy is the node CPU policy; default "simple".
+	nodePolicy string
 }
 
 // launchFixture is an instance provider launching into a fake Proxmox
@@ -159,7 +161,7 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	client := cl.Client(t)
 	pool.Set(testRegion, client)
 
-	ctx := options.ToContext(t.Context(), &options.Options{ProxmoxVMID: firstVMID})
+	ctx := options.ToContext(t.Context(), &options.Options{ProxmoxVMID: firstVMID, NodePolicy: setup.nodePolicy})
 
 	capacity := cloudcapacity.NewProvider(ctx, pool)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
@@ -391,6 +393,34 @@ func TestCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pool.Members, 1)
 	assert.Equal(t, firstVMID, pool.Members[0].VMID)
+}
+
+func TestCreateWritesGrantTokensIntoDescription(t *testing.T) {
+	for _, tc := range []struct {
+		policy string
+		pinned bool
+	}{
+		{policy: "simple"},
+		{policy: "static", pinned: true},
+	} {
+		t.Run(tc.policy, func(t *testing.T) {
+			f := newLaunchFixture(t, launchSetup{nodePolicy: tc.policy, cpus: 2, memory: "2Gi"})
+
+			node, err := f.create(f.ctx, "node-1")
+			require.NoError(t, err)
+
+			cfg := f.vmConfig(node)
+			if !tc.pinned {
+				assert.Empty(t, cfg.Affinity)
+				assert.NotContains(t, cfg.Description, "affinity=")
+
+				return
+			}
+
+			require.NotEmpty(t, cfg.Affinity, "a pinned VM gets its own host CPUs")
+			assert.True(t, strings.HasSuffix(cfg.Description, ", affinity="+cfg.Affinity), "description %q carries the affinity token", cfg.Description)
+		})
+	}
 }
 
 func TestCreateWithoutCloudInitISO(t *testing.T) {

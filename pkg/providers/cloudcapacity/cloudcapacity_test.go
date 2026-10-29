@@ -166,6 +166,28 @@ func TestSyncCountsStartedVMOnce(t *testing.T) {
 	require.False(t, fits(p, 3, gib))
 }
 
+func TestSyncIgnoresNodeCapacityGuest(t *testing.T) {
+	t.Parallel()
+
+	ctx, cluster, p := newProvider(t)
+
+	tags := qemu.Tags{"karpenter"}
+	cluster.Node(zone).AddVM(9000, &qemu.Config{
+		Cores:  new(8),
+		Memory: &qemu.Memory{Current: new(16384)},
+		Tags:   &tags,
+	}, fakeapi.WithStatus(qemu.VMStatusRunning))
+	cluster.Node(zone).AddVM(100, &qemu.Config{
+		Cores:       new(2),
+		Memory:      &qemu.Memory{Current: new(2048)},
+		Description: "Karpenter managed instance, affinity=0,4",
+	}, fakeapi.WithStatus(qemu.VMStatusRunning))
+	require.NoError(t, p.SyncNodeCapacity(ctx))
+
+	require.True(t, fits(p, 6, 13*gib), "the node-capacity guest holds nothing")
+	require.False(t, fits(p, 7, gib), "the workload's affinity token pins 2 CPUs")
+}
+
 func TestReservationDuringSyncSurvivesIt(t *testing.T) {
 	t.Parallel()
 

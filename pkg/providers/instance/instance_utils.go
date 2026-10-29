@@ -115,9 +115,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		fmt.Sprintf("class=%s", nodeClass.Name),
 		fmt.Sprintf("capacity-type=%s", capacityType),
 	}
-	if !reserved.CPUSet.IsEmpty() {
-		comments = append(comments, fmt.Sprintf("affinity=%s", reserved.CPUSet.String()))
-	}
+	comments = append(comments, reserved.DescriptionTokens...)
 
 	// Added before the clone, which can fail after Proxmox created the VM.
 	// DeleteVM stops the VM first if it is running (e.g. when creation

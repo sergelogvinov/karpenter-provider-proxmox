@@ -25,8 +25,8 @@ import (
 	"sort"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -38,7 +38,7 @@ var ErrNoZoneFits = errors.New("no zone has room for the VM")
 // zoneFit is the fit of a VM in one candidate zone.
 type zoneFit struct {
 	zone string
-	fit  resourcemanager.Fit
+	fit  zonecapacity.Fit
 }
 
 // span is how many NUMA nodes the VM would span, counting a shared VM as one,
@@ -59,7 +59,7 @@ func (p *DefaultProvider) ChooseZone(ctx context.Context, region string, zones [
 	// failed records a zone's lack of room, and returns any other error to give up with.
 	failed := func(zone string, err error) error {
 		err = fmt.Errorf("zone %s: %w", zone, err)
-		if !errors.Is(err, resourcemanager.ErrNoRoom) {
+		if !errors.Is(err, zonecapacity.ErrNoRoom) {
 			return err
 		}
 

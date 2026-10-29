@@ -26,7 +26,6 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/network"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
-	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -81,12 +80,12 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		opt, err := vmresources.GetResourceFromVMConfig(&vmr, cfg)
+		vm, err := resourcemanager.VMFromConfig(&vmr, cfg)
 		if err != nil {
 			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
 		}
 
-		err = i.Capacity.Track(opt)
+		err = i.Capacity.Track(vm)
 		if err != nil {
 			log.Error(err, "Failed to track resources for VM", "vmID", vmr.VMID)
 		}
