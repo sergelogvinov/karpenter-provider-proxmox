@@ -123,6 +123,9 @@ type Grant struct {
 	CPUSet cpuset.CPUSet
 	// NUMA maps host NUMA nodes to the guest vCPUs and memory bound to them.
 	NUMA map[int]NUMABinding
+	// HugePageSize > 0 means the VM is launched with hugepages of this size, in bytes:
+	// a VM in a NUMA slot of a zone with a hugepage pool.
+	HugePageSize uint64
 	// DescriptionTokens are written into the VM description, e.g. "affinity=8-15" or "cpushare=2".
 	DescriptionTokens []string
 }
@@ -157,6 +160,8 @@ type Zone struct {
 	numaMemory map[int]uint64
 	// slots are the zone's NUMA slots, fixed by the topology and the host reserve.
 	slots []slot
+	// hugePageSize is the page size of the zone's hugepage pool; 0 without one.
+	hugePageSize uint64
 
 	vms map[int]record
 }
@@ -219,6 +224,7 @@ func New(h Host) (*Zone, error) {
 		memory:       topo.TotalMemory - reservedMemory,
 		numaMemory:   numaMemory,
 		slots:        carveSlots(topo, allCPUs.Difference(h.ReservedCPUs), numaMemory),
+		hugePageSize: h.HugePageSize,
 		vms:          map[int]record{},
 	}, nil
 }
@@ -281,11 +287,17 @@ func (z *Zone) Reserve(p Policy, vm VM) (Grant, error) {
 		return Grant{}, nil
 	}
 
-	return Grant{
+	grant := Grant{
 		CPUSet:            rec.cpuSet.Clone(),
 		NUMA:              numa,
 		DescriptionTokens: []string{affinityToken + rec.cpuSet.String()},
-	}, nil
+	}
+
+	if vm.Slot != nil {
+		grant.HugePageSize = z.hugePageSize
+	}
+
+	return grant, nil
 }
 
 // Fit is what reserving vm under p would leave the zone with, without reserving it.
@@ -378,12 +390,21 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 		return record{}, nil, fmt.Errorf("%w: CPU share VM %d under CPU overcommit", ErrNotOffered, vm.ID)
 	}
 
+	if err := vm.checkSlot(p, share); err != nil {
+		return record{}, nil, err
+	}
+
 	rec := record{cpus: vm.CPUs, cpuSet: cpuset.New(), share: share, memory: vm.Memory}
 
 	var numa map[int]NUMABinding
 
 	if p.Kind == PolicyStatic && share == 0 {
-		rec.cpuSet, numa, err = placePinned(z.free(z.usage(p)), vm.CPUs, vm.Memory)
+		if vm.Slot != nil {
+			rec.cpuSet, numa, err = z.placeSlot(z.free(z.usage(p)), *vm.Slot)
+		} else {
+			rec.cpuSet, numa, err = placePinned(z.free(z.usage(p)), vm.CPUs, vm.Memory)
+		}
+
 		if err != nil {
 			return record{}, nil, noRoomError{err}
 		}

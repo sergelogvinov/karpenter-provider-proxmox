@@ -45,6 +45,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -85,7 +86,18 @@ type launchSetup struct {
 	nodePolicy string
 	// cpuShare makes the instance type a CPU share type of that many seats, family e<N>.
 	cpuShare int
+	// numa makes the instance type the NUMA type of a NUMA template of that slot fraction, family n<N>,
+	// on zones of two NUMA nodes, CPUs 0-3 and 4-7, of 8GiB each.
+	numa int
+	// hugePages gives each zone a hugepage pool of 2MiB pages on its NUMA nodes.
+	hugePages bool
 }
+
+// numaZoneSettings is the node settings file of launchSetup.numa: two NUMA nodes of 4 CPUs and 8GiB.
+const numaZoneSettings = `{%q: {"*": {"sockets": 2, "hugepagesize": %d, "nodes": {
+	"0": {"cpus": "0-3", "memsize": 8589934592},
+	"1": {"cpus": "4-7", "memsize": 8589934592}
+}}}}`
 
 // launchFixture is an instance provider launching into a fake Proxmox
 // cluster, with real zone capacity, IP pool and template sync behind it.
@@ -94,8 +106,11 @@ type launchFixture struct {
 	ctx          context.Context //nolint:containedctx
 	cluster      *fakeapi.Cluster
 	client       *proxmoxrest.Client
+	pool         *pxpool.ProxmoxPool
 	provider     *instance.DefaultProvider
 	capacity     *cloudcapacity.DefaultProvider
+	types        *instancetype.DefaultProvider
+	options      *options.Options
 	setup        launchSetup
 	nodeClass    *v1alpha1.ProxmoxNodeClass
 	instanceType *cloudprovider.InstanceType
@@ -178,7 +193,22 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 		`[{"name": %q, "cpushare": %d, "capacity": {"cpu": "%d", "memory": %q}}]`,
 		instanceTypeName, setup.cpuShare, setup.cpus, setup.memory), 0o600))
 
-	ctx := options.ToContext(t.Context(), &options.Options{ProxmoxVMID: firstVMID, NodePolicy: setup.nodePolicy, InstanceTypesFilePath: typesFile})
+	operatorOptions := &options.Options{ProxmoxVMID: firstVMID, NodePolicy: setup.nodePolicy, InstanceTypesFilePath: typesFile}
+
+	if setup.numa > 0 {
+		var pageSize int
+		if setup.hugePages {
+			pageSize = 2 << 20
+		}
+
+		require.NoError(t, os.WriteFile(typesFile, fmt.Appendf(nil,
+			`[{"name": "n%d", "numa": %d, "capacity": {"pods": "110"}}]`, setup.numa, setup.numa), 0o600))
+
+		operatorOptions.NodeSettingFilePath = filepath.Join(t.TempDir(), "nodes.json")
+		require.NoError(t, os.WriteFile(operatorOptions.NodeSettingFilePath, fmt.Appendf(nil, numaZoneSettings, testRegion, pageSize), 0o600))
+	}
+
+	ctx := options.ToContext(t.Context(), operatorOptions)
 
 	capacity := cloudcapacity.NewProvider(ctx, pool)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
@@ -246,13 +276,27 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 		Offerings: offerings,
 	}
 
+	if setup.numa > 0 {
+		// The NUMA type is generated from the zones' slot shapes, with its offerings.
+		require.NoError(t, instanceTypes.UpdateInstanceTypeOfferings(ctx))
+
+		types, err := instanceTypes.List(ctx, nodeClass)
+		require.NoError(t, err)
+		require.Len(t, types, 1, "both NUMA nodes have the same slot shape")
+
+		instanceType = types[0]
+	}
+
 	return &launchFixture{
 		t:            t,
 		ctx:          ctx,
 		cluster:      cl,
 		client:       client,
+		pool:         pool,
 		provider:     p,
 		capacity:     capacity,
+		types:        instanceTypes,
+		options:      operatorOptions,
 		setup:        setup,
 		nodeClass:    nodeClass,
 		instanceType: instanceType,
@@ -468,6 +512,155 @@ func TestCreateCPUShare(t *testing.T) {
 			require.Error(t, err, "a third node needs a second group")
 		})
 	}
+}
+
+// TestCreateNUMASlot checks that NUMA types launch into aligned NUMA slots, lowest NUMA node and slot first:
+// pinned 1:1 to the slot's CPUs, with one guest NUMA node bound to the slot's host node and its memory.
+// Once every slot is taken, the next launch fails for lack of capacity instead of spanning NUMA nodes.
+func TestCreateNUMASlot(t *testing.T) {
+	for _, tc := range []struct {
+		numa     int
+		name     string
+		memory   int
+		affinity []string
+	}{
+		// Each NUMA node keeps 7.5GiB after its half of the 1GiB host reserve.
+		{numa: 1, name: "n1.4VCPU-7GB", memory: 7 * 1024, affinity: []string{"0-3", "4-7"}},
+		// Two halves fill a NUMA node.
+		{numa: 2, name: "n2.2VCPU-3GB", memory: 3 * 1024, affinity: []string{"0-1", "2-3", "4-5", "6-7"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: tc.numa})
+			require.Equal(t, tc.name, f.instanceType.Name)
+
+			for i, affinity := range tc.affinity {
+				node, err := f.create(f.ctx, fmt.Sprintf("node-%d", i))
+				require.NoError(t, err)
+				assert.Equal(t, fmt.Sprintf("n%d", tc.numa), node.Labels[v1alpha1.LabelInstanceFamily])
+
+				hostNode := "0"
+				if i >= len(tc.affinity)/2 {
+					hostNode = "1"
+				}
+
+				cfg := f.vmConfig(node)
+				assert.Equal(t, affinity, cfg.Affinity)
+				assert.True(t, strings.HasSuffix(cfg.Description, ", affinity="+affinity), "description %q carries the affinity token", cfg.Description)
+				require.NotNil(t, cfg.NUMAEnabled)
+				assert.True(t, *cfg.NUMAEnabled)
+				assert.Equal(t, map[int]qemu.NUMA{0: {
+					CPUIDs:    []string{fmt.Sprintf("0-%d", 4/tc.numa-1)},
+					HostNodes: []string{hostNode},
+					Memory:    new(tc.memory),
+					Policy:    "bind",
+				}}, cfg.NUMA)
+				assert.Nil(t, cfg.Hugepages, "the zone has no hugepage pool")
+			}
+
+			// The offering was available when the type was listed, but the last slot is gone.
+			_, err := f.create(f.ctx, "node-last")
+			require.Error(t, err)
+			assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "no free slot is a lack of capacity: %v", err)
+			assert.Len(t, f.guests()["pve1"], len(tc.affinity), "no VM spans NUMA nodes")
+		})
+	}
+}
+
+// TestCreateNUMASlotHugePages checks that a zone with a hugepage pool launches NUMA VMs with hugepages
+// of the pool's page size, sized on the pool.
+func TestCreateNUMASlotHugePages(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 1, hugePages: true})
+	require.Equal(t, "n1.4VCPU-8GB", f.instanceType.Name)
+
+	node, err := f.create(f.ctx, "node-1")
+	require.NoError(t, err)
+
+	cfg := f.vmConfig(node)
+	require.NotNil(t, cfg.Hugepages)
+	assert.Equal(t, "2", *cfg.Hugepages)
+	assert.Equal(t, new(8*1024), cfg.NUMA[0].Memory)
+}
+
+// TestCreateNUMASlotResyncs checks that a capacity sync that never saw the launch tracks a NUMA VM
+// as a pinned VM covering its slot.
+func TestCreateNUMASlotResyncs(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 2})
+
+	_, err := f.create(f.ctx, "node-1")
+	require.NoError(t, err)
+
+	synced := cloudcapacity.NewProvider(f.ctx, f.pool)
+	require.NoError(t, synced.SyncNodeCapacity(f.ctx))
+
+	assert.Equal(t, f.capacity.Slots(testRegion, "pve1"), synced.Slots(testRegion, "pve1"))
+	// The VM covers the first half of NUMA node 0, so the whole node and two of its quarters are taken too.
+	assert.Equal(t, []zonecapacity.SlotOffer{
+		{Shape: zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 7 << 30}, Free: 1},
+		{Shape: zonecapacity.SlotShape{Fraction: 2, CPUs: 2, Memory: 3 << 30}, Free: 3},
+		{Shape: zonecapacity.SlotShape{Fraction: 4, CPUs: 1, Memory: 1 << 30}, Free: 6},
+	}, synced.Slots(testRegion, "pve1"))
+}
+
+// TestCreateNUMASlotAligned checks that a NUMA VM takes a whole free slot, not the free CPUs ordinary
+// pinned placement would pick around a VM already pinned inside a slot.
+func TestCreateNUMASlotAligned(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 2})
+
+	f.cluster.Node("pve1").AddVM(500, &qemu.Config{Name: "other", Cores: new(1), Affinity: "0", Memory: &qemu.Memory{Current: new(1024)}},
+		fakeapi.WithStatus(qemu.VMStatusRunning))
+	require.NoError(t, f.capacity.SyncNodeCapacity(f.ctx))
+
+	for _, affinity := range []string{"2-3", "4-5", "6-7"} {
+		node, err := f.create(f.ctx, "node-"+affinity)
+		require.NoError(t, err)
+		assert.Equal(t, affinity, f.vmConfig(node).Affinity)
+	}
+
+	_, err := f.create(f.ctx, "node-last")
+	require.Error(t, err)
+	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "CPU 1 is free, but no slot is: %v", err)
+}
+
+// TestCreateNUMASlotTypeVanished checks that a NUMA type launches into a NUMA slot even when it is gone
+// from the generated instance types between listing and launch, here by a reload of the instance types
+// file before the next offerings refresh: the slot comes from the type being launched, not the current list.
+func TestCreateNUMASlotTypeVanished(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 1, hugePages: true})
+
+	require.NoError(t, f.types.UpdateInstanceTypes(f.ctx))
+
+	types, err := f.types.List(f.ctx, f.nodeClass)
+	require.NoError(t, err)
+	require.Empty(t, types, "the NUMA type is not generated until the next offerings refresh")
+
+	for _, hostNode := range []string{"0", "1"} {
+		node, err := f.create(f.ctx, "node-"+hostNode)
+		require.NoError(t, err)
+
+		cfg := f.vmConfig(node)
+		require.NotNil(t, cfg.Hugepages, "a VM in a NUMA slot gets hugepages")
+		assert.Equal(t, "2", *cfg.Hugepages)
+		require.Len(t, cfg.NUMA, 1)
+		assert.Equal(t, []string{hostNode}, cfg.NUMA[0].HostNodes)
+	}
+
+	_, err = f.create(f.ctx, "node-last")
+	require.Error(t, err)
+	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "no free slot is a lack of capacity: %v", err)
+}
+
+// TestCreateNUMASlotZoneLeftStatic checks that a NUMA type listed while its zone was static fails for lack
+// of capacity once the zone has moved to simple placement, which offers no NUMA slots.
+func TestCreateNUMASlotZoneLeftStatic(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 2})
+
+	f.options.NodePolicy = "simple"
+	require.NoError(t, f.capacity.SyncNodeCapacity(f.ctx))
+
+	_, err := f.create(f.ctx, "node-1")
+	require.Error(t, err)
+	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "a zone without NUMA slots has no room: %v", err)
+	assert.Empty(t, f.guests()["pve1"])
 }
 
 func TestCreateWithoutCloudInitISO(t *testing.T) {

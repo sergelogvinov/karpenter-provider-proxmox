@@ -18,6 +18,7 @@ package zonecapacity
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
@@ -210,4 +211,19 @@ func wholeCores(topo *topology.Topology, node int, usable cpuset.CPUSet) ([]int,
 	}
 
 	return cores, caches
+}
+
+// placeSlot is strict slot allocation: it gives a VM the lowest free slot of shape, by NUMA node, then
+// slot index. The VM is pinned 1:1 to the slot's CPUs, with one guest NUMA node bound to the slot's NUMA
+// node holding all its memory. There is no fallback: without a free slot, the placement fails.
+func (z *Zone) placeSlot(free freeResources, shape SlotShape) (cpuset.CPUSet, map[int]NUMABinding, error) {
+	for _, s := range z.slots {
+		if s.shape != shape || !s.cpus.IsSubsetOf(free.cpus) || free.numaMemory[s.node] < shape.Memory {
+			continue
+		}
+
+		return s.cpus.Clone(), map[int]NUMABinding{s.node: {VCPUs: vcpuRange(0, s.cpus.Size()), Memory: shape.Memory}}, nil
+	}
+
+	return cpuset.New(), nil, fmt.Errorf("no free NUMA slot of fraction %d with %d CPUs and %dM", shape.Fraction, shape.CPUs, shape.Memory/MiB)
 }

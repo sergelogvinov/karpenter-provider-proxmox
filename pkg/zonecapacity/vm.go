@@ -61,6 +61,9 @@ type VM struct {
 	// CPUShare asks Reserve and Fit for a CPU share VM of that many seats (2, 3 or 4); 0 asks for none.
 	// A tracked VM is read from its `cpushare=N` token instead, unless this is set.
 	CPUShare int
+	// Slot asks Reserve and Fit for a strict NUMA slot of this shape; CPUs and Memory must match it.
+	// A tracked VM is read from its affinity and NUMA memory instead: a pinned VM covering its slot.
+	Slot *SlotShape
 	// Tags are the VM's tags; `karpenter` on a VM named `node-capacity` marks the node-capacity guest, which is ignored.
 	Tags []string
 	// NUMAMemory is the memory bound to each host NUMA node, in bytes, from numaN hostnodes.
@@ -159,6 +162,27 @@ func (vm VM) cpuShare() (int, error) {
 	}
 
 	return share, nil
+}
+
+// checkSlot rejects a slot request the policy never offers, or one that is not the size of its slot.
+func (vm VM) checkSlot(p Policy, share int) error {
+	if vm.Slot == nil {
+		return nil
+	}
+
+	if p.Kind != PolicyStatic {
+		return fmt.Errorf("%w: NUMA slot for VM %d under shared placement", ErrNotOffered, vm.ID)
+	}
+
+	if share > 0 {
+		return fmt.Errorf("%w: VM %d asks for both a NUMA slot and a CPU share", ErrInvalid, vm.ID)
+	}
+
+	if !ValidSlotFraction(vm.Slot.Fraction) || vm.CPUs != vm.Slot.CPUs || vm.Memory != vm.Slot.Memory {
+		return fmt.Errorf("%w: VM %d of %d CPUs and %dM does not match its NUMA slot %+v", ErrInvalid, vm.ID, vm.CPUs, vm.Memory/MiB, *vm.Slot)
+	}
+
+	return nil
 }
 
 // cpuShareTokenOf returns the description's `cpushare=` token, "" when it has none.

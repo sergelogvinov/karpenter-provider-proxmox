@@ -74,8 +74,9 @@ func NewZoneCapacity(host zonecapacity.Host, policy zonecapacity.Policy) (*ZoneC
 }
 
 // Reserve admits a new VM if the zone has room for it, and fills op with where it goes:
-// for pinned placement its host CPUs and NUMA split, and the description tokens to write
-// (`cpushare=N` for a CPU share VM, which gets no CPUs and no NUMA binding).
+// for pinned placement its host CPUs and NUMA split, the hugepage size of a VM in a NUMA slot,
+// and the description tokens to write (`cpushare=N` for a CPU share VM, which gets no CPUs
+// and no NUMA binding).
 // A failure for lack of room is zonecapacity.ErrNoRoom.
 func (z *ZoneCapacity) Reserve(op *resources.VMResources) error {
 	if op == nil {
@@ -246,7 +247,7 @@ func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, err
 
 // vmFromRequest is a VM request as the zone takes it.
 func vmFromRequest(op resources.VMResources) zonecapacity.VM {
-	return zonecapacity.VM{ID: op.ID, CPUs: op.CPUs, Memory: op.Memory, CPUShare: op.CPUShare}
+	return zonecapacity.VM{ID: op.ID, CPUs: op.CPUs, Memory: op.Memory, CPUShare: op.CPUShare, Slot: op.Slot}
 }
 
 // vmFromGrant is the VM a launch writes from vm's grant, as the zone reads it back.
@@ -262,9 +263,11 @@ func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
 	return vm
 }
 
-// applyGrant writes grant into op: host CPUs, the NUMA split with guest vCPU ranges and MiB, and the tokens.
+// applyGrant writes grant into op: host CPUs, the NUMA split with guest vCPU ranges and MiB, the hugepage
+// size, and the tokens.
 func applyGrant(op *resources.VMResources, grant zonecapacity.Grant) {
 	op.DescriptionTokens = grant.DescriptionTokens
+	op.HugePageSize = grant.HugePageSize
 
 	if grant.CPUSet.IsEmpty() {
 		return

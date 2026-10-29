@@ -56,10 +56,11 @@ func (p *DefaultProvider) ChooseZone(ctx context.Context, region string, zones [
 	fits := []zoneFit{}
 	errs := []error{}
 
-	// failed records a zone's lack of room, and returns any other error to give up with.
+	// failed records a zone's lack of room, and returns any other error to give up with. A zone whose
+	// policy does not offer the VM, such as a NUMA slot in a zone that left static placement, has no room for it.
 	failed := func(zone string, err error) error {
 		err = fmt.Errorf("zone %s: %w", zone, err)
-		if !errors.Is(err, zonecapacity.ErrNoRoom) {
+		if !errors.Is(err, zonecapacity.ErrNoRoom) && !errors.Is(err, zonecapacity.ErrNotOffered) {
 			return err
 		}
 

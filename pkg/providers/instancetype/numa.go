@@ -36,11 +36,6 @@ import (
 func (p *DefaultProvider) numaTypes(regions []string) []*InstanceTypeStatic {
 	byName := map[string]*InstanceTypeStatic{}
 
-	static := make(map[string]bool, len(p.staticTypes))
-	for _, item := range p.staticTypes {
-		static[item.Name] = true
-	}
-
 	taken := map[string]bool{}
 
 	for _, region := range regions {
@@ -55,7 +50,7 @@ func (p *DefaultProvider) numaTypes(regions []string) []*InstanceTypeStatic {
 					name := numaTypeName(family, offer.Shape)
 
 					// A static entry keeps its name; the NUMA type of the same name is not offered.
-					if static[name] {
+					if p.staticNames[name] {
 						if !taken[name] {
 							taken[name] = true
 

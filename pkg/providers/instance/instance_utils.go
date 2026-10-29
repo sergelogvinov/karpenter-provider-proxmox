@@ -36,6 +36,7 @@ import (
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -382,6 +383,10 @@ func cloneConfigOverrides(opt *resources.VMResources, tags []string, instanceTyp
 			}
 			idx++
 		}
+	}
+
+	if opt.HugePageSize > 0 {
+		update.Hugepages = new(strconv.FormatUint(opt.HugePageSize/zonecapacity.MiB, 10))
 	}
 
 	if len(tags) > 0 {

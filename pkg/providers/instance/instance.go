@@ -161,7 +161,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 					break
 				}
 
-				request := instancetype.VMRequest(instanceType.Capacity, p.instanceTypeProvider.CPUShare(instanceType.Name))
+				request := instancetype.VMRequest(instanceType.Capacity,
+					p.instanceTypeProvider.CPUShare(instanceType.Name), p.instanceTypeProvider.SlotFraction(instanceType.Name))
 				request.ID = newID
 
 				zone, reserved, err := p.cloudCapacityProvider.ChooseZone(ctx, region, candidates, nodeClass.Spec.PlacementStrategy, request)

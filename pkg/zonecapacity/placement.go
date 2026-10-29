@@ -220,12 +220,7 @@ func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map
 		memMiB := totalMiB * uint64(n) / uint64(cpus.Size())
 		assigned += memMiB
 
-		vcpus := make([]int, n)
-		for k := range vcpus {
-			vcpus[k] = vcpu + k
-		}
-
-		nodes[i] = NUMABinding{VCPUs: cpuset.New(vcpus...), Memory: memMiB * MiB}
+		nodes[i] = NUMABinding{VCPUs: vcpuRange(vcpu, n), Memory: memMiB * MiB}
 
 		vcpu += n
 	}
@@ -243,4 +238,14 @@ func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map
 	}
 
 	return nodes, nil
+}
+
+// vcpuRange is the n guest vCPUs numbered from first.
+func vcpuRange(first, n int) cpuset.CPUSet {
+	vcpus := make([]int, n)
+	for k := range vcpus {
+		vcpus[k] = first + k
+	}
+
+	return cpuset.New(vcpus...)
 }

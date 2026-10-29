@@ -17,6 +17,8 @@ limitations under the License.
 package resources
 
 import (
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+
 	"k8s.io/utils/cpuset"
 )
 
@@ -39,6 +41,8 @@ type VMResources struct {
 	// CPUShare is the number of VMs that share the VM's CPUs in a CPU share group: 2, 3 or 4.
 	// Zero means the VM does not sit in a CPU share group.
 	CPUShare int
+	// Slot asks for a strict NUMA slot of this shape: the VM of a NUMA type. Nil asks for none.
+	Slot *zonecapacity.SlotShape
 	// DiskGBytes is the amount of system disk in gigabytes assigned to the VM.
 	DiskGBytes uint64
 	// StorageID is the ID of the storage where the VM's disk is located.
@@ -48,6 +52,8 @@ type VMResources struct {
 	CPUSet cpuset.CPUSet
 	// NUMANodes represents the topology on the Host assigned to the VM.
 	NUMANodes map[int]NUMANodeState
+	// HugePageSize > 0 launches the VM with hugepages of this size, in bytes.
+	HugePageSize uint64
 	// DescriptionTokens are written into the VM description at launch, e.g. "affinity=8-15" or "cpushare=2".
 	DescriptionTokens []string
 }
