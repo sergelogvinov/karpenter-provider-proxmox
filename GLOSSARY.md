@@ -131,6 +131,10 @@ _Avoid_: slot type, NUMA instance
 A zone's slot shape together with how many free NUMA slots of that shape it has; a NUMA type is available in a zone when its slot offer has at least one.
 _Avoid_: slot availability, free slots (for the pair)
 
+**Strict slot allocation**:
+Reserving a NUMA type's virtual machine in the lowest free NUMA slot of its slot shape (lowest NUMA node, then lowest slot), pinned 1:1 to the slot's CPUs with one guest NUMA node bound to the slot's NUMA node, and with hugepages when the zone has a hugepage pool. Without a free slot the reservation fails; it never falls back to CPUs outside a slot.
+_Avoid_: slot reserve, aligned placement
+
 **CPU share group**:
 A set of host CPUs with a fixed number of seats, used only by the virtual machines seated in it; every member has the same vCPU count and sees all of the group's CPUs.
 _Avoid_: shared pool, shared placement, share group

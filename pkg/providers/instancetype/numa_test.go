@@ -208,4 +208,6 @@ func TestNUMATypeNameTakenByStaticEntry(t *testing.T) {
 	it, err := p.Get(context.Background(), "n2.14VCPU-63GB")
 	require.NoError(t, err)
 	require.Equal(t, int64(2), it.Capacity.Cpu().Value(), "the static entry wins")
+	require.Zero(t, p.SlotFraction("n2.14VCPU-63GB"), "the static entry launches without a NUMA slot")
+	require.Equal(t, 2, p.SlotFraction("n2.16VCPU-63GB"))
 }

@@ -51,6 +51,10 @@ type Provider interface {
 	// CPUShare is the number of VMs that share the CPUs of instance type name: 2, 3 or 4.
 	// Zero means dedicated CPUs, or an unknown instance type.
 	CPUShare(name string) int
+	// SlotFraction is the slot fraction of NUMA type name: 1, 2 or 4, from the NUMA template of its family.
+	// It holds while the template is configured, whether or not the type is generated at the moment.
+	// Zero means any other instance type, or an unknown one.
+	SlotFraction(name string) int
 
 	UpdateInstanceTypes(context.Context) error
 	UpdateInstanceTypeOfferings(context.Context) error
@@ -66,8 +70,12 @@ type DefaultProvider struct {
 	staticTypes []*InstanceTypeStatic
 	// numaTemplates are the configured NUMA templates, which the NUMA types are generated from.
 	numaTemplates []*InstanceTypeStatic
+	// staticNames are the names of the static types.
+	staticNames map[string]bool
 	// cpuShares are the CPU shares of the instance types that have one, by name.
 	cpuShares map[string]int
+	// slotFractions are the slot fractions of the NUMA templates, by family.
+	slotFractions map[string]int
 
 	log logr.Logger
 }
@@ -146,14 +154,40 @@ func (p *DefaultProvider) CPUShare(name string) int {
 	return p.cpuShares[name]
 }
 
+func (p *DefaultProvider) SlotFraction(name string) int {
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
+
+	// A static type keeps its name, even in the family of a NUMA template.
+	if p.staticNames[name] {
+		return 0
+	}
+
+	return p.slotFractions[instanceFamily(name)]
+}
+
 // VMRequest is the VM request for an instance type of capacity, seated in a CPU share group
-// of cpuShare seats unless it is 0.
-func VMRequest(capacity corev1.ResourceList, cpuShare int) resources.VMResources {
-	return resources.VMResources{
+// of cpuShare seats unless it is 0, and in a strict NUMA slot of slotFraction unless it is 0:
+// a NUMA type's slot shape is its slot fraction with its CPUs and memory.
+func VMRequest(capacity corev1.ResourceList, cpuShare, slotFraction int) resources.VMResources {
+	req := resources.VMResources{
 		CPUs:     int(capacity.Cpu().Value()),
 		Memory:   uint64(capacity.Memory().Value()),
 		CPUShare: cpuShare,
 	}
+
+	if slotFraction != 0 {
+		req.Slot = &zonecapacity.SlotShape{Fraction: slotFraction, CPUs: req.CPUs, Memory: req.Memory}
+	}
+
+	return req
+}
+
+// instanceFamily is the family of instance type name, the part before the first dot.
+func instanceFamily(name string) string {
+	family, _, _ := strings.Cut(name, ".")
+
+	return family
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
@@ -208,21 +242,26 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	return nil
 }
 
-// setInstanceTypes replaces the instance types and NUMA templates, with the lookup of their CPU shares.
+// setInstanceTypes replaces the instance types and NUMA templates, with the lookups of the static names,
+// their CPU shares, and the templates' slot fractions.
 // The NUMA types are generated on the next offerings refresh. The caller holds the lock.
 func (p *DefaultProvider) setInstanceTypes(instanceTypes []*InstanceTypeStatic) {
 	p.staticTypes = []*InstanceTypeStatic{}
 	p.numaTemplates = []*InstanceTypeStatic{}
+	p.staticNames = make(map[string]bool, len(instanceTypes))
 	p.cpuShares = make(map[string]int, len(instanceTypes))
+	p.slotFractions = map[string]int{}
 
 	for _, item := range instanceTypes {
 		if item.NUMA != 0 {
 			p.numaTemplates = append(p.numaTemplates, item)
+			p.slotFractions[item.Name] = item.NUMA
 
 			continue
 		}
 
 		p.staticTypes = append(p.staticTypes, item)
+		p.staticNames[item.Name] = true
 
 		if item.CPUShare != 0 {
 			p.cpuShares[item.Name] = item.CPUShare
@@ -265,7 +304,7 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
-			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, opts.CPUShare))
+			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, opts.CPUShare, 0))
 			if errors.Is(err, zonecapacity.ErrNotOffered) {
 				continue
 			}
@@ -315,7 +354,7 @@ func computeRequirements(instanceTypeName string, offerings cloudprovider.Offeri
 		})...),
 
 		// Well Known to Proxmox
-		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(instanceTypeName, ".")[0]),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, instanceFamily(instanceTypeName)),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUType, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceImageID, corev1.NodeSelectorOpDoesNotExist),
 	)

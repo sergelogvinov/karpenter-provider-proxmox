@@ -188,10 +188,10 @@ func (z *Zone) CPUShareCPUs(p Policy) int // eCPUs accounting charges under p; 0
 
 | Error | When | Caller action |
 |---|---|---|
-| `ErrNoRoom` | `Reserve`/`Fit`: not enough CPUs, memory, or no free slot (wrapped with the reason) | `InsufficientCapacityError`, try another zone |
-| `ErrNotOffered` | a CPU share VM under overcommit, or a slot under shared placement | the type has no offering here; permanent for the policy |
+| `ErrNoRoom` | `Reserve`/`Fit`: not enough CPUs, memory, or no free slot of the shape, including a shape the zone does not carve (wrapped with the reason) | `InsufficientCapacityError`, try another zone |
+| `ErrNotOffered` | a CPU share VM under overcommit, or a slot under shared placement | the type has no offering here; permanent for the policy. A launch already under way counts the zone as having no room: `InsufficientCapacityError`, try another zone |
 | `ErrExists` | `Reserve` on an ID that has a record | bug in the caller |
-| `ErrInvalid` | no ID, no CPUs/memory for `Reserve`/`Fit`, unparseable affinity or token, bad ratio | bug or bad config |
+| `ErrInvalid` | no ID, no CPUs/memory for `Reserve`/`Fit`, a slot request with a CPU share or not the size of its own slot shape, unparseable affinity or token, bad ratio | bug or bad config |
 | `ErrTokenIgnored` | `Track`: a `cpushare` token next to an affinity; the VM is recorded and holds its affinity | log a warning |
 
 `Release` of an unknown ID is a no-op. `Plan` never fails; problems come back in `Notes`.
