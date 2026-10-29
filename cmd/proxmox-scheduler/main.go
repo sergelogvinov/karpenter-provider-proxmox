@@ -82,7 +82,7 @@ var (
 	cpuGovernorBusy = pflag.String(cpuGovernorBusyFlagName, env.WithDefaultString(cpuGovernorBusyEnvVarName, "performance"), "CPU governor to set when CPU is busy")
 	cpuGovernorFree = pflag.String(cpuGovernorFreeFlagName, env.WithDefaultString(cpuGovernorFreeEnvVarName, "powersave"), "CPU governor to set when CPU is free")
 
-	sharedPolicy      = pflag.String(sharedPolicyFlagName, env.WithDefaultString(sharedPolicyEnvVarName, "none"), "Shared CPU pool placement policy for VMs without affinity: none, partition")
+	sharedPolicy      = pflag.String(sharedPolicyFlagName, env.WithDefaultString(sharedPolicyEnvVarName, SharedPolicyPartition), "Placement policy for VMs without affinity: partition, none")
 	reservedCPUs      = pflag.String(reservedCPUsFlagName, env.WithDefaultString(reservedCPUsEnvVarName, ""), "Host-only CPUs excluded from every pool, e.g. 0,32")
 	sharedMinWidth    = pflag.Int(sharedMinWidthFlagName, env.WithDefaultInt(sharedMinWidthEnvVarName, 0), "Minimum CPUs per shared VM in oversubscribed mode (0 = one physical core)")
 	rebalanceDebounce = pflag.Duration(rebalanceDebounceFlagName, env.WithDefaultDuration(rebalanceDebounceEnvVarName, 2*time.Second), "Event coalescing window before a shared CPU pool rebalance")

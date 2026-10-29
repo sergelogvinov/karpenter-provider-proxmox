@@ -19,11 +19,13 @@ package main
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -272,7 +274,7 @@ func TestScheduleRebalanceNoopWhenPolicyNone(t *testing.T) {
 
 // TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity drives
 // handleVMStart end-to-end against a real process: with
-// --shared-policy=none (the default), an unaffined VM must be left
+// --shared-policy=none, an unaffined VM must be left
 // exactly as Proxmox started it — no provisional shared-pool mask
 // applied — matching the documented "ship dark" escape hatch.
 func TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity(t *testing.T) {
@@ -337,6 +339,100 @@ func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 	assert.True(t, vm.applied.IsEmpty(), "the provisional mask is not the VM's partition: the rebalance places it")
 }
 
+// TestHandleVMStartConfinesCPUShareVMUnderPolicyNone checks that a CPU share VM is masked to
+// its group whatever --shared-policy says, and the group is recorded as applied.
+func TestHandleVMStartConfinesCPUShareVMUnderPolicyNone(t *testing.T) {
+	tp := liveTopology(t)
+
+	f := fakelocal.New(t, fakelocal.WithGuest(301, "#Karpenter managed instance, cpushare=2\nname: e2\ncores: 1\n"))
+	h := newHandler(t, f.Client(), tp, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
+
+	pid := spawnFakeQemuThread(t)
+
+	threads, err := utilsys.GetProcessThreads(pid, "CPU")
+	require.NoError(t, err)
+	require.NotEmpty(t, threads)
+
+	require.NoError(t, h.handleVMStart(t.Context(), 301, pid))
+
+	group := h.plan().Groups
+	require.Equal(t, 1, group.Size(), "a 1-vCPU group")
+
+	after, err := utilsys.GetThreadAffinity(pid, threads[0])
+	require.NoError(t, err)
+	assert.True(t, after.Equals(group), "expected the thread masked to its group %v, got %v", group, after)
+
+	vm, ok := h.tracker.get(301)
+	require.True(t, ok)
+	assert.True(t, vm.applied.Equals(group), "the group is applied: %v", vm.applied)
+	assert.Empty(t, h.plan().Changed, "the plan is applied")
+}
+
+// TestSyncRebuildsCPUShareGroupsFromMasks is docs/scheduler-cpushare.md §10, daemon restart: nothing
+// is persisted, so a sync takes the masks the members' threads already have as their groups, and
+// keeps them.
+func TestSyncRebuildsCPUShareGroupsFromMasks(t *testing.T) {
+	tp := liveTopology(t)
+
+	f := fakelocal.New(t,
+		fakelocal.WithGuest(301, "#cpushare=2\nname: e2-a\ncores: 1\n"),
+		fakelocal.WithGuest(302, "#cpushare=2\nname: e2-b\ncores: 1\n"),
+	)
+	h := newHandler(t, f.Client(), tp, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
+
+	// Not the CPU the planner would pick on its own.
+	group := cpuset.New(tp.CPUDetails.CPUs().List()[tp.NumCPUs-1])
+	running := map[int]int{}
+
+	for _, id := range []int{301, 302} {
+		pid := spawnFakeQemuThread(t)
+
+		threads, err := utilsys.GetProcessThreads(pid, "CPU")
+		require.NoError(t, err)
+		require.NoError(t, utilsys.SetThreadsAffinity(t.Context(), id, pid, threads, group))
+
+		running[id] = pid
+	}
+
+	h.syncRunning(t.Context(), running)
+
+	for _, id := range []int{301, 302} {
+		vm, ok := h.tracker.get(id)
+		require.True(t, ok)
+		assert.True(t, vm.applied.Equals(group), "VM %d keeps its group %v, got %v", id, group, vm.applied)
+	}
+
+	assert.Empty(t, h.plan().Changed)
+}
+
+// TestRebalanceConfinesCPUShareVMsAndLogsNotes checks that a rebalance under --shared-policy=none
+// still places CPU share VMs, and logs the groups that do not fit and the accounting drift.
+func TestRebalanceConfinesCPUShareVMsAndLogsNotes(t *testing.T) {
+	tp := dualNodeTopology()
+
+	var logs []string
+
+	logger := funcr.New(func(prefix, args string) { logs = append(logs, args) }, funcr.Options{})
+
+	h, err := NewHandler(nil, tp, logger, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
+	require.NoError(t, err)
+
+	track(t, h, 100, deadPID, &qemu.Config{Cores: new(3), Affinity: "0,1,4"})
+	track(t, h, 301, deadPID, &qemu.Config{Cores: new(4), Description: "cpushare=2"})
+	track(t, h, 401, deadPID, &qemu.Config{Cores: new(2), Description: "cpushare=4"})
+	require.Contains(t, h.plan().Changed, 301)
+	require.Contains(t, h.plan().Changed, 401)
+
+	h.scheduleRebalance(t.Context())
+
+	_, ok := h.tracker.get(301)
+	assert.False(t, ok, "the rebalance tried to place the dead CPU share VM, and dropped it")
+
+	joined := strings.Join(logs, "\n")
+	assert.Contains(t, joined, "no room for 2 CPUs")
+	assert.Contains(t, joined, "CPU share groups drift")
+}
+
 // TestTrackReentrantStartDoesNotLeakStaleAffinity covers a duplicate start event for a VM
 // already tracked: its previous affinity must not stay held once its config has changed.
 func TestTrackReentrantStartDoesNotLeakStaleAffinity(t *testing.T) {
@@ -388,12 +484,12 @@ func TestTrackerForgetPIDKeepsRestartedVM(t *testing.T) {
 }
 
 // TestWithSharedPolicyRejectsUnknownValue confirms a typo'd or otherwise
-// unrecognized --shared-policy value never silently activates
-// shared-pool placement: it must be ignored, keeping the safe default.
+// unrecognized --shared-policy value is ignored, keeping the default
+// partition.
 func TestWithSharedPolicyRejectsUnknownValue(t *testing.T) {
 	tp := dualNodeTopology()
 
 	h := newHandler(t, nil, tp, WithSharedPolicy("parition")) // typo
 
-	assert.False(t, h.partition, "an unrecognized policy must not be silently treated as partition mode")
+	assert.True(t, h.partition, "an unrecognized policy must keep the default partition")
 }

@@ -3,7 +3,8 @@
 The Proxmox Scheduler is a server component that monitors the Proxmox VE environment and makes scheduling decisions for virtual machines based on CPU and memory affinity rules defined in each VM configuration.
 
 The scheduler acts on VMs which have specific CPU affinity requirements defined in their configuration, and,
-when `--shared-policy=partition` is set, on every other VM too.
+with the default `--shared-policy=partition`, on every other VM too. It is built for Karpenter's `static` node
+policy.
 
 ## Features
 
@@ -28,7 +29,7 @@ All command-line flags can be configured using environment variables. This is pa
 | `--resync-interval` | `RESYNC_INTERVAL` | `60m` |
 | `--cpu-governor-busy` | `CPU_GOVERNOR_BUSY` | `performance` |
 | `--cpu-governor-free` | `CPU_GOVERNOR_FREE` | `powersave` |
-| `--shared-policy` | `SHARED_POLICY` | `none` |
+| `--shared-policy` | `SHARED_POLICY` | `partition` |
 | `--reserved-cpus` | `RESERVED_CPUS` | `""` |
 | `--shared-min-width` | `SHARED_MIN_WIDTH` | `0` |
 | `--rebalance-debounce` | `REBALANCE_DEBOUNCE` | `2s` |

@@ -30,11 +30,13 @@ import (
 
 // PlanOptions are the scheduler's settings for a plan.
 type PlanOptions struct {
-	// Partition divides the unpinned CPUs among the VMs under shared placement
-	// (--shared-policy=partition). Without it those VMs are left as they are.
+	// Partition divides the ungrouped CPUs among the VMs under shared placement
+	// (--shared-policy=partition). Without it those VMs are masked to all the ungrouped
+	// CPUs while a CPU share group exists or once they were masked, and otherwise left
+	// as they are. CPU share VMs are confined to their groups either way.
 	Partition bool
 	// MinWidth is the fewest CPUs a VM under shared placement is scaled down to when
-	// the unpinned CPUs are oversubscribed (--shared-min-width); 0 means one physical core.
+	// the ungrouped CPUs are oversubscribed (--shared-min-width); 0 means one physical core.
 	MinWidth int
 }
 
@@ -43,12 +45,14 @@ type Placement int
 
 const (
 	// PlacementShared is shared placement: the VM's threads are masked to its partition
-	// of the unpinned CPUs.
+	// of the ungrouped CPUs, or to all of them.
 	PlacementShared Placement = iota
 	// PlacementPinned is pinned placement: one vCPU thread per host CPU of the affinity.
 	PlacementPinned
 	// PlacementConstrained masks a constrained VM's threads to its affinity.
 	PlacementConstrained
+	// PlacementCPUShare masks a CPU share VM's threads to its CPU share group.
+	PlacementCPUShare
 )
 
 // Assignment is where one VM's threads go.
@@ -68,55 +72,60 @@ type Plan struct {
 	Changed map[int]Assignment
 	// Pinned are the host CPUs pinned and constrained VMs hold.
 	Pinned cpuset.CPUSet
-	// Unpinned are the usable CPUs no pinned or constrained VM holds: where VMs under
-	// shared placement run.
+	// Unpinned are the usable CPUs no pinned or constrained VM holds: where the CPU
+	// share groups and the VMs under shared placement run.
 	Unpinned cpuset.CPUSet
+	// Groups are the unpinned CPUs the CPU share groups hold.
+	Groups cpuset.CPUSet
+	// Ungrouped are the unpinned CPUs no CPU share group holds: where VMs under shared
+	// placement run.
+	Ungrouped cpuset.CPUSet
 	// Busy are the CPUs some VM's cpuset holds once the plan is applied.
 	Busy cpuset.CPUSet
 	// Idle are the rest of the usable CPUs.
 	Idle cpuset.CPUSet
-	// Notes explain what the plan could not do: VMs left as they are and why.
+	// Notes explain what the plan could not do: VMs left as they are and why, CPU share
+	// groups that spilled across NUMA nodes or did not fit, and drift from the CPUs
+	// accounting charges for the groups.
 	Notes []string
 }
 
 // Plan works out where every tracked VM's CPUs go. current holds the cpusets the caller
 // has actually applied to each VM. Pinned VMs get their affinity one CPU per vCPU,
-// constrained VMs are masked to it, and with o.Partition the VMs under shared placement
-// divide the unpinned CPUs. It is deterministic in the records, current and o, and never
-// fails: problems come back in Notes.
+// constrained VMs are masked to it, CPU share VMs are masked to their CPU share group
+// (docs/scheduler-cpushare.md §8), and VMs under shared placement get the ungrouped CPUs:
+// with o.Partition they divide them. Priority is pinned > CPU share groups > shared
+// placement. It is deterministic in the records, current and o, and never fails: problems
+// come back in Notes.
 func (z *Zone) Plan(current map[int]cpuset.CPUSet, o PlanOptions) Plan {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	usable := z.allCPUs.Difference(z.reservedCPUs)
-	pinned := cpuset.New()
-	target := map[int]cpuset.CPUSet{}
-
-	// keep leaves VM id on what it has applied, if anything.
-	keep := func(id int) {
-		if cur, ok := current[id]; ok {
-			target[id] = cur
-		}
+	p := &planner{
+		z:       z,
+		current: current,
+		target:  map[int]cpuset.CPUSet{},
+		plan:    Plan{Changed: map[int]Assignment{}},
 	}
 
-	plan := Plan{Changed: map[int]Assignment{}}
+	usable := z.allCPUs.Difference(z.reservedCPUs)
+	pinned := cpuset.New()
 
-	var shared []cpumanager.SharedRequest
+	var (
+		sharedVMs []int
+		members   []cpumanager.CPUShareRequest
+	)
 
 	for _, id := range slices.Sorted(maps.Keys(z.vms)) {
 		rec := z.vms[id]
 
-		if rec.cpuSet.IsEmpty() {
-			if o.Partition && rec.cpus > 0 {
-				shared = append(shared, cpumanager.SharedRequest{
-					VMID:     id,
-					CPUs:     rec.cpus,
-					NUMAHint: z.numaHint(current[id]),
-					Current:  current[id],
-				})
-			} else {
-				keep(id)
-			}
+		switch {
+		case rec.share > 0:
+			members = append(members, cpumanager.CPUShareRequest{VMID: id, CPUs: rec.cpus, Share: rec.share, Current: current[id]})
+
+			continue
+		case rec.cpuSet.IsEmpty():
+			sharedVMs = append(sharedVMs, id)
 
 			continue
 		}
@@ -124,59 +133,153 @@ func (z *Zone) Plan(current map[int]cpuset.CPUSet, o PlanOptions) Plan {
 		pinned = pinned.Union(rec.cpuSet)
 
 		if !rec.cpuSet.IsSubsetOf(z.allCPUs) {
-			plan.Notes = append(plan.Notes, fmt.Sprintf("VM %d: affinity %s is outside the host CPUs %s, left as is", id, rec.cpuSet, z.allCPUs))
-			keep(id)
+			p.notef("VM %d: affinity %s is outside the host CPUs %s, left as is", id, rec.cpuSet, z.allCPUs)
+			p.keep(id)
 
 			continue
 		}
 
-		target[id] = rec.cpuSet
-
-		if !rec.cpuSet.Equals(current[id]) {
-			placement := PlacementConstrained
-			if rec.cpuSet.Size() == rec.cpus {
-				placement = PlacementPinned
-			}
-
-			plan.Changed[id] = Assignment{CPUs: rec.cpuSet, Placement: placement}
+		placement := PlacementConstrained
+		if rec.cpuSet.Size() == rec.cpus {
+			placement = PlacementPinned
 		}
+
+		p.assign(id, rec.cpuSet, placement)
 	}
 
-	plan.Pinned = pinned.Intersection(z.allCPUs)
-	plan.Unpinned = usable.Difference(pinned)
+	p.plan.Pinned = pinned.Intersection(z.allCPUs)
+	p.plan.Unpinned = usable.Difference(pinned)
 
-	if len(shared) > 0 {
-		partitions, err := cpumanager.PlanShared(logr.Discard(), &z.topo.CPUTopology, plan.Unpinned, shared, cpumanager.SharedOptions{MinWidth: o.MinWidth})
-		if err != nil {
-			plan.Notes = append(plan.Notes, fmt.Sprintf("unpinned CPUs %s: %v", plan.Unpinned, err))
-		}
-
-		for _, req := range shared {
-			cpus, ok := partitions[req.VMID]
-			if !ok {
-				plan.Notes = append(plan.Notes, fmt.Sprintf("VM %d: no room for %d CPUs in the unpinned CPUs %s, left as is", req.VMID, req.CPUs, plan.Unpinned))
-				keep(req.VMID)
-
-				continue
-			}
-
-			target[req.VMID] = cpus
-
-			if !cpus.Equals(current[req.VMID]) {
-				plan.Changed[req.VMID] = Assignment{CPUs: cpus, Placement: PlacementShared}
-			}
-		}
-	}
+	p.planCPUShare(members)
+	p.planShared(sharedVMs, o)
 
 	busy := cpuset.New()
-	for _, cpus := range target {
+	for _, cpus := range p.target {
 		busy = busy.Union(cpus)
 	}
 
-	plan.Busy = busy.Intersection(z.allCPUs)
-	plan.Idle = usable.Difference(busy)
+	p.plan.Busy = busy.Intersection(z.allCPUs)
+	p.plan.Idle = usable.Difference(busy)
 
-	return plan
+	return p.plan
+}
+
+// planner builds one Plan of z from the cpusets current holds as applied.
+type planner struct {
+	z       *Zone
+	current map[int]cpuset.CPUSet
+	// target is every VM's cpuset once the plan is applied.
+	target map[int]cpuset.CPUSet
+	plan   Plan
+}
+
+// keep leaves VM id on what it has applied, if anything.
+func (p *planner) keep(id int) {
+	if cur, ok := p.current[id]; ok {
+		p.target[id] = cur
+	}
+}
+
+// assign sets VM id's target, and changes it when it differs from what was applied.
+func (p *planner) assign(id int, cpus cpuset.CPUSet, placement Placement) {
+	p.target[id] = cpus
+
+	if !cpus.Equals(p.current[id]) {
+		p.plan.Changed[id] = Assignment{CPUs: cpus, Placement: placement}
+	}
+}
+
+// notef adds a note to the plan.
+func (p *planner) notef(format string, args ...any) {
+	p.plan.Notes = append(p.plan.Notes, fmt.Sprintf(format, args...))
+}
+
+// planCPUShare seats the CPU share VMs in their groups on the unpinned CPUs, and sets
+// plan.Groups and plan.Ungrouped. A member no group has CPUs for is left as it is. It
+// notes when the groups use other than the CPUs static accounting charges for them: the
+// scheduler builds CPU share groups for the static node policy.
+func (p *planner) planCPUShare(members []cpumanager.CPUShareRequest) {
+	p.plan.Groups = cpuset.New()
+	p.plan.Ungrouped = p.plan.Unpinned
+
+	charged := p.z.usage(Policy{Kind: PolicyStatic}).cpuShareCPUs
+
+	if len(members) > 0 {
+		groups, notes, err := cpumanager.PlanCPUShare(logr.Discard(), &p.z.topo.CPUTopology, p.plan.Unpinned, p.plan.Pinned, members)
+		if err != nil {
+			p.notef("CPU share groups: %v", err)
+
+			return
+		}
+
+		p.plan.Notes = append(p.plan.Notes, notes...)
+
+		for _, g := range groups {
+			for _, id := range g.Members {
+				if g.CPUs.IsEmpty() {
+					p.keep(id)
+
+					continue
+				}
+
+				p.assign(id, g.CPUs, PlacementCPUShare)
+			}
+
+			p.plan.Groups = p.plan.Groups.Union(g.CPUs)
+		}
+
+		p.plan.Ungrouped = p.plan.Unpinned.Difference(p.plan.Groups)
+	}
+
+	if used := p.plan.Groups.Size(); used != charged {
+		p.notef("CPU share groups drift: the groups use %d CPUs, accounting charges %d", used, charged)
+	}
+}
+
+// planShared places the VMs under shared placement on plan.Ungrouped. With o.Partition
+// they divide it; otherwise each is masked to all of it while a CPU share group exists or
+// once it was masked, and left as it is otherwise.
+func (p *planner) planShared(ids []int, o PlanOptions) {
+	var reqs []cpumanager.SharedRequest
+
+	for _, id := range ids {
+		rec := p.z.vms[id]
+
+		switch {
+		case o.Partition && rec.cpus > 0:
+			reqs = append(reqs, cpumanager.SharedRequest{
+				VMID:     id,
+				CPUs:     rec.cpus,
+				NUMAHint: p.z.numaHint(p.current[id]),
+				Current:  p.current[id],
+			})
+		case !o.Partition && (!p.plan.Groups.IsEmpty() || !p.current[id].IsEmpty()) && !p.plan.Ungrouped.IsEmpty():
+			p.assign(id, p.plan.Ungrouped, PlacementShared)
+		default:
+			p.keep(id)
+		}
+	}
+
+	if len(reqs) == 0 {
+		return
+	}
+
+	partitions, err := cpumanager.PlanShared(logr.Discard(), &p.z.topo.CPUTopology, p.plan.Ungrouped, reqs, cpumanager.SharedOptions{MinWidth: o.MinWidth})
+	if err != nil {
+		p.notef("ungrouped CPUs %s: %v", p.plan.Ungrouped, err)
+	}
+
+	for _, req := range reqs {
+		cpus, ok := partitions[req.VMID]
+		if !ok {
+			p.notef("VM %d: no room for %d CPUs in the ungrouped CPUs %s, left as is", req.VMID, req.CPUs, p.plan.Ungrouped)
+			p.keep(req.VMID)
+
+			continue
+		}
+
+		p.assign(req.VMID, cpus, PlacementShared)
+	}
 }
 
 // numaHint is the CPUs of every NUMA node cpus touches; empty for no cpus.

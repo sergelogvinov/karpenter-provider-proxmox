@@ -8,7 +8,7 @@ VERBOSITY=0
 PROXMOX_FEATURE_FLAGS=karpenter
 
 # Shared policy for the VMs partition or none
-SHARED_POLICY=none
+SHARED_POLICY=partition
 
 # Additional command line arguments
 EXTRA_ARGS=""

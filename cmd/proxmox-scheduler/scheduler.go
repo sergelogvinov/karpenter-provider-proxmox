@@ -48,9 +48,11 @@ type SchedulerHandler struct {
 
 	// reservedCPUs are host-only CPUs, never given to a VM under shared placement.
 	reservedCPUs cpuset.CPUSet
-	// partition divides the unpinned CPUs among the VMs under shared
+	// partition divides the ungrouped CPUs among the VMs under shared
 	// placement (--shared-policy=partition); otherwise they are left as
-	// Proxmox started them.
+	// Proxmox started them, or masked to all the ungrouped CPUs while a
+	// CPU share group exists. CPU share VMs are confined to their groups
+	// either way.
 	partition bool
 	// sharedMinWidth is the fewest CPUs a VM under shared placement is
 	// scaled down to when the unpinned CPUs are oversubscribed.
@@ -61,6 +63,10 @@ type SchedulerHandler struct {
 
 	rebalanceMu    sync.Mutex
 	rebalanceTimer *time.Timer
+
+	// groupCPUs are the CPUs the CPU share groups held at the last rebalance,
+	// so CPUs a group gives up get the free governor. Guarded by applyMu.
+	groupCPUs cpuset.CPUSet
 
 	// applyMu serializes planning and applying a plan, so a start, a stop and a
 	// rebalance never act on plans computed from the same applied cpusets.
@@ -137,6 +143,8 @@ func NewHandler(client *local.Client, topology *topology.Topology, logger logr.L
 		client:       client,
 		tracker:      newVMTracker(),
 		reservedCPUs: cpuset.New(),
+		groupCPUs:    cpuset.New(),
+		partition:    true,
 		debounce:     2 * time.Second,
 		logger:       logger,
 	}
@@ -259,8 +267,21 @@ func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int)
 	r.applyMu.Lock()
 
 	for vmID, a := range r.plan().Changed {
-		if vm, ok := r.tracker.get(vmID); ok && a.Placement == zonecapacity.PlacementPinned {
+		vm, ok := r.tracker.get(vmID)
+		if !ok {
+			continue
+		}
+
+		switch a.Placement {
+		case zonecapacity.PlacementPinned:
 			r.tracker.setApplied(vmID, vm.pid, a.CPUs)
+		case zonecapacity.PlacementCPUShare:
+			// Nothing is persisted: members with equal masks form a group again.
+			if mask, ok := threadsMask(vm.pid); ok && vm.applied.IsEmpty() {
+				r.tracker.setApplied(vmID, vm.pid, mask)
+			}
+		case zonecapacity.PlacementShared, zonecapacity.PlacementConstrained:
+			// Placed by the start path and the rebalance.
 		}
 	}
 
@@ -272,6 +293,28 @@ func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int)
 	// event being observed (e.g. events missed while the daemon was
 	// down), so a resync always re-evaluates the partition too.
 	r.scheduleRebalance(ctx)
+}
+
+// threadsMask is the CPU mask every vCPU thread of process pid has; false when the
+// threads cannot be read or have different masks.
+func threadsMask(pid int) (cpuset.CPUSet, bool) {
+	threads, err := utilsys.GetProcessThreads(pid, "CPU")
+	if err != nil || len(threads) == 0 {
+		return cpuset.New(), false
+	}
+
+	mask := cpuset.New()
+
+	for i, tid := range threads {
+		cpus, err := utilsys.GetThreadAffinity(pid, tid)
+		if err != nil || (i > 0 && !cpus.Equals(mask)) {
+			return cpuset.New(), false
+		}
+
+		mask = cpus
+	}
+
+	return mask, true
 }
 
 // getRunningVMs scans the PID directory and returns a map of VM ID to PID for running VMs
@@ -332,14 +375,10 @@ func getVMIDs(pidFile string) (vmID, pid int, err error) {
 }
 
 // scheduleRebalance coalesces a burst of start/stop/sync events into a
-// single rebalance, fired after r.debounce of quiescence. Without
-// partitioning there is nothing to rebalance.
+// single rebalance, fired after r.debounce of quiescence. It runs whatever
+// --shared-policy says: CPU share groups are always planned.
 // A zero debounce rebalances inline, which is what tests want.
 func (r *SchedulerHandler) scheduleRebalance(ctx context.Context) {
-	if !r.partition {
-		return
-	}
-
 	if r.debounce <= 0 {
 		r.rebalance(ctx)
 
@@ -366,12 +405,12 @@ func (r *SchedulerHandler) plan() zonecapacity.Plan {
 	})
 }
 
-// rebalance applies the partition of the unpinned CPUs to every VM under shared
+// rebalance applies the plan to every CPU share VM and every VM under shared
 // placement whose cpuset changed. Pinned and constrained VMs are placed when they
 // start and never touched here. Best-effort throughout: a failure applying one VM
 // is logged and does not abort the others.
 func (r *SchedulerHandler) rebalance(ctx context.Context) {
-	if ctx.Err() != nil || !r.partition {
+	if ctx.Err() != nil {
 		return
 	}
 
@@ -381,8 +420,8 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 	}
 }
 
-// applyPlan plans and applies the partition under applyMu. It reports whether it
-// dropped a VM whose process had died.
+// applyPlan plans and applies the CPU share groups and the ungrouped CPUs under applyMu.
+// It reports whether it dropped a VM whose process had died.
 func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
@@ -392,7 +431,7 @@ func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 
 	for _, vmID := range slices.Sorted(maps.Keys(plan.Changed)) {
 		a := plan.Changed[vmID]
-		if a.Placement != zonecapacity.PlacementShared {
+		if a.Placement != zonecapacity.PlacementShared && a.Placement != zonecapacity.PlacementCPUShare {
 			continue
 		}
 
@@ -407,7 +446,7 @@ func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 
 		if !utilsys.ProcessExists(vm.pid) {
 			// Its stop event is on the way; until then it must not hold CPUs nor be retried.
-			r.logger.V(1).Info("Shared VM process no longer exists, skipping", "vmID", vmID, "pid", vm.pid)
+			r.logger.V(1).Info("VM process no longer exists, skipping", "vmID", vmID, "pid", vm.pid)
 
 			if r.tracker.forgetPID(vmID, vm.pid) {
 				r.zone.Release(vmID)
@@ -419,7 +458,14 @@ func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 		}
 
 		if err := r.applyCPUs(ctx, vmID, vm.pid, a); err != nil {
-			r.logger.Error(err, "Failed to apply shared CPU plan to VM", "vmID", vmID)
+			r.logger.Error(err, "Failed to apply CPU plan to VM", "vmID", vmID)
+
+			continue
+		}
+
+		if a.Placement == zonecapacity.PlacementCPUShare {
+			r.logger.Info("Seated VM in its CPU share group", "vmID", vmID, "cpus", a.CPUs.String())
+			r.steerIRQs(ctx, vmID, a.CPUs)
 
 			continue
 		}
@@ -427,12 +473,55 @@ func (r *SchedulerHandler) applyPlan(ctx context.Context) (droppedDead bool) {
 		r.logger.Info("Rebalanced shared VM", "vmID", vmID, "cpus", a.CPUs.String())
 	}
 
-	// The governors of pinned and constrained VMs are set when they start and stop.
-	busy := plan.Busy.Intersection(plan.Unpinned)
-	r.setGovernor(0, busy, *cpuGovernorBusy)
-	r.setGovernor(0, plan.Unpinned.Difference(busy), *cpuGovernorFree)
+	r.setGovernors(plan)
 
 	return droppedDead
+}
+
+// setGovernors sets the governors of the unpinned CPUs after a rebalance, per
+// --shared-policy. The governors of pinned and constrained VMs are set when they
+// start and stop.
+func (r *SchedulerHandler) setGovernors(plan zonecapacity.Plan) {
+	if r.partition {
+		r.setPartitionGovernors(plan)
+	} else {
+		r.setGroupGovernors(plan)
+	}
+
+	r.groupCPUs = plan.Groups
+}
+
+// setPartitionGovernors sets the busy governor on the unpinned CPUs some CPU share
+// group or partition holds, and the free governor on the rest of them.
+func (r *SchedulerHandler) setPartitionGovernors(plan zonecapacity.Plan) {
+	busy := plan.Busy.Intersection(plan.Unpinned)
+
+	r.setGovernor(0, busy, *cpuGovernorBusy)
+	r.setGovernor(0, plan.Unpinned.Difference(busy), *cpuGovernorFree)
+}
+
+// setGroupGovernors governs only the CPU share groups, as VMs under shared placement
+// are not partitioned: the busy governor on the CPUs the groups hold, and the free
+// governor on the unpinned CPUs they held at the last rebalance and gave up.
+func (r *SchedulerHandler) setGroupGovernors(plan zonecapacity.Plan) {
+	r.setGovernor(0, plan.Groups, *cpuGovernorBusy)
+	r.setGovernor(0, r.groupCPUs.Intersection(plan.Unpinned).Difference(plan.Groups), *cpuGovernorFree)
+}
+
+// steerIRQs steers the passthrough devices' IRQs of VM vmID to cpus, reading its config.
+func (r *SchedulerHandler) steerIRQs(ctx context.Context, vmID int, cpus cpuset.CPUSet) {
+	if r.client == nil {
+		return
+	}
+
+	vmConfig, err := loadVMConfig(ctx, r.client, vmID)
+	if err != nil {
+		r.logger.Error(err, "Failed to load VM config to steer its IRQs", "vmID", vmID)
+
+		return
+	}
+
+	r.steerDeviceIRQs(vmID, vmConfig, cpus)
 }
 
 // applyCPUs sets a's CPUs on VM vmID's threads and records them as applied once
