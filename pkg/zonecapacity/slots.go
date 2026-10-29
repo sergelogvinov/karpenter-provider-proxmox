@@ -89,7 +89,7 @@ func (z *Zone) Slots(p Policy) []SlotOffer {
 	slotsClear := map[nodeShape]int{}
 	shapes := map[SlotShape]bool{}
 
-	for _, s := range z.slots {
+	for _, s := range free.slots {
 		shapes[s.shape] = true
 
 		if s.cpus.Intersection(u.pinnedCPUs).IsEmpty() {
@@ -216,9 +216,10 @@ func wholeCores(topo *topology.Topology, node int, usable cpuset.CPUSet) ([]int,
 // placeSlot is strict slot allocation: it gives a VM the lowest free slot of shape, by NUMA node, then
 // slot index. The VM is pinned 1:1 to the slot's CPUs, with one guest NUMA node bound to the slot's NUMA
 // node holding all its memory. There is no fallback: without a free slot, the placement fails.
-func (z *Zone) placeSlot(free freeResources, shape SlotShape) (cpuset.CPUSet, map[int]NUMABinding, error) {
-	for _, s := range z.slots {
-		if s.shape != shape || !s.cpus.IsSubsetOf(free.cpus) || free.numaMemory[s.node] < shape.Memory {
+// The zone's room for CPU share groups and shared VMs is checked by the caller, so a clear slot is enough here.
+func placeSlot(free freeResources, shape SlotShape) (cpuset.CPUSet, map[int]NUMABinding, error) {
+	for _, s := range free.slots {
+		if s.shape != shape || !free.isClear(s) {
 			continue
 		}
 

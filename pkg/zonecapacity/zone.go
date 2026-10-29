@@ -400,7 +400,7 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 
 	if p.Kind == PolicyStatic && share == 0 {
 		if vm.Slot != nil {
-			rec.cpuSet, numa, err = z.placeSlot(z.free(z.usage(p)), *vm.Slot)
+			rec.cpuSet, numa, err = placeSlot(z.free(z.usage(p)), *vm.Slot)
 		} else {
 			rec.cpuSet, numa, err = placePinned(z.free(z.usage(p)), vm.CPUs, vm.Memory)
 		}
@@ -478,6 +478,7 @@ func (z *Zone) free(u usage) freeResources {
 		usable:     usable,
 		cpus:       usable.Difference(u.pinnedCPUs),
 		numaMemory: numaMemory,
+		slots:      z.slots,
 	}
 }
 
