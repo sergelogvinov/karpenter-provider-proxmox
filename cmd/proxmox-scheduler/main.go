@@ -144,12 +144,16 @@ func main() {
 		}
 	}
 
-	handler := NewHandler(client, tp, logger,
+	handler, err := NewHandler(client, tp, logger,
 		WithReservedCPUs(reservedCPUSet),
 		WithSharedPolicy(*sharedPolicy),
 		WithSharedMinWidth(*sharedMinWidth),
 		WithRebalanceDebounce(*rebalanceDebounce),
 	)
+	if err != nil {
+		logger.Error(err, "Failed to set up the CPU scheduler")
+		os.Exit(1)
+	}
 
 	if err := scheduler(handler, logger); err != nil {
 		logger.Error(err, "Reconciler encountered an error")

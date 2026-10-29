@@ -40,73 +40,20 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-// trackedVM is what the scheduler knows of a running VM beyond its zone record:
-// its process, and the cpuset last applied to its threads.
-type trackedVM struct {
-	pid int
-	// applied is the cpuset taskset last set on the VM's threads; empty when none was.
-	applied cpuset.CPUSet
-}
-
-// VMTracker holds the process and applied cpuset of every running VM.
-type VMTracker struct {
-	vms map[int]trackedVM
-
-	mu sync.RWMutex
-}
-
-// appliedCPUs returns every VM's applied cpuset, for zonecapacity.Zone.Plan.
-func (t *VMTracker) appliedCPUs() map[int]cpuset.CPUSet {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	applied := make(map[int]cpuset.CPUSet, len(t.vms))
-
-	for id, vm := range t.vms {
-		if !vm.applied.IsEmpty() {
-			applied[id] = vm.applied
-		}
-	}
-
-	return applied
-}
-
-// setApplied records that cpus were applied to VM id's process pid. It is a no-op
-// if the VM has stopped or restarted with another PID since.
-func (t *VMTracker) setApplied(id, pid int, cpus cpuset.CPUSet) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if vm, ok := t.vms[id]; ok && vm.pid == pid {
-		vm.applied = cpus
-		t.vms[id] = vm
-	}
-}
-
-// pid returns VM id's process.
-func (t *VMTracker) pid(id int) (int, bool) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	vm, ok := t.vms[id]
-
-	return vm.pid, ok
-}
-
 type SchedulerHandler struct {
-	client   *local.Client
-	topology *topology.Topology
-	tracker  *VMTracker
-	// zone records every running VM and plans where their CPUs go; nil without a topology.
+	client  *local.Client
+	tracker *VMTracker
+	// zone records every running VM and plans where their CPUs go.
 	zone *zonecapacity.Zone
 
-	// reservedCPUs are host-only CPUs, excluded from every pool.
+	// reservedCPUs are host-only CPUs, never given to a VM under shared placement.
 	reservedCPUs cpuset.CPUSet
-	// sharedPolicy selects the shared-pool placement strategy; "none"
-	// leaves floating VMs as Proxmox started them.
-	sharedPolicy string
-	// sharedMinWidth is the fewest CPUs a floating VM is scaled down to
-	// in an oversubscribed shared pool.
+	// partition divides the unpinned CPUs among the VMs under shared
+	// placement (--shared-policy=partition); otherwise they are left as
+	// Proxmox started them.
+	partition bool
+	// sharedMinWidth is the fewest CPUs a VM under shared placement is
+	// scaled down to when the unpinned CPUs are oversubscribed.
 	sharedMinWidth int
 	// debounce coalesces a burst of start/stop/sync events into a single
 	// rebalance (docs/scheduler-shared.md §6).
@@ -115,8 +62,8 @@ type SchedulerHandler struct {
 	rebalanceMu    sync.Mutex
 	rebalanceTimer *time.Timer
 
-	// applyMu serializes planning and applying a plan, so a start and a
-	// rebalance never apply plans computed from the same applied cpusets.
+	// applyMu serializes planning and applying a plan, so a start, a stop and a
+	// rebalance never act on plans computed from the same applied cpusets.
 	applyMu sync.Mutex
 
 	logger logr.Logger
@@ -126,12 +73,12 @@ const (
 	// pidFileExtension is the file extension for PID files
 	pidFileExtension = ".pid"
 
-	// SharedPolicyNone disables shared-pool placement: every unaffined
-	// VM is left exactly as Proxmox started it, matching the daemon's
-	// behavior before docs/scheduler-shared.md.
+	// SharedPolicyNone disables the partition: every VM under shared
+	// placement is left exactly as Proxmox started it, matching the
+	// daemon's behavior before docs/scheduler-shared.md.
 	SharedPolicyNone = "none"
-	// SharedPolicyPartition confines every unaffined VM to a slice of
-	// the shared pool, per docs/scheduler-shared.md §4.
+	// SharedPolicyPartition confines every VM under shared placement to
+	// its partition of the unpinned CPUs, per docs/scheduler-shared.md §4.
 	SharedPolicyPartition = "partition"
 )
 
@@ -145,21 +92,23 @@ func WithReservedCPUs(cpus cpuset.CPUSet) HandlerOption {
 	}
 }
 
-// WithSharedPolicy selects the shared-pool placement strategy.
+// WithSharedPolicy selects the shared placement strategy.
 func WithSharedPolicy(policy string) HandlerOption {
 	return func(h *SchedulerHandler) {
 		switch policy {
 		case "":
 			// keep the default
-		case SharedPolicyNone, SharedPolicyPartition:
-			h.sharedPolicy = policy
+		case SharedPolicyNone:
+			h.partition = false
+		case SharedPolicyPartition:
+			h.partition = true
 		default:
 			// An unrecognized value (e.g. a typo) must never silently
-			// fall through to full shared-pool placement — that would
-			// change production VM affinity on a misconfiguration. Warn
-			// and keep whatever the default already is.
+			// fall through to partitioning — that would change production
+			// VM affinity on a misconfiguration. Warn and keep whatever
+			// the default already is.
 			h.logger.Error(fmt.Errorf("unknown shared CPU pool policy %q", policy), "Ignoring unrecognized --shared-policy, keeping the default",
-				"policy", policy, "validValues", []string{SharedPolicyNone, SharedPolicyPartition}, "default", h.sharedPolicy)
+				"policy", policy, "validValues", []string{SharedPolicyNone, SharedPolicyPartition}, "partition", h.partition)
 		}
 	}
 }
@@ -181,15 +130,13 @@ func WithRebalanceDebounce(d time.Duration) HandlerOption {
 	}
 }
 
-func NewHandler(client *local.Client, topology *topology.Topology, logger logr.Logger, opts ...HandlerOption) *SchedulerHandler {
+// NewHandler returns a handler for the host's topology. It fails if the zone
+// capacity cannot be set up, as the handler could then place no VM.
+func NewHandler(client *local.Client, topology *topology.Topology, logger logr.Logger, opts ...HandlerOption) (*SchedulerHandler, error) {
 	h := &SchedulerHandler{
-		client:   client,
-		topology: topology,
-		tracker: &VMTracker{
-			vms: make(map[int]trackedVM),
-		},
+		client:       client,
+		tracker:      newVMTracker(),
 		reservedCPUs: cpuset.New(),
-		sharedPolicy: SharedPolicyNone,
 		debounce:     2 * time.Second,
 		logger:       logger,
 	}
@@ -200,16 +147,18 @@ func NewHandler(client *local.Client, topology *topology.Topology, logger logr.L
 		}
 	}
 
-	if topology != nil {
-		zone, err := zonecapacity.New(zonecapacity.Host{Topology: topology, ReservedCPUs: h.reservedCPUs})
-		if err != nil {
-			logger.Error(err, "Failed to set up zone capacity, CPU placement is disabled")
-		} else {
-			h.zone = zone
-		}
+	if topology == nil {
+		return nil, fmt.Errorf("a CPU topology is required")
 	}
 
-	return h
+	zone, err := zonecapacity.New(zonecapacity.Host{Topology: topology, ReservedCPUs: h.reservedCPUs})
+	if err != nil {
+		return nil, fmt.Errorf("failed to set up zone capacity: %w", err)
+	}
+
+	h.zone = zone
+
+	return h, nil
 }
 
 func (r *SchedulerHandler) Reconcile(ctx context.Context, sender reconciler.EventSender, event reconciler.Event) error {
@@ -273,23 +222,19 @@ func (r *SchedulerHandler) handleSyncEvent(ctx context.Context) error {
 		return fmt.Errorf("failed to get running VMs: %w", err)
 	}
 
-	stopped := []int{}
+	r.syncRunning(ctx, runningVMs)
 
-	r.tracker.mu.RLock()
+	return nil
+}
 
-	for vmID := range r.tracker.vms {
-		if _, ok := runningVMs[vmID]; !ok {
-			stopped = append(stopped, vmID)
-		}
-	}
-
-	r.tracker.mu.RUnlock()
-
-	for _, vmID := range stopped {
+// syncRunning tracks exactly the VMs in running (VM ID to PID). It never runs taskset
+// itself: a pinned VM's affinity is taken as applied, as Proxmox started it with it.
+func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int) {
+	for _, vmID := range r.tracker.notIn(running) {
 		r.forgetVM(vmID)
 	}
 
-	for vmID, pid := range runningVMs {
+	for vmID, pid := range running {
 		vmConfig, err := loadVMConfig(ctx, r.client, vmID)
 		if err != nil {
 			// Keep whatever the VM held so far: it still runs.
@@ -298,19 +243,27 @@ func (r *SchedulerHandler) handleSyncEvent(ctx context.Context) error {
 			continue
 		}
 
-		if err := r.trackVM(vmID, pid, vmConfig); err != nil {
+		if err := r.trackVM(vmID, pid, vmConfig, false); err != nil {
 			r.logger.Error(err, "Failed to track VM", "vmID", vmID, "pid", pid)
 		}
 	}
+
+	r.applyMu.Lock()
+
+	for vmID, a := range r.plan().Changed {
+		if vm, ok := r.tracker.get(vmID); ok && a.Placement == zonecapacity.PlacementPinned {
+			r.tracker.setApplied(vmID, vm.pid, a.CPUs)
+		}
+	}
+
+	r.applyMu.Unlock()
 
 	r.logVMStatus()
 
 	// The VM set may have changed without a corresponding start/stop
 	// event being observed (e.g. events missed while the daemon was
-	// down), so a resync always re-evaluates the plan too.
+	// down), so a resync always re-evaluates the partition too.
 	r.scheduleRebalance(ctx)
-
-	return nil
 }
 
 // getRunningVMs scans the PID directory and returns a map of VM ID to PID for running VMs
@@ -346,14 +299,7 @@ func (r *SchedulerHandler) getRunningVMs() (map[int]int, error) {
 
 // logVMStatus logs the current status of all tracked VMs
 func (r *SchedulerHandler) logVMStatus() {
-	r.tracker.mu.RLock()
-	defer r.tracker.mu.RUnlock()
-
-	if r.zone == nil || len(r.tracker.vms) == 0 {
-		return
-	}
-
-	for vmID, vm := range r.tracker.vms {
+	for vmID, vm := range r.tracker.all() {
 		r.logger.V(2).Info("VM info", "vmID", vmID, "pid", vm.pid, "applied", vm.applied.String())
 	}
 }
@@ -378,10 +324,11 @@ func getVMIDs(pidFile string) (vmID, pid int, err error) {
 }
 
 // scheduleRebalance coalesces a burst of start/stop/sync events into a
-// single rebalance, fired after r.debounce of quiescence.
+// single rebalance, fired after r.debounce of quiescence. Without
+// partitioning there is nothing to rebalance.
 // A zero debounce rebalances inline, which is what tests want.
 func (r *SchedulerHandler) scheduleRebalance(ctx context.Context) {
-	if r.zone == nil {
+	if !r.partition {
 		return
 	}
 
@@ -406,16 +353,17 @@ func (r *SchedulerHandler) scheduleRebalance(ctx context.Context) {
 // plan asks the zone where every tracked VM's CPUs go, given what was applied.
 func (r *SchedulerHandler) plan() zonecapacity.Plan {
 	return r.zone.Plan(r.tracker.appliedCPUs(), zonecapacity.PlanOptions{
-		Partition: r.sharedPolicy == SharedPolicyPartition,
+		Partition: r.partition,
 		MinWidth:  r.sharedMinWidth,
 	})
 }
 
-// rebalance plans every tracked VM and applies what changed.
-// Best-effort throughout: a failure applying one VM is logged and does not abort the others;
-// its applied cpuset stays as it was, so the next rebalance retries it.
+// rebalance applies the partition of the unpinned CPUs to every VM under shared
+// placement whose cpuset changed. Pinned and constrained VMs are placed when they
+// start and never touched here. Best-effort throughout: a failure applying one VM
+// is logged and does not abort the others.
 func (r *SchedulerHandler) rebalance(ctx context.Context) {
-	if ctx.Err() != nil || r.zone == nil {
+	if ctx.Err() != nil || !r.partition {
 		return
 	}
 
@@ -423,82 +371,96 @@ func (r *SchedulerHandler) rebalance(ctx context.Context) {
 	defer r.applyMu.Unlock()
 
 	plan := r.plan()
-
-	for _, note := range plan.Notes {
-		r.logger.Info("CPU plan note", "note", note)
-	}
+	r.logNotes(plan)
 
 	for _, vmID := range slices.Sorted(maps.Keys(plan.Changed)) {
+		a := plan.Changed[vmID]
+		if a.Placement != zonecapacity.PlacementShared {
+			continue
+		}
+
 		if ctx.Err() != nil {
 			return
 		}
 
-		pid, ok := r.tracker.pid(vmID)
+		vm, ok := r.tracker.get(vmID)
 		if !ok {
 			continue
 		}
 
-		cpus := plan.Changed[vmID]
-
-		if err := r.applyCPUs(ctx, vmID, pid, cpus, plan.OneToOne[vmID]); err != nil {
-			r.logger.Error(err, "Failed to apply CPU plan to VM", "vmID", vmID, "pid", pid, "cpus", cpus.String())
+		if !utilsys.ProcessExists(vm.pid) {
+			// Its stop event is on the way; until then it must not hold CPUs nor be retried.
+			r.logger.V(1).Info("Shared VM process no longer exists, skipping", "vmID", vmID, "pid", vm.pid)
+			r.forgetVM(vmID)
 
 			continue
 		}
 
-		r.logger.Info("Rebalanced VM", "vmID", vmID, "cpus", cpus.String(), "oneToOne", plan.OneToOne[vmID])
+		if err := r.applyCPUs(ctx, vmID, vm.pid, a); err != nil {
+			r.logger.Error(err, "Failed to apply shared CPU plan to VM", "vmID", vmID)
+
+			continue
+		}
+
+		r.logger.Info("Rebalanced shared VM", "vmID", vmID, "cpus", a.CPUs.String())
 	}
 
-	// Governors are swept only under shared-pool placement: without it,
-	// floating VMs run anywhere and the CPUs they use are unknown.
-	if r.sharedPolicy == SharedPolicyPartition {
-		r.applyGovernors(plan.Busy, plan.Idle)
-	}
+	// The governors of pinned and constrained VMs are set when they start and stop.
+	busy := plan.Busy.Intersection(plan.Unpinned)
+	r.setGovernor(0, busy, *cpuGovernorBusy)
+	r.setGovernor(0, plan.Unpinned.Difference(busy), *cpuGovernorFree)
 }
 
-// applyCPUs sets cpus on VM vmID's threads, pinning one vCPU per CPU when oneToOne,
-// and records them as applied only once taskset succeeded.
-func (r *SchedulerHandler) applyCPUs(ctx context.Context, vmID, pid int, cpus cpuset.CPUSet, oneToOne bool) error {
-	if !utilsys.ProcessExists(pid) {
-		return fmt.Errorf("VM %d process %d no longer exists", vmID, pid)
-	}
-
+// applyCPUs sets a's CPUs on VM vmID's threads and records them as applied once
+// taskset succeeded. A pinned VM gets one vCPU thread per CPU; any other VM's threads
+// and process are masked to the CPUs.
+func (r *SchedulerHandler) applyCPUs(ctx context.Context, vmID, pid int, a zonecapacity.Assignment) error {
 	threads, err := utilsys.GetProcessThreads(pid, "CPU")
 	if err != nil {
 		return fmt.Errorf("failed to get threads of VM %d: %w", vmID, err)
 	}
 
-	if oneToOne {
-		if err := utilsys.PinThreadsToCores(ctx, vmID, pid, threads, cpus.UnsortedList()); err != nil {
+	if a.OneToOne() {
+		if err := utilsys.PinThreadsToCores(ctx, vmID, pid, threads, a.CPUs.UnsortedList()); err != nil {
 			return fmt.Errorf("failed to pin VM %d threads to cores: %w", vmID, err)
 		}
 	} else {
-		if err := utilsys.SetThreadsAffinity(ctx, vmID, pid, threads, cpus); err != nil {
+		if err := utilsys.SetThreadsAffinity(ctx, vmID, pid, threads, a.CPUs); err != nil {
 			return fmt.Errorf("failed to mask VM %d threads: %w", vmID, err)
 		}
 
-		if err := utilsys.SetProcessAffinity(ctx, vmID, pid, cpus); err != nil {
+		if err := utilsys.SetProcessAffinity(ctx, vmID, pid, a.CPUs); err != nil {
 			r.logger.Error(err, "Failed to mask VM process", "vmID", vmID)
 		}
 	}
 
-	r.tracker.setApplied(vmID, pid, cpus)
+	r.tracker.setApplied(vmID, pid, a.CPUs)
 
 	return nil
 }
 
-// applyGovernors sets the busy CPU governor on the CPUs some VM holds,
-// and the free one on the rest of the usable CPUs.
-func (r *SchedulerHandler) applyGovernors(busy, idle cpuset.CPUSet) {
-	if busy.Size() > 0 && *cpuGovernorBusy != "" {
-		if err := utilsys.SetCPUGovernor(0, busy.List(), *cpuGovernorBusy); err != nil {
-			r.logger.Error(err, "Failed to set CPU governor for busy CPUs", "governor", *cpuGovernorBusy, "cores", busy.String())
-		}
+// logNotes logs what a plan could not do.
+func (r *SchedulerHandler) logNotes(plan zonecapacity.Plan) {
+	for _, note := range plan.Notes {
+		r.logger.Info("CPU plan note", "note", note)
+	}
+}
+
+// setGovernor sets the CPU governor on cpus, a no-op if either is empty.
+// vmID 0 is a sweep over many VMs' CPUs, logged only at debug level.
+func (r *SchedulerHandler) setGovernor(vmID int, cpus cpuset.CPUSet, governor string) {
+	if cpus.IsEmpty() || governor == "" {
+		return
 	}
 
-	if idle.Size() > 0 && *cpuGovernorFree != "" {
-		if err := utilsys.SetCPUGovernor(0, idle.List(), *cpuGovernorFree); err != nil {
-			r.logger.Error(err, "Failed to set CPU governor for idle CPUs", "governor", *cpuGovernorFree, "cores", idle.String())
-		}
+	log := r.logger
+	if vmID == 0 {
+		log = log.V(1)
+	}
+
+	log.Info("VM governing CPUs", "vmID", vmID, "governor", governor, "cores", cpus.String())
+
+	if err := utilsys.SetCPUGovernor(vmID, cpus.List(), governor); err != nil {
+		r.logger.Error(err, "Failed to set CPU governor", "vmID", vmID, "governor", governor, "cores", cpus.String())
 	}
 }

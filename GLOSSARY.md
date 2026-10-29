@@ -87,6 +87,26 @@ _Avoid_: simple policy
 A virtual machine gets its own set of host CPUs aligned to the NUMA layout, and its memory is split across the NUMA nodes those CPUs belong to.
 _Avoid_: static policy
 
+**Constrained VM**:
+A virtual machine whose affinity has a different number of host CPUs than it has vCPUs; its threads are masked to the affinity instead of pinned one per CPU. Its CPUs count as pinned.
+_Avoid_: masked VM
+
+**Unpinned CPUs**:
+A zone's CPUs that are neither reserved for the host nor held by a pinned or constrained virtual machine; where virtual machines under shared placement run.
+_Avoid_: shared pool, shared CPUs, free CPUs
+
+**Partition**:
+The scheduler's division of the unpinned CPUs among the virtual machines under shared placement, one cpuset each (`--shared-policy=partition`). Cpusets are disjoint while the unpinned CPUs suffice; when oversubscribed they overlap, but only within one NUMA node.
+_Avoid_: shared pool, slice
+
+**Plan**:
+Where a zone's running virtual machines' CPUs go, worked out from the zone's records and the cpusets the scheduler has applied: the virtual machines whose cpuset must change and how their threads are placed, plus the CPUs left busy or idle.
+_Avoid_: rebalance (for the result), schedule
+
+**Applied cpuset**:
+The cpuset the scheduler last set on a virtual machine's threads, recorded only after `taskset` succeeded; a new process starts with none.
+_Avoid_: current affinity, assigned set
+
 **NUMA slot**:
 An aligned whole, half or quarter of one NUMA node's usable CPUs and memory; smaller slots nest inside larger ones.
 _Avoid_: partition, chunk

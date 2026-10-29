@@ -81,47 +81,60 @@ func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int)
 	r.logger.Info("VM config loaded", "vmID", vmID, "name", vmConfig.Name,
 		"memoryMB", memoryMB(vmConfig), "cores", lo.FromPtr(vmConfig.Cores))
 
-	if err := r.trackVM(vmID, pid, vmConfig); err != nil {
+	if err := r.trackVM(vmID, pid, vmConfig, true); err != nil {
 		r.logger.Error(err, "Failed to track VM", "vmID", vmID)
 	}
 
-	if r.zone == nil {
-		return nil
-	}
-
-	// Place the starting VM right away; everyone else waits for the debounced rebalance.
 	r.applyMu.Lock()
 
 	plan := r.plan()
-	if cpus, ok := plan.Changed[vmID]; ok {
-		if err := r.applyCPUs(ctx, vmID, pid, cpus, plan.OneToOne[vmID]); err != nil {
-			r.logger.Error(err, "Failed to apply CPU plan to VM", "vmID", vmID, "cpus", cpus.String())
-		} else {
-			r.logger.Info("VM placed", "vmID", vmID, "threadCount", len(threads), "cpus", cpus.String(), "oneToOne", plan.OneToOne[vmID])
+	r.logNotes(plan)
 
-			r.setGovernorBusy(vmID, cpus)
-			r.steerDeviceIRQs(vmID, vmConfig, cpus)
-		}
+	if a, ok := plan.Changed[vmID]; ok {
+		r.placeStartedVM(ctx, vmID, pid, threads, vmConfig, a, plan.Unpinned)
 	}
 
 	r.applyMu.Unlock()
 
+	// A VM starting always changes the unpinned CPUs: its own partition if under
+	// shared placement, or the CPUs it takes from them otherwise.
 	r.scheduleRebalance(ctx)
 
 	return nil
 }
 
-// setGovernorBusy applies the configured busy CPU governor to cpus, a
-// no-op if cpus is empty or --cpu-governor-busy is unset.
-func (r *SchedulerHandler) setGovernorBusy(vmID int, cpus cpuset.CPUSet) {
-	if cpus.IsEmpty() || *cpuGovernorBusy == "" {
-		return
-	}
+// placeStartedVM puts a starting VM's threads where a says. A pinned VM is pinned one
+// vCPU per CPU and a constrained VM masked to its affinity, both with the busy governor
+// and their devices' IRQs on those CPUs. A VM under shared placement is masked to all
+// unpinned CPUs until the next rebalance gives it its partition.
+func (r *SchedulerHandler) placeStartedVM(ctx context.Context, vmID, pid int, threads []int, vmConfig *qemu.Config, a zonecapacity.Assignment, unpinned cpuset.CPUSet) {
+	switch a.Placement {
+	case zonecapacity.PlacementPinned, zonecapacity.PlacementConstrained:
+		r.logger.Info("VM placing CPU threads", "vmID", vmID, "threadCount", len(threads), "cores", a.CPUs.String(), "oneToOne", a.OneToOne())
 
-	r.logger.Info("VM governing CPUs", "vmID", vmID, "governor", *cpuGovernorBusy, "cores", cpus.String())
+		if err := r.applyCPUs(ctx, vmID, pid, a); err != nil {
+			r.logger.Error(err, "Failed to place VM threads", "vmID", vmID)
+		}
 
-	if err := utilsys.SetCPUGovernor(vmID, cpus.List(), *cpuGovernorBusy); err != nil {
-		r.logger.Error(err, "Failed to set CPU governor for VM", "vmID", vmID)
+		r.setGovernor(vmID, a.CPUs, *cpuGovernorBusy)
+		r.steerDeviceIRQs(vmID, vmConfig, a.CPUs)
+
+	case zonecapacity.PlacementShared:
+		if unpinned.IsEmpty() {
+			return
+		}
+
+		r.logger.Info("VM masking CPU threads to the unpinned CPUs", "vmID", vmID, "threadCount", len(threads), "cpus", unpinned.String())
+
+		if err := utilsys.SetThreadsAffinity(ctx, vmID, pid, threads, unpinned); err != nil {
+			r.logger.Error(err, "Failed to apply provisional shared CPU mask", "vmID", vmID)
+		}
+
+		if err := utilsys.SetProcessAffinity(ctx, vmID, pid, unpinned); err != nil {
+			r.logger.Error(err, "Failed to mask shared VM process", "vmID", vmID)
+		}
+
+		r.steerDeviceIRQs(vmID, vmConfig, unpinned)
 	}
 }
 
@@ -153,54 +166,33 @@ func (r *SchedulerHandler) steerDeviceIRQs(vmID int, vmConfig *qemu.Config, cpus
 func (r *SchedulerHandler) handleVMStop(ctx context.Context, vmID int) {
 	r.logger.Info("Handling VM stop", "vmID", vmID)
 
-	stopped, ok := r.forgetVM(vmID)
-	if !ok {
+	r.applyMu.Lock()
+
+	before := r.plan().Pinned
+
+	if _, ok := r.forgetVM(vmID); !ok {
+		r.applyMu.Unlock()
+
 		r.logger.Info("VM not found in tracker, skipping cleanup", "vmID", vmID)
 
 		return
 	}
 
-	if r.zone == nil {
-		return
-	}
-
 	// A CPU another VM still holds was never really freed by this VM stopping.
-	freed := stopped.applied.Intersection(r.plan().Idle)
+	freed := before.Difference(r.plan().Pinned)
 
-	if freed.Size() > 0 && *cpuGovernorFree != "" {
-		r.logger.Info("VM governing CPUs", "vmID", vmID, "governor", *cpuGovernorFree, "cores", freed.String())
+	r.applyMu.Unlock()
 
-		if err := utilsys.SetCPUGovernor(vmID, freed.List(), *cpuGovernorFree); err != nil {
-			r.logger.Error(err, "Failed to set CPU governor for VM", "vmID", vmID)
-		}
-	}
+	r.setGovernor(vmID, freed, *cpuGovernorFree)
 
 	r.scheduleRebalance(ctx)
 }
 
-// trackVM records a running VM's process and config. A VM restarted with a new
-// PID is tracked afresh: what was applied to its old process no longer holds.
+// trackVM records a running VM's process and config. A fresh track (a start), or a
+// VM restarted with a new PID, forgets what was applied: it held for the old process.
 // An error means the zone could not read the config; the VM is still tracked.
-func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config) error {
-	r.tracker.mu.Lock()
-
-	prev, ok := r.tracker.vms[vmID]
-	restarted := ok && prev.pid != pid
-
-	vm := trackedVM{pid: pid, applied: cpuset.New()}
-	if ok && !restarted {
-		vm.applied = prev.applied
-	}
-
-	r.tracker.vms[vmID] = vm
-
-	r.tracker.mu.Unlock()
-
-	if r.zone == nil {
-		return nil
-	}
-
-	if restarted {
+func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config, fresh bool) error {
+	if r.tracker.track(vmID, pid, fresh) {
 		r.zone.Release(vmID)
 	}
 
@@ -209,16 +201,8 @@ func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config) error {
 
 // forgetVM drops a stopped VM, returning what was tracked for it.
 func (r *SchedulerHandler) forgetVM(vmID int) (trackedVM, bool) {
-	r.tracker.mu.Lock()
-
-	vm, ok := r.tracker.vms[vmID]
-	delete(r.tracker.vms, vmID)
-
-	r.tracker.mu.Unlock()
-
-	if r.zone != nil {
-		r.zone.Release(vmID)
-	}
+	vm, ok := r.tracker.forget(vmID)
+	r.zone.Release(vmID)
 
 	return vm, ok
 }

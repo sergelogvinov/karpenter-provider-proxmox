@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/go-proxmox-local/fakelocal"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
@@ -123,11 +124,57 @@ func spawnFakeQemuThread(t *testing.T) int {
 	return pid
 }
 
-// track records a running VM with its config, as a start or a sync does.
+// newHandler is NewHandler for a test, which must succeed.
+func newHandler(t *testing.T, client *local.Client, tp *topology.Topology, opts ...HandlerOption) *SchedulerHandler {
+	t.Helper()
+
+	h, err := NewHandler(client, tp, logr.Discard(), opts...)
+	require.NoError(t, err)
+
+	return h
+}
+
+// track records a running VM with its config, as a sync does.
 func track(t *testing.T, h *SchedulerHandler, vmID, pid int, cfg *qemu.Config) {
 	t.Helper()
 
-	require.NoError(t, h.trackVM(vmID, pid, cfg))
+	require.NoError(t, h.trackVM(vmID, pid, cfg, false))
+}
+
+// deadPID is never a real process.
+const deadPID = 1<<31 - 1
+
+// TestNewHandlerFailsWithoutZone checks that a handler that cannot plan refuses to start,
+// rather than running without placing any VM.
+func TestNewHandlerFailsWithoutZone(t *testing.T) {
+	_, err := NewHandler(nil, nil, logr.Discard())
+	require.Error(t, err, "no topology")
+
+	_, err = NewHandler(nil, dualNodeTopology(), logr.Discard(), WithReservedCPUs(cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8)))
+	require.Error(t, err, "more reserved CPUs than the host has")
+}
+
+// TestSyncTracksWithoutApplying checks that a sync under --shared-policy=none never runs
+// taskset, and takes a pinned VM's affinity as applied, as it always did.
+func TestSyncTracksWithoutApplying(t *testing.T) {
+	tp := dualNodeTopology()
+
+	f := fakelocal.New(t,
+		fakelocal.WithGuest(100, "name: pinned\ncores: 2\naffinity: 0,4\n"),
+		fakelocal.WithGuest(101, "name: constrained\ncores: 1\naffinity: 1,5\n"),
+		fakelocal.WithGuest(102, "name: shared\ncores: 2\n"),
+	)
+	h := newHandler(t, f.Client(), tp, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
+
+	h.syncRunning(t.Context(), map[int]int{100: deadPID, 101: deadPID, 102: deadPID})
+
+	for id, want := range map[int]cpuset.CPUSet{100: cpuset.New(0, 4), 101: cpuset.New(), 102: cpuset.New()} {
+		vm, ok := h.tracker.get(id)
+		require.True(t, ok, "VM %d is tracked", id)
+		assert.True(t, vm.applied.Equals(want), "VM %d applied %v, want %v", id, vm.applied, want)
+	}
+
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(0, 1, 4, 5)), "got %v", busyCPUs(h))
 }
 
 // busyCPUs are the CPUs the handler's plan holds for some VM.
@@ -140,7 +187,7 @@ func busyCPUs(h *SchedulerHandler) cpuset.CPUSet {
 func TestHandleVMStopReleasesVM(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone))
 
 	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,1"})
 	track(t, h, 101, 2, &qemu.Config{Cores: new(2), Affinity: "1,5"})
@@ -148,7 +195,8 @@ func TestHandleVMStopReleasesVM(t *testing.T) {
 
 	h.handleVMStop(t.Context(), 100)
 
-	assert.NotContains(t, h.tracker.vms, 100)
+	_, ok := h.tracker.get(100)
+	assert.False(t, ok)
 	assert.True(t, busyCPUs(h).Equals(cpuset.New(1, 5)), "CPU 1 is still VM 101's, CPU 0 is free: got %v", busyCPUs(h))
 }
 
@@ -157,7 +205,7 @@ func TestHandleVMStopReleasesVM(t *testing.T) {
 func TestTrackIgnoresOnlyNodeCapacityGuest(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone))
 
 	track(t, h, 999, 1, &qemu.Config{Name: "node-capacity", Cores: new(8), Affinity: "0-7", Tags: &qemu.Tags{"karpenter"}})
 	assert.True(t, busyCPUs(h).IsEmpty(), "the node-capacity guest's affinity is never counted: got %v", busyCPUs(h))
@@ -171,56 +219,55 @@ func TestTrackIgnoresOnlyNodeCapacityGuest(t *testing.T) {
 func TestTrackReadsMultiRangeDescriptionAffinity(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone))
 
 	track(t, h, 100, 1, &qemu.Config{Cores: new(4), Description: "Karpenter managed, affinity=1-2,5-6, class=default"})
 
 	plan := h.plan()
-	assert.True(t, plan.Changed[100].Equals(cpuset.New(1, 2, 5, 6)), "got %v", plan.Changed[100])
-	assert.True(t, plan.OneToOne[100], "4 cores on 4 CPUs are pinned 1:1")
+	assert.True(t, plan.Changed[100].CPUs.Equals(cpuset.New(1, 2, 5, 6)), "got %v", plan.Changed[100])
+	assert.True(t, plan.Changed[100].OneToOne(), "4 cores on 4 CPUs are pinned 1:1")
 }
 
-// TestRebalanceSharedSkipsDeadProcess drives rebalanceShared's apply
-// step against a VM whose process has since exited (a stop event racing
-// the debounce timer) — it must skip that VM rather than fail the whole
-// rebalance, and must leave the tracker's AssignedSet untouched so the
-// next rebalance retries it.
-func TestRebalanceSharedSkipsDeadProcess(t *testing.T) {
+// TestRebalanceTouchesOnlySharedPlacement checks that a rebalance never runs taskset on a
+// pinned VM, and that a VM under shared placement whose process has exited is skipped
+// and dropped, not retried on every rebalance until its stop event.
+func TestRebalanceTouchesOnlySharedPlacement(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(),
-		WithSharedPolicy(SharedPolicyPartition),
-		WithRebalanceDebounce(0), // synchronous, for the test
-	)
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyPartition), WithRebalanceDebounce(0))
 
-	const deadPID = 1<<31 - 1 // never a real PID
-
+	track(t, h, 100, deadPID, &qemu.Config{Cores: new(2), Affinity: "0,4"})
 	track(t, h, 200, deadPID, &qemu.Config{Cores: new(2)})
-	require.Contains(t, h.plan().Changed, 200, "the floating VM is planned")
+	require.Contains(t, h.plan().Changed, 100)
+	require.Contains(t, h.plan().Changed, 200)
 
 	h.scheduleRebalance(t.Context())
 
-	assert.True(t, h.tracker.vms[200].applied.IsEmpty(), "apply must be skipped for a dead process, not recorded as done")
-	assert.Contains(t, h.plan().Changed, 200, "the next rebalance retries it")
+	_, ok := h.tracker.get(100)
+	assert.True(t, ok, "the pinned VM is left to its start path")
+	_, ok = h.tracker.get(200)
+	assert.False(t, ok, "the dead VM is dropped")
+	assert.NotContains(t, h.plan().Changed, 200, "and never retried")
+	assert.True(t, busyCPUs(h).Equals(cpuset.New(0, 4)), "the dead VM holds nothing: got %v", busyCPUs(h))
 }
 
-// TestScheduleRebalanceNoopWhenPolicyNone confirms the escape hatch:
-// with SharedPolicyNone, a shared VM is
-// never touched at all, even across a synchronous rebalance.
+// TestScheduleRebalanceNoopWhenPolicyNone confirms the escape hatch: with
+// SharedPolicyNone, no VM is ever touched by a rebalance.
 func TestScheduleRebalanceNoopWhenPolicyNone(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(),
-		WithSharedPolicy(SharedPolicyNone),
-		WithRebalanceDebounce(0),
-	)
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
 
-	track(t, h, 200, 1, &qemu.Config{Cores: new(2)})
+	track(t, h, 100, deadPID, &qemu.Config{Cores: new(2), Affinity: "0,4"})
+	track(t, h, 200, deadPID, &qemu.Config{Cores: new(2)})
 
 	h.scheduleRebalance(t.Context())
 
-	assert.True(t, h.tracker.vms[200].applied.IsEmpty())
-	assert.Empty(t, h.plan().Changed)
+	for _, id := range []int{100, 200} {
+		vm, ok := h.tracker.get(id)
+		require.True(t, ok, "VM %d was not touched", id)
+		assert.True(t, vm.applied.IsEmpty())
+	}
 }
 
 // TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity drives
@@ -233,13 +280,13 @@ func TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity(t *testing.T) {
 
 	f := fakelocal.New(t, fakelocal.WithGuest(100, "name: shared-vm\ncores: 1\n"))
 	reserved := cpuset.New(tp.CPUDetails.CPUs().List()[0])
-	// Reserve a CPU: if handleVMStart masked to the shared pool despite
+	// Reserve a CPU: if handleVMStart masked to the unpinned CPUs despite
 	// SharedPolicyNone (the bug this test guards against), the mask
 	// would exclude the reserved CPU and so differ from the process's
 	// inherited (unrestricted) affinity — a masking bug that always
 	// narrows to "every CPU" would otherwise look like a no-op and slip
 	// past this test.
-	h := NewHandler(f.Client(), tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone), WithReservedCPUs(reserved))
+	h := newHandler(t, f.Client(), tp, WithSharedPolicy(SharedPolicyNone), WithReservedCPUs(reserved))
 
 	pid := spawnFakeQemuThread(t)
 
@@ -260,14 +307,14 @@ func TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity(t *testing.T) {
 
 // TestHandleVMStartMasksSharedVMUnderPartitionPolicy is the mirror
 // image: with --shared-policy=partition, an unaffined VM's threads must
-// actually be confined to the shared pool (host CPUs minus reserved
+// actually be confined to the unpinned CPUs (host CPUs minus reserved
 // CPUs) right away, not left on their inherited affinity.
 func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 	tp := liveTopology(t)
 
 	f := fakelocal.New(t, fakelocal.WithGuest(100, "name: shared-vm\ncores: 1\n"))
 	reserved := cpuset.New(tp.CPUDetails.CPUs().List()[0])
-	h := NewHandler(f.Client(), tp, logr.Discard(),
+	h := newHandler(t, f.Client(), tp,
 		WithSharedPolicy(SharedPolicyPartition),
 		WithReservedCPUs(reserved),
 	)
@@ -283,9 +330,11 @@ func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 	after, err := utilsys.GetThreadAffinity(pid, threads[0])
 	require.NoError(t, err)
 
-	assert.True(t, after.Intersection(reserved).IsEmpty(), "the reserved CPU must never be handed to a shared VM, got %v", after)
-	assert.True(t, after.IsSubsetOf(tp.CPUDetails.CPUs().Difference(reserved)), "expected the thread masked to the shared pool, got %v", after)
-	assert.True(t, after.Equals(h.tracker.vms[100].applied), "the applied cpuset is what taskset set: %v vs %v", after, h.tracker.vms[100].applied)
+	assert.True(t, after.Equals(tp.CPUDetails.CPUs().Difference(reserved)), "expected the thread masked to all unpinned CPUs, got %v", after)
+
+	vm, ok := h.tracker.get(100)
+	require.True(t, ok)
+	assert.True(t, vm.applied.IsEmpty(), "the provisional mask is not the VM's partition: the rebalance places it")
 }
 
 // TestTrackReentrantStartDoesNotLeakStaleAffinity covers a duplicate start event for a VM
@@ -293,7 +342,7 @@ func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 func TestTrackReentrantStartDoesNotLeakStaleAffinity(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone))
 
 	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,4"})
 	assert.True(t, busyCPUs(h).Equals(cpuset.New(0, 4)), "got %v", busyCPUs(h))
@@ -307,7 +356,7 @@ func TestTrackReentrantStartDoesNotLeakStaleAffinity(t *testing.T) {
 func TestTrackNewPIDForgetsAppliedCPUs(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy(SharedPolicyNone))
+	h := newHandler(t, nil, tp, WithSharedPolicy(SharedPolicyNone))
 
 	track(t, h, 100, 1, &qemu.Config{Cores: new(2), Affinity: "0,4"})
 	h.tracker.setApplied(100, 1, cpuset.New(0, 4))
@@ -326,7 +375,7 @@ func TestTrackNewPIDForgetsAppliedCPUs(t *testing.T) {
 func TestWithSharedPolicyRejectsUnknownValue(t *testing.T) {
 	tp := dualNodeTopology()
 
-	h := NewHandler(nil, tp, logr.Discard(), WithSharedPolicy("parition")) // typo
+	h := newHandler(t, nil, tp, WithSharedPolicy("parition")) // typo
 
-	assert.Equal(t, SharedPolicyNone, h.sharedPolicy, "an unrecognized policy must not be silently treated as partition mode")
+	assert.False(t, h.partition, "an unrecognized policy must not be silently treated as partition mode")
 }
