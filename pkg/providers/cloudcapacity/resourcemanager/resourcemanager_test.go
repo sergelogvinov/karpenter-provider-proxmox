@@ -26,24 +26,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 )
 
-var testNodeSettings = settings.NodeSettings{
-	NumSockets:      1,
-	NumThreads:      2,
-	NumUncoreCaches: 2,
-	NUMANodes: settings.NUMANodes{
-		0: settings.NUMAInfo{
-			CPUs:    "0-7",
-			MemSize: 16 * 1024 * 1024 * 1024,
-		},
-		1: settings.NUMAInfo{
-			CPUs:    "8-15",
-			MemSize: 16 * 1024 * 1024 * 1024,
-		},
-	},
-	ReservedCPUs:   []int{},
-	ReservedMemory: 1024 * 1024 * 1024,
-}
-
 func TestNodeSettingsFromVM(t *testing.T) {
 	testCases := []struct { //nolint:dupl
 		name         string

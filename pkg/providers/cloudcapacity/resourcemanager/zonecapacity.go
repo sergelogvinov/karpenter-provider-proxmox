@@ -17,182 +17,120 @@ limitations under the License.
 package resourcemanager
 
 import (
-	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
+	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
-
-	"k8s.io/utils/cpuset"
+	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 )
 
 // pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.
 const pendingGracePeriod = 10 * time.Minute
 
-// errInvalidRequest means a VM request lacks the CPUs or memory, or the VM ID Reserve needs.
-var errInvalidRequest = errors.New("cannot reserve resources: a VM ID, CPUs and memory are required")
+const mib = uint64(1 << 20)
 
-// ErrNoRoom marks a reservation that fails because the zone has no room for the VM,
-// as opposed to an invalid request.
-var ErrNoRoom = errors.New("no room in zone")
-
-// noRoomError is a lack-of-room failure that keeps err's message.
-type noRoomError struct {
-	err error
-}
-
-func (e noRoomError) Error() string { return e.err.Error() }
-
-func (e noRoomError) Unwrap() []error { return []error{e.err, ErrNoRoom} }
-
-// Capacity is what a new shared VM could still get in a zone.
-type Capacity struct {
-	CPUs   int
-	Memory uint64
-}
-
-// ZoneCapacity tracks the CPU and memory one zone gives to VMs, one record per VM ID.
-// Usage is always recomputed from the records, so reserving, tracking and releasing
-// the same VM any number of times never drifts.
+// ZoneCapacity is one zone's capacity under the controller's node policy, plus its
+// pending reservations: VMs reserved here and not yet seen running.
 type ZoneCapacity struct {
 	mu sync.Mutex
 
-	topo      *topology.Topology
-	placement Placement
+	zone   *zonecapacity.Zone
+	policy zonecapacity.Policy
 
-	allCPUs      cpuset.CPUSet
-	reservedCPUs cpuset.CPUSet
-	// memory is the zone memory left after the reservation.
-	memory uint64
-
-	vms map[int]record
+	// tracked are the VMs seen running in the zone.
+	tracked map[int]bool
+	// pending are the reservations whose VMs have not been seen running yet.
+	pending map[int]pendingReservation
 
 	now func() time.Time
 }
 
-// record is what one VM holds: shared vCPUs or a pinned CPU set, and its memory.
-type record struct {
-	cpus   int
-	cpuSet cpuset.CPUSet
-	memory uint64
-	// numaMemory is the VM's memory bound to each NUMA node, if any.
-	numaMemory map[int]uint64
-	// reservedAt is when Reserve admitted the VM; zero for a tracked VM.
+// pendingReservation is what Reserve asked for and got, and when.
+type pendingReservation struct {
+	vm         zonecapacity.VM
+	grant      zonecapacity.Grant
 	reservedAt time.Time
 }
 
-// usage is the sum of all records.
-type usage struct {
-	pinnedCPUs cpuset.CPUSet
-	sharedCPUs int
-	memory     uint64
-	numaMemory map[int]uint64
-}
-
-// NewZoneCapacity returns an empty zone on topo that places new VMs with placement.
-func NewZoneCapacity(topo *topology.Topology, reservedCPUs []int, reservedMemory uint64, placement Placement) (*ZoneCapacity, error) {
-	if topo == nil {
-		return nil, fmt.Errorf("system topology must be provided")
-	}
-
-	reserved := cpuset.New(reservedCPUs...)
-	if topo.NumCPUs < reserved.Size() {
-		return nil, fmt.Errorf("not enough CPUs available: maxCPUs=%d, reservedCPUs=%d", topo.NumCPUs, reserved.Size())
-	}
-
-	if reservedMemory >= topo.TotalMemory {
-		return nil, fmt.Errorf("reserved memory %d must be less than max memory %d", reservedMemory, topo.TotalMemory)
-	}
-
-	ratio := placement.ratio()
-	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 1 {
-		return nil, fmt.Errorf("CPU overcommit ratio must be a finite number greater than or equal to 1")
-	}
-
-	if float64(topo.NumCPUs)*ratio >= float64(math.MaxInt) {
-		return nil, fmt.Errorf("CPU overcommit ratio exceeds the supported CPU budget")
+// NewZoneCapacity returns an empty zone on host that places new VMs under policy.
+func NewZoneCapacity(host zonecapacity.Host, policy zonecapacity.Policy) (*ZoneCapacity, error) {
+	zone, err := zonecapacity.New(host)
+	if err != nil {
+		return nil, err
 	}
 
 	return &ZoneCapacity{
-		topo:         topo,
-		placement:    placement,
-		allCPUs:      topo.CPUDetails.CPUs(),
-		reservedCPUs: reserved,
-		memory:       topo.TotalMemory - reservedMemory,
-		vms:          map[int]record{},
-		now:          time.Now,
+		zone:    zone,
+		policy:  policy,
+		tracked: map[int]bool{},
+		pending: map[int]pendingReservation{},
+		now:     time.Now,
 	}, nil
 }
 
-// Fit is what placing a VM would leave a zone with.
-type Fit struct {
-	// NUMANodes is how many NUMA nodes the VM would span; zero for a shared VM.
-	NUMANodes int
-	// Leftover is the free share of the zone's scarcer resource, CPU or memory,
-	// after placing the VM: 0 when that resource is used up, 1 when the zone is empty.
-	Leftover float64
-}
-
-// Reserve admits a new VM if the zone has room for it. A failure for lack of room is ErrNoRoom.
+// Reserve admits a new VM if the zone has room for it, and fills op with where it goes:
+// for pinned placement its host CPUs and NUMA split, and the description tokens to write.
+// A failure for lack of room is zonecapacity.ErrNoRoom.
 func (z *ZoneCapacity) Reserve(op *resources.VMResources) error {
-	if op == nil || op.ID <= 0 {
-		return errInvalidRequest
+	if op == nil {
+		return fmt.Errorf("%w: a VM request is required", zonecapacity.ErrInvalid)
 	}
 
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	rec, numaNodes, err := z.admit(op)
+	vm := vmFromRequest(*op)
+
+	grant, err := z.zone.Reserve(z.policy, vm)
 	if err != nil {
 		return err
 	}
 
-	rec.reservedAt = z.now()
-	z.vms[op.ID] = rec
+	z.pending[op.ID] = pendingReservation{vm: vm, grant: grant, reservedAt: z.now()}
 
-	if !rec.cpuSet.IsEmpty() {
-		op.CPUSet = rec.cpuSet.Clone()
-		op.NUMANodes = numaNodes
-	}
+	applyGrant(op, grant)
 
 	return nil
 }
 
 // Fit is what reserving op would leave the zone with, without reserving it.
 // It fails exactly when Reserve would, except that op may have no ID yet.
-func (z *ZoneCapacity) Fit(op resources.VMResources) (Fit, error) {
-	z.mu.Lock()
-	defer z.mu.Unlock()
-
-	rec, numaNodes, err := z.admit(&op)
-	if err != nil {
-		return Fit{}, err
-	}
-
-	left := z.available(z.usageWith(op.ID, rec))
-
-	return Fit{
-		NUMANodes: len(numaNodes),
-		Leftover:  scarcerShare(left.CPUs, z.sharedCapacity(usage{}), left.Memory, z.memory),
-	}, nil
+func (z *ZoneCapacity) Fit(op resources.VMResources) (zonecapacity.Fit, error) {
+	return z.zone.Fit(z.policy, vmFromRequest(op))
 }
 
-// Track records a VM that already exists in the zone, replacing any earlier record.
-// It never fails on budget: an over-committed zone just has nothing available.
-func (z *ZoneCapacity) Track(op *resources.VMResources) error {
-	if op == nil || op.ID <= 0 {
-		return fmt.Errorf("cannot track resources: a VM ID is required")
-	}
-
+// Track records a VM that runs in the zone, replacing any earlier record or reservation.
+func (z *ZoneCapacity) Track(vm zonecapacity.VM) error {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	z.vms[op.ID] = newRecord(op.CPUs, op.CPUSet, op.Memory, op.NUMANodes)
+	if err := z.zone.Track(vm); err != nil {
+		return err
+	}
+
+	z.tracked[vm.ID] = true
+	delete(z.pending, vm.ID)
 
 	return nil
+}
+
+// Release forgets VM id. Releasing a VM without a record changes nothing.
+func (z *ZoneCapacity) Release(id int) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	z.zone.Release(id)
+	delete(z.tracked, id)
+	delete(z.pending, id)
+}
+
+// Available is what a new shared VM could still get, clamped at zero.
+func (z *ZoneCapacity) Available() zonecapacity.Capacity {
+	return z.zone.Available(z.policy)
 }
 
 // KeepPending copies prev's pending reservations into z: reserved VMs that z has not tracked.
@@ -208,20 +146,25 @@ func (z *ZoneCapacity) KeepPending(prev *ZoneCapacity, exists func(id int) bool)
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	for id, rec := range prev.vms {
-		if rec.reservedAt.IsZero() {
+	for id, p := range prev.pending {
+		if z.tracked[id] {
 			continue
 		}
 
-		if _, ok := z.vms[id]; ok {
+		if _, ok := z.pending[id]; ok {
 			continue
 		}
 
-		if z.now().Sub(rec.reservedAt) > pendingGracePeriod && !exists(id) {
+		if z.now().Sub(p.reservedAt) > pendingGracePeriod && !exists(id) {
 			continue
 		}
 
-		z.vms[id] = rec
+		// The reservation is tracked as the VM its grant will launch, so it keeps its CPUs.
+		if err := z.zone.Track(vmFromGrant(p.vm, p.grant)); err != nil {
+			continue
+		}
+
+		z.pending[id] = p
 	}
 }
 
@@ -230,29 +173,7 @@ func (z *ZoneCapacity) HasPending() bool {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	for _, rec := range z.vms {
-		if !rec.reservedAt.IsZero() {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Release forgets VM id. Releasing a VM without a record changes nothing.
-func (z *ZoneCapacity) Release(id int) {
-	z.mu.Lock()
-	defer z.mu.Unlock()
-
-	delete(z.vms, id)
-}
-
-// Available is what a new shared VM could still get, clamped at zero.
-func (z *ZoneCapacity) Available() Capacity {
-	z.mu.Lock()
-	defer z.mu.Unlock()
-
-	return z.available(z.usage())
+	return len(z.pending) > 0
 }
 
 // String describes the zone's capacity for logs.
@@ -260,137 +181,81 @@ func (z *ZoneCapacity) String() string {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	u := z.usage()
-	free := z.available(u)
+	free := z.zone.Available(z.policy)
 
-	return fmt.Sprintf("VMs: %d, CPU: Free: %d, Pinned: [%v], Reserved: [%v], Mem: %dM",
-		len(z.vms), free.CPUs, u.pinnedCPUs, z.reservedCPUs, free.Memory/1024/1024)
+	return fmt.Sprintf("VMs: %d, Pending: %d, CPU: Free: %d, Mem: %dM",
+		len(z.tracked), len(z.pending), free.CPUs, free.Memory/mib)
 }
 
-// admit places op and checks the zone has room for it, without recording it.
-func (z *ZoneCapacity) admit(op *resources.VMResources) (record, map[int]resources.NUMANodeState, error) {
-	// A zero ID is a VM that Fit is asked about before it has one; Reserve rejects it.
-	if op.ID < 0 || op.CPUs <= 0 || op.Memory == 0 {
-		return record{}, nil, errInvalidRequest
-	}
-
-	if _, ok := z.vms[op.ID]; ok {
-		return record{}, nil, fmt.Errorf("resources for VM %d are already reserved", op.ID)
-	}
-
-	cpus, numaNodes, err := z.placement.place(z.free(), op)
+// VMFromConfig is a running VM as the zone reads it: a field copy of its listing entry and config.
+func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, error) {
+	opt, err := vmresources.GetResourceFromVMConfig(vmr, cfg)
 	if err != nil {
-		return record{}, nil, noRoomError{err}
+		return zonecapacity.VM{}, err
 	}
 
-	rec := newRecord(op.CPUs, cpus, op.Memory, numaNodes)
-
-	u := z.usageWith(op.ID, rec)
-	if u.memory > z.memory {
-		return record{}, nil, noRoomError{fmt.Errorf("not enough memory available: requested=%d, available=%d", op.Memory, z.available(z.usage()).Memory)}
+	vm := zonecapacity.VM{
+		ID:          opt.ID,
+		CPUs:        opt.CPUs,
+		Memory:      opt.Memory,
+		Affinity:    cfg.Affinity,
+		Description: cfg.Description,
+		Tags:        vmr.Tags,
 	}
 
-	for i := range rec.numaMemory {
-		if u.numaMemory[i] > z.topo.NUMANodes[i] {
-			return record{}, nil, noRoomError{fmt.Errorf("not enough memory available on NUMA node %d", i)}
+	if cfg.Tags != nil {
+		vm.Tags = *cfg.Tags
+	}
+
+	if len(opt.NUMANodes) > 0 {
+		vm.NUMAMemory = make(map[int]uint64, len(opt.NUMANodes))
+		for node, state := range opt.NUMANodes {
+			vm.NUMAMemory[node] = state.Memory * mib
 		}
 	}
 
-	if u.sharedCPUs > z.sharedCapacity(u) {
-		return record{}, nil, noRoomError{fmt.Errorf("not enough CPUs available: requested=%d, available=%d", op.CPUs, z.available(z.usage()).CPUs)}
-	}
-
-	return rec, numaNodes, nil
+	return vm, nil
 }
 
-func (z *ZoneCapacity) available(u usage) Capacity {
-	c := Capacity{CPUs: max(0, z.sharedCapacity(u)-u.sharedCPUs)}
-	if u.memory < z.memory {
-		c.Memory = z.memory - u.memory
-	}
-
-	return c
+// vmFromRequest is a VM request as the zone takes it.
+func vmFromRequest(op resources.VMResources) zonecapacity.VM {
+	return zonecapacity.VM{ID: op.ID, CPUs: op.CPUs, Memory: op.Memory}
 }
 
-// sharedCapacity is how many shared vCPUs the unpinned, unreserved CPUs offer.
-func (z *ZoneCapacity) sharedCapacity(u usage) int {
-	unpinned := z.allCPUs.Difference(z.reservedCPUs).Difference(u.pinnedCPUs).Size()
-
-	return int(math.Floor(float64(unpinned) * z.placement.ratio()))
-}
-
-// free is what the zone has left for a new VM.
-func (z *ZoneCapacity) free() freeResources {
-	u := z.usage()
-	zoneFree := z.available(u).Memory
-
-	numaMemory := make(map[int]uint64, len(z.topo.NUMANodes))
-	for i, mem := range z.topo.NUMANodes {
-		var nodeFree uint64
-		if u.numaMemory[i] < mem {
-			nodeFree = mem - u.numaMemory[i]
-		}
-
-		numaMemory[i] = min(nodeFree, zoneFree)
+// vmFromGrant is the VM a launch writes from vm's grant, as the zone reads it back.
+func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
+	if !grant.CPUSet.IsEmpty() {
+		vm.Affinity = grant.CPUSet.String()
 	}
 
-	usable := z.allCPUs.Difference(z.reservedCPUs)
-
-	return freeResources{
-		topo:       z.topo,
-		usable:     usable,
-		cpus:       usable.Difference(u.pinnedCPUs),
-		numaMemory: numaMemory,
-	}
-}
-
-func (z *ZoneCapacity) usage() usage {
-	u := usage{pinnedCPUs: cpuset.New(), numaMemory: map[int]uint64{}}
-
-	for _, rec := range z.vms {
-		if rec.cpuSet.IsEmpty() {
-			u.sharedCPUs += rec.cpus
-		} else {
-			u.pinnedCPUs = u.pinnedCPUs.Union(rec.cpuSet)
-		}
-
-		u.memory += rec.memory
-
-		for i, mem := range rec.numaMemory {
-			u.numaMemory[i] += mem
+	if len(grant.NUMA) > 0 {
+		vm.NUMAMemory = make(map[int]uint64, len(grant.NUMA))
+		for node, b := range grant.NUMA {
+			vm.NUMAMemory[node] = b.Memory
 		}
 	}
 
-	u.pinnedCPUs = u.pinnedCPUs.Intersection(z.allCPUs).Difference(z.reservedCPUs)
-
-	return u
+	return vm
 }
 
-// usageWith is the usage if VM id held rec instead of its current record.
-func (z *ZoneCapacity) usageWith(id int, rec record) usage {
-	prev, ok := z.vms[id]
-	z.vms[id] = rec
+// applyGrant writes grant into op: host CPUs, the NUMA split with guest vCPU ranges and MiB, and the tokens.
+func applyGrant(op *resources.VMResources, grant zonecapacity.Grant) {
+	op.DescriptionTokens = grant.DescriptionTokens
 
-	u := z.usage()
-
-	if ok {
-		z.vms[id] = prev
-	} else {
-		delete(z.vms, id)
+	if grant.CPUSet.IsEmpty() {
+		return
 	}
 
-	return u
-}
+	op.CPUSet = grant.CPUSet.Clone()
+	op.NUMANodes = make(map[int]resources.NUMANodeState, len(grant.NUMA))
 
-func newRecord(cpus int, cpuSet cpuset.CPUSet, memory uint64, numaNodes map[int]resources.NUMANodeState) record {
-	rec := record{cpus: cpus, cpuSet: cpuSet.Clone(), memory: memory}
+	for node, b := range grant.NUMA {
+		vcpus := b.VCPUs.List()
 
-	if len(numaNodes) > 0 {
-		rec.numaMemory = make(map[int]uint64, len(numaNodes))
-		for i, node := range numaNodes {
-			rec.numaMemory[i] = node.Memory * 1024 * 1024
+		op.NUMANodes[node] = resources.NUMANodeState{
+			CPUs:   fmt.Sprintf("%d-%d", vcpus[0], vcpus[len(vcpus)-1]),
+			Memory: b.Memory / mib,
+			Policy: "bind",
 		}
 	}
-
-	return rec
 }

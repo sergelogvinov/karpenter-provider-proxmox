@@ -45,4 +45,6 @@ type VMResources struct {
 	CPUSet cpuset.CPUSet
 	// NUMANodes represents the topology on the Host assigned to the VM.
 	NUMANodes map[int]NUMANodeState
+	// DescriptionTokens are written into the VM description at launch, e.g. "affinity=8-15".
+	DescriptionTokens []string
 }

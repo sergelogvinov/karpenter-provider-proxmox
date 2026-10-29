@@ -28,6 +28,7 @@ import (
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 )
 
 // TestNodePolicySelection exercises policy dispatch using discovered Proxmox topology.
@@ -74,8 +75,8 @@ func TestNodePolicySelection(t *testing.T) {
 			err = capacity.Reserve(request)
 			if tc.admit {
 				require.NoError(t, err)
-				require.NoError(t, capacity.Track(request))
-				require.Equal(t, Capacity{CPUs: 2, Memory: 23 << 30}, capacity.Available())
+				require.NoError(t, capacity.Track(zonecapacity.VM{ID: request.ID, CPUs: request.CPUs, Memory: request.Memory}))
+				require.Equal(t, zonecapacity.Capacity{CPUs: 2, Memory: 23 << 30}, capacity.Available())
 				capacity.Release(request.ID)
 				require.Equal(t, 18, capacity.Available().CPUs)
 			} else {

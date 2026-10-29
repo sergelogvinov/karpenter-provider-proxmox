@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
@@ -102,18 +103,21 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 		return nil, fmt.Errorf("failed to discover topology from settings for node %s: %w", zone, err)
 	}
 
-	var placement Placement
+	policy := zonecapacity.Policy{Ratio: 1}
 
 	switch opts.NodePolicy {
 	case policyStatic:
-		placement = Pinned(log)
+		policy = zonecapacity.Policy{Pinned: true}
 	case policySimpleWithCPUOvercommit:
-		placement = Shared(opts.CPUOvercommitRatio)
-	default:
-		placement = Shared(1)
+		policy = zonecapacity.Policy{Ratio: opts.CPUOvercommitRatio}
 	}
 
-	capacity, err := NewZoneCapacity(sysTopology, nodeSettings.ReservedCPUs, nodeSettings.ReservedMemory, placement)
+	capacity, err := NewZoneCapacity(zonecapacity.Host{
+		Topology:       sysTopology,
+		ReservedCPUs:   cpuset.New(nodeSettings.ReservedCPUs...),
+		ReservedMemory: nodeSettings.ReservedMemory,
+		HugePageSize:   nodeSettings.HugePageSize,
+	}, policy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create %s zone capacity for node %s: %w", opts.NodePolicy, zone, err)
 	}
