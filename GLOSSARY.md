@@ -87,6 +87,26 @@ _Avoid_: simple policy
 A virtual machine gets its own set of host CPUs aligned to the NUMA layout, and its memory is split across the NUMA nodes those CPUs belong to.
 _Avoid_: static policy
 
+**NUMA slot**:
+An aligned whole, half or quarter of one NUMA node's usable CPUs and memory; smaller slots nest inside larger ones.
+_Avoid_: partition, chunk
+
+**Slot fraction**:
+The number a NUMA node is divided by to form its NUMA slots: 1, 2 or 4.
+_Avoid_: numa size, split
+
+**Slot shape**:
+The CPU and memory size of a NUMA slot on a given NUMA node.
+_Avoid_: size class
+
+**CPU share group**:
+A set of host CPUs with a fixed number of seats, used only by the virtual machines seated in it; every member has the same vCPU count and sees all of the group's CPUs.
+_Avoid_: shared pool, shared placement, share group
+
+**CPU share VM**:
+A virtual machine that sits in a CPU share group instead of holding CPUs of its own.
+_Avoid_: shared VM, fractional VM
+
 **CPU overcommit ratio**:
 How many shared vCPUs a zone offers for each unpinned host CPU; 1.0 means no overcommit.
 _Avoid_: oversubscription factor

@@ -1,4 +1,4 @@
-# Shared CPU Instance Types Design
+# CPU Share Instance Types Design
 
 Design notes for new instance type families whose VMs share a dedicated set of host CPUs: two, three or four VMs
 run on the same CPUs, each with its own dedicated memory.
@@ -37,11 +37,11 @@ with at most N−1 other VMs of the same shape".
 - CPU bandwidth control (`cpulimit`, cgroup quotas). Sharing is fair only in the sense of the Linux scheduler on
   a confined cpuset.
 - Mixed groups (different fractions or sizes sharing the same CPUs).
-- Per-NUMA accounting of `e` VMs in Karpenter (§7).
+- Per-NUMA accounting of CPU share VMs in Karpenter (§6).
 
 ## 3. Model
 
-A **share group** is a set of `vCPU` host CPUs with `N` seats. Every member of a group has the same family and
+A **CPU share group** is a set of `vCPU` host CPUs with `N` seats. Every member of a group has the same family and
 the same vCPU count, and all of their vCPU threads may run on any CPU of the group.
 
 ```
@@ -98,7 +98,7 @@ CPUShare int `json:"cpushare,omitempty"`
 ]
 ```
 
-- `cpushare` is what makes a type shared, not its name. The family can be called anything.
+- `cpushare` is what makes a type a CPU share type, not its name. The family can be called anything.
 - `capacity.cpu` is the full vCPU count the guest sees.
 - The loader rejects `cpushare` values other than 0, 2, 3 and 4.
 
@@ -106,7 +106,7 @@ CPUShare int `json:"cpushare,omitempty"`
 `e<N>` family for the requested CPUs and memory factors, with `cpushare` set.
 
 NodePools select the families with the existing `LabelInstanceFamily` label (`pkg/apis/v1alpha1/labels.go`); no
-new label is added:
+new label is added (see [ADR 0002](adr/0002-family-digit-encodes-fraction.md)):
 
 ```yaml
 requirements:
@@ -127,7 +127,7 @@ requirements:
 
 ## 6. Karpenter accounting
 
-Karpenter never assigns CPUs to an `e` VM. It only counts how many host CPUs the `e` groups of a zone need.
+Karpenter never assigns CPUs to a CPU share VM. It only counts how many host CPUs the CPU share groups of a zone need.
 
 For each size class `(N, vCPU)` with `count` VMs in the zone:
 
@@ -139,7 +139,7 @@ eCPUs           = Σ groups(N, vCPU) × vCPU
 So a lone `e2.2VCPU` VM costs 2 CPUs, and a second one in the same zone costs nothing more: it fills the open
 seat. Sharing is never assumed across classes.
 
-`resourcemanager.ZoneCapacity` gets a third kind of record next to pinned and shared: an `e` record holds
+`resourcemanager.ZoneCapacity` gets a third kind of record next to pinned and shared placement: a CPU share record holds
 `(N, vCPU)` and its memory. `usage()` adds `eCPUs` computed as above.
 
 - **`static` policy.** `eCPUs` are subtracted from the CPUs a pinned VM can be placed on, as a count:
@@ -148,16 +148,19 @@ seat. Sharing is never assumed across classes.
   (§8.3).
 - **`simple` policy.** `eCPUs` are subtracted from `sharedCapacity` before unpinned VMs are counted against it.
 - **`simple-with-cpu-overcommit` policy.** `e` types get no offerings.
+- **NUMA slots.** A NUMA slot ([scheduler-numa.md](scheduler-numa.md) §5) is free only
+  if the zone still has room after `eCPUs`, because launching a NUMA VM may push a CPU share group off the slot's
+  CPUs.
 - **Fit.** An `e` offering is available in a zone when adding one VM of that class keeps the zone's CPUs and memory
   within capacity. Because of the `ceil`, a zone with an open seat of that class always fits on CPU.
-- **Memory.** Charged at the zone level only. `e` VMs get no `numaN: hostnodes=…` binding and no per-NUMA memory
+- **Memory.** Charged at the zone level only. CPU share VMs get no `numaN: hostnodes=…` binding and no per-NUMA memory
   record.
 
 ## 7. Launch and resync
 
 When Karpenter launches an `e` type:
 
-1. The capacity provider reserves an `e` record for the zone (no CPU set).
+1. The capacity provider reserves a CPU share record for the zone (no CPU set).
 2. The VM is created with `cores = vCPU`, no `affinity`, no NUMA binding, and the description token
    `cpushare=<N>`:
 
@@ -179,7 +182,7 @@ A VM resized in place, or whose `cpushare` changes, simply moves to another size
 
 | Class | Detection | Handling |
 |---|---|---|
-| `cpushare` | no `affinity`, `cpushare=<N>` in the description | Member of a share group; all threads masked to the group's cpuset. |
+| `cpushare` | no `affinity`, `cpushare=<N>` in the description | Member of a CPU share group; all threads masked to the group's cpuset. |
 
 `cpushare` VMs are confined whatever `--shared-policy` says, and floating VMs are always kept off the groups'
 CPUs. With `none`, floating VMs are masked to the whole `sharedPool` (§8.2) instead of being left on all CPUs; with
@@ -224,7 +227,8 @@ func PlanCPUShare(logger logr.Logger, topo *topology.CPUTopology,
 3. **Merge.** When a class has more groups than it needs, the emptiest groups (ties: highest CPU IDs) are dissolved and their members move
    to open seats of the kept ones. Repacking is eager, on every debounced rebalance, so the host's real usage
    matches Karpenter's count. Moving a member is only an affinity change.
-4. **Place.** New groups take `CPUs` CPUs from the remaining pool with `takeByTopologyNUMAPacked`
+4. **Place.** New groups go to the NUMA node with the most pinned CPUs first, so they rarely sit on whole free
+   NUMA slots and rarely have to move when a NUMA VM launches. Within that order they take `CPUs` CPUs from the remaining pool with `takeByTopologyNUMAPacked`
    (`CPUSortingStrategyPacked`, whole physical cores with their siblings, aligned by uncore cache). A group prefers a
    single NUMA node and keeps it once placed; when no node has room it spills across nodes and the planner logs the
    spill.
@@ -291,7 +295,7 @@ A new `e2.2VCPU` VM in this zone is free on CPU for Karpenter as long as a seat 
 
 ## 11. Implementation plan
 
-1. Accounting: `VMResources.CPUShare`, `cpushare=` parsing in `GetResourceFromVMConfig`, the `e` record in
+1. Accounting: `VMResources.CPUShare`, `cpushare=` parsing in `GetResourceFromVMConfig`, the CPU share record in
    `ZoneCapacity` with the `ceil` count, and its effect on `static` and `simple` fit. Table tests per policy,
    including the worked example (§9).
 2. Instance types: `InstanceTypeStatic.CPUShare`, loader validation, pricing with `vCPU/N`, no offerings under
