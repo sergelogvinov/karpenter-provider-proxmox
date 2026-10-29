@@ -117,12 +117,20 @@ type PlanOptions struct {
     MinWidth  int  // --shared-min-width
 }
 
+type Placement int // PlacementShared, PlacementPinned (1:1), PlacementConstrained (masked)
+
+type Assignment struct {
+    CPUs      cpuset.CPUSet
+    Placement Placement
+}
+
 type Plan struct {
-    Changed map[int]cpuset.CPUSet // VMs whose cpuset must change; absent = leave as is
-    OneToOne map[int]bool         // VMs in Changed whose vCPUs are pinned 1:1, not masked
-    Busy    cpuset.CPUSet         // CPUs some VM uses, for the busy governor
-    Idle    cpuset.CPUSet         // the rest of the usable CPUs
-    Notes   []string              // spills, groups that did not fit, accounting drift
+    Changed  map[int]Assignment // VMs whose cpuset must change; absent = leave as is
+    Pinned   cpuset.CPUSet      // CPUs pinned and constrained VMs hold
+    Unpinned cpuset.CPUSet      // usable CPUs no pinned or constrained VM holds
+    Busy     cpuset.CPUSet      // CPUs some VM's cpuset holds, for the busy governor
+    Idle     cpuset.CPUSet      // the rest of the usable CPUs
+    Notes    []string           // spills, groups that did not fit, accounting drift
 }
 ```
 
@@ -212,14 +220,20 @@ _ = z.Track(zonecapacity.VM{                // start / sync
 z.Release(id)                               // stop
 
 plan := z.Plan(tracker.applied(), zonecapacity.PlanOptions{Partition: partition, MinWidth: w})
-for id, cpus := range plan.Changed {        // debounced rebalance
-    if apply(id, cpus, plan.OneToOne[id]) == nil {
-        tracker.setApplied(id, cpus)
+for id, a := range plan.Changed {           // debounced rebalance, partition only
+    if a.Placement == zonecapacity.PlacementShared && apply(id, a) == nil {
+        tracker.setApplied(id, a.CPUs)
     }
 }
-setGovernors(plan.Busy, plan.Idle)
+setGovernors(plan.Busy.Intersection(plan.Unpinned), plan.Unpinned)
 logNotes(plan.Notes)
 ```
+
+The scheduler keeps its pre-module behaviour: a starting VM's own entry in `plan.Changed` is applied at once
+(pinned 1:1 or masked to its affinity, with the busy governor and its IRQs; a VM under shared placement is masked to
+all of `plan.Unpinned` until the rebalance gives it its partition). A stop frees the governor of
+`before.Pinned − after.Pinned`. A sync never runs `taskset`; it takes a pinned VM's affinity as applied. The rebalance
+runs only under `--shared-policy=partition` and touches only VMs under shared placement.
 
 `classifyVM`, `sharedPool`, `numaHint`, the `usedCPUs`/`sharedCPUs` bookkeeping and the direct `cpumanager.PlanShared`
 call are deleted.

@@ -70,37 +70,39 @@ func TestPlanSharedWorkedExample(t *testing.T) {
 
 	plan := z.Plan(nil, partition)
 
-	require.Equal(t, map[int]cpuset.CPUSet{
-		100: cpuset.New(8, 9, 10, 11, 12, 13, 14, 15),
-		200: cpuset.New(1, 2, 33, 34),
-		201: cpuset.New(3, 4, 35, 36),
-		202: mustParse(t, "16-23,48-55"),
+	require.Equal(t, map[int]zonecapacity.Assignment{
+		100: {CPUs: mustParse(t, "8-15"), Placement: zonecapacity.PlacementPinned},
+		200: {CPUs: cpuset.New(1, 2, 33, 34), Placement: zonecapacity.PlacementShared},
+		201: {CPUs: cpuset.New(3, 4, 35, 36), Placement: zonecapacity.PlacementShared},
+		202: {CPUs: mustParse(t, "16-23,48-55"), Placement: zonecapacity.PlacementShared},
 	}, plan.Changed)
-	require.Equal(t, map[int]bool{100: true}, plan.OneToOne, "only the pinned VM is pinned 1:1")
+	require.True(t, plan.Changed[100].OneToOne(), "the pinned VM is pinned 1:1")
+	require.Equal(t, mustParse(t, "8-15"), plan.Pinned)
+	require.Equal(t, mustParse(t, "1-7,16-31,33-63"), plan.Unpinned, "all CPUs but the reserved and the pinned")
 	require.Equal(t, mustParse(t, "1-4,8-23,33-36,48-55"), plan.Busy)
 	require.Equal(t, mustParse(t, "5-7,24-31,37-47,56-63"), plan.Idle)
 	require.Empty(t, plan.Notes)
 
-	// A 32-vCPU VM 203 oversubscribes the 54-CPU pool: floating VMs then share CPUs only
+	// A 32-vCPU VM 203 oversubscribes the 54 unpinned CPUs: VMs then share CPUs only
 	// with VMs in the same NUMA node, and VM 100 keeps 8-15 to itself.
 	track(t, z, zonecapacity.VM{ID: 203, CPUs: 32, Memory: 32 * gib})
 
-	applied := plan.Changed
+	applied := cpusOf(plan.Changed)
 
 	plan = z.Plan(applied, partition)
 	require.NotContains(t, plan.Changed, 100, "the pinned VM is already applied")
 	require.Contains(t, plan.Changed, 203)
-	maps.Copy(applied, plan.Changed)
+	maps.Copy(applied, cpusOf(plan.Changed))
 
-	floating := map[int]cpuset.CPUSet{}
+	shared := map[int]cpuset.CPUSet{}
 	for _, id := range []int{200, 201, 202, 203} {
-		floating[id] = applied[id]
-		require.False(t, floating[id].IsEmpty(), "VM %d is placed", id)
-		require.True(t, floating[id].Intersection(mustParse(t, "0,8-15,32")).IsEmpty(), "VM %d on %s", id, floating[id])
+		shared[id] = applied[id]
+		require.False(t, shared[id].IsEmpty(), "VM %d is placed", id)
+		require.True(t, shared[id].Intersection(mustParse(t, "0,8-15,32")).IsEmpty(), "VM %d on %s", id, shared[id])
 	}
 
-	for a, cpusA := range floating {
-		for b, cpusB := range floating {
+	for a, cpusA := range shared {
+		for b, cpusB := range shared {
 			if a != b && !cpusA.Intersection(cpusB).IsEmpty() {
 				require.Equal(t, numaNodes(cpusA), numaNodes(cpusB), "VMs %d and %d overlap across NUMA nodes", a, b)
 			}
@@ -108,8 +110,8 @@ func TestPlanSharedWorkedExample(t *testing.T) {
 	}
 }
 
-// TestPlanWithoutPartition checks that --shared-policy=none leaves floating VMs as they are
-// while pinned and constrained VMs still get their affinity.
+// TestPlanWithoutPartition checks that --shared-policy=none leaves VMs under shared placement
+// as they are, while pinned and constrained VMs still get their affinity.
 func TestPlanWithoutPartition(t *testing.T) {
 	t.Parallel()
 
@@ -123,17 +125,19 @@ func TestPlanWithoutPartition(t *testing.T) {
 
 	plan := z.Plan(map[int]cpuset.CPUSet{100: cpuset.New(8, 40)}, zonecapacity.PlanOptions{})
 
-	require.Equal(t, map[int]cpuset.CPUSet{
-		101: cpuset.New(16, 17, 48, 49),
-		102: cpuset.New(24, 25, 26, 27),
-	}, plan.Changed, "VM 100 is applied already, the floating VM 200 is left as is")
-	require.Equal(t, map[int]bool{101: true, 102: false}, plan.OneToOne, "VM 102 is constrained: masked, not pinned")
+	require.Equal(t, map[int]zonecapacity.Assignment{
+		101: {CPUs: cpuset.New(16, 17, 48, 49), Placement: zonecapacity.PlacementPinned},
+		102: {CPUs: cpuset.New(24, 25, 26, 27), Placement: zonecapacity.PlacementConstrained},
+	}, plan.Changed, "VM 100 is applied already, VM 200 is left as is")
+	require.False(t, plan.Changed[102].OneToOne(), "a constrained VM is masked, not pinned")
+	require.Equal(t, mustParse(t, "8,16-17,24-27,40,48-49"), plan.Pinned)
 	require.Equal(t, mustParse(t, "8,16-17,24-27,40,48-49"), plan.Busy)
 	require.Equal(t, mustParse(t, "1-7,9-15,18-23,28-31,33-39,41-47,50-63"), plan.Idle)
 }
 
 // TestPlanKeepsAppliedCPUs checks that a plan that was applied is stable: planning again
-// with what was applied changes nothing, and a floating VM only moves when its CPUs are taken.
+// with what was applied changes nothing, and a VM under shared placement only moves when
+// its CPUs are taken.
 func TestPlanKeepsAppliedCPUs(t *testing.T) {
 	t.Parallel()
 
@@ -153,12 +157,13 @@ func TestPlanKeepsAppliedCPUs(t *testing.T) {
 
 	plan = z.Plan(maps.Clone(applied), partition)
 	require.Equal(t, []int{100, 201}, slices.Sorted(maps.Keys(plan.Changed)))
-	require.True(t, plan.Changed[201].Intersection(mustParse(t, "8-9,40-41")).IsEmpty())
-	require.Equal(t, []int{1}, numaNodes(plan.Changed[201]))
+	require.True(t, plan.Changed[201].CPUs.Intersection(mustParse(t, "8-9,40-41")).IsEmpty())
+	require.Equal(t, []int{1}, numaNodes(plan.Changed[201].CPUs))
 }
 
 // TestPlanSkipsWhatItCannotPlace checks that the node-capacity guest is never planned, a VM with
-// an unreadable affinity floats, and an affinity outside the host is left as is with a note.
+// an unreadable affinity gets shared placement, and an affinity outside the host is left as is
+// with a note.
 func TestPlanSkipsWhatItCannotPlace(t *testing.T) {
 	t.Parallel()
 
@@ -171,10 +176,21 @@ func TestPlanSkipsWhatItCannotPlace(t *testing.T) {
 
 	plan := z.Plan(nil, partition)
 
-	require.Equal(t, []int{200}, slices.Sorted(maps.Keys(plan.Changed)), "only the VM with an unreadable affinity floats")
-	require.Equal(t, 2, plan.Changed[200].Size())
+	require.Equal(t, []int{200}, slices.Sorted(maps.Keys(plan.Changed)), "only the VM with an unreadable affinity is planned")
+	require.Equal(t, zonecapacity.PlacementShared, plan.Changed[200].Placement)
+	require.Equal(t, 2, plan.Changed[200].CPUs.Size())
 	require.Len(t, plan.Notes, 1)
 	require.Contains(t, plan.Notes[0], "VM 100")
+}
+
+// cpusOf is the cpusets of a plan's assignments, as the caller applies them.
+func cpusOf(changed map[int]zonecapacity.Assignment) map[int]cpuset.CPUSet {
+	cpus := make(map[int]cpuset.CPUSet, len(changed))
+	for id, a := range changed {
+		cpus[id] = a.CPUs
+	}
+
+	return cpus
 }
 
 // TestPlanDeterministic checks that Plan does not depend on the order VMs were tracked in,
