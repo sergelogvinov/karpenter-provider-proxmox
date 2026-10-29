@@ -84,6 +84,49 @@ Only when no single NUMA node can hold the VM is it spread across NUMA nodes, wi
 Across zones, a zone where the VM stays on one NUMA node is always preferred over a zone where it would span several,
 whatever the node class's `placementStrategy` (see [NodeClass](nodeclass.md)).
 
+## CPU share types
+
+A VM of a CPU share type (see [Instance types](instancetypes.md#cpu-share-types)) does not get CPUs of its own: it takes a seat in a CPU share group.
+Karpenter never assigns CPUs to a CPU share VM, it only counts how many host CPUs the CPU share groups of a node need.
+The [Proxmox Scheduler](scheduler.md) decides which host CPUs each group runs on.
+
+For each size class, the number of seats N and the vCPU count, with `count` VMs on the node:
+
+```
+groups = ceil(count / N)
+CPUs   = groups × vCPU
+```
+
+The CPUs of all size classes add up. Sharing is never assumed across size classes.
+So a single `e2.2VCPU-4GB` VM costs 2 CPUs, and a second one on the same node costs no more CPUs: it fills the open seat.
+
+* `simple` mode: the CPU share groups' CPUs are subtracted from the available vCPUs before the other VMs without CPU affinity are counted.
+* `static` mode: a new pinned VM fits only if the CPUs not pinned by other VMs, minus the CPU share groups' CPUs, are enough for it.
+  The pinned VM may land on CPUs a CPU share group runs on; the scheduler then moves the group.
+  CPU share VMs get no CPU affinity and no NUMA node affinity.
+* `simple-with-cpu-overcommit` mode: CPU share types are not offered.
+  A VM created by hand with a `cpushare` token is counted as a regular VM without CPU affinity.
+
+Memory is accounted as for any other VM, at the node level.
+
+Karpenter writes the `cpushare=N` token into the VM description, and reads it back when it observes the running VMs,
+so a VM created by hand with the token is accounted the same way:
+
+```
+Karpenter managed instance, class=default, capacity-type=on-demand, cpushare=2
+```
+
+A VM with both CPU affinity and a `cpushare` token is accounted as a pinned VM, and the token is ignored.
+
+Example:
+
+A Proxmox node has 16 CPUs. Running VMs are:
+* three `e2.2VCPU-4GB` VMs: 2 groups, 4 CPUs
+* one `e4.8VCPU-16GB` VM: 1 group with three free seats, 8 CPUs
+
+The CPU share groups take 12 CPUs, so 4 CPUs are left for other VMs.
+A fourth `e2.2VCPU-4GB` VM costs no more CPUs, only its 4 GB of memory.
+
 ## Limitations and notes
 
 `static` mode requires root privileges (`root@pam`) to set CPU pinning for VMs.

@@ -40,13 +40,27 @@ type InstanceTypeOptions struct {
 	CPUs       []int
 	MemFactors []int
 	Storage    int
+	// CPUShares adds the CPU share family e<N> of the same sizes for each N (2, 3 or 4).
+	CPUShares []int
 
 	KubeletOverhead   bool
 	SystemOverhead    bool
 	EvictionThreshold bool
 }
 
+// Generate returns the instance types of every size, followed by the CPU share types of each of CPUShares.
 func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
+	instanceTypes := o.generate(0)
+
+	for _, share := range o.CPUShares {
+		instanceTypes = append(instanceTypes, o.generate(share)...)
+	}
+
+	return instanceTypes
+}
+
+// generate returns the instance types of every size: CPU share types of share seats, or dedicated ones if share is 0.
+func (o *InstanceTypeOptions) generate(share int) []*InstanceTypeStatic {
 	instanceTypes := []*InstanceTypeStatic{}
 
 	for _, cpu := range o.CPUs {
@@ -73,9 +87,10 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 			}
 
 			instanceType := InstanceTypeStatic{
-				Name:         makeGenericInstanceTypeName(cpu, memFactor),
+				Name:         makeGenericInstanceTypeName(cpu, memFactor, share),
 				Capacity:     capacity,
 				CapacityType: karpv1.CapacityTypeOnDemand,
+				CPUShare:     share,
 			}
 
 			if o.KubeletOverhead || o.SystemOverhead || o.EvictionThreshold {
@@ -101,25 +116,32 @@ func (o *InstanceTypeOptions) Generate() []*InstanceTypeStatic {
 	return instanceTypes
 }
 
-func makeGenericInstanceTypeName(cpu, memFactor int) string {
+// makeGenericInstanceTypeName names the instance type <family><digit>.<vCPU>VCPU-<memory>GB. A dedicated type's
+// family letter comes from its memory ratio and its digit is the generation, 1. A CPU share type's family letter
+// is e and its digit is the number of seats (see ADR 0002).
+func makeGenericInstanceTypeName(cpu, memFactor, share int) string {
 	var family string
 
-	switch memFactor {
-	case 2:
+	digit := 1
+
+	switch {
+	case share > 0:
+		family, digit = "e", share
+	case memFactor == 2:
 		family = "c" // cpu
-	case 3:
+	case memFactor == 3:
 		family = "t"
-	case 4:
+	case memFactor == 4:
 		family = "s" // standard
-	case 8:
+	case memFactor == 8:
 		family = "m" // memory
-	case 16:
+	case memFactor == 16:
 		family = "x" // in-memory applications
 	default:
 		family = "e"
 	}
 
-	return fmt.Sprintf("%s1.%dVCPU-%dGB", family, cpu, cpu*memFactor)
+	return fmt.Sprintf("%s%d.%dVCPU-%dGB", family, digit, cpu, cpu*memFactor)
 }
 
 func systemReservedResources(_ *corev1.ResourceList) corev1.ResourceList {
