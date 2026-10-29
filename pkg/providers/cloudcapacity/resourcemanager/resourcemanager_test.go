@@ -23,7 +23,7 @@ import (
 
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 )
 
 var testNodeSettings = settings.NodeSettings{

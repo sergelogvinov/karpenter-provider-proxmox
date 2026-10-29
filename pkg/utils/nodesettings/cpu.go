@@ -22,7 +22,7 @@ import (
 	"strings"
 
 	"github.com/sergelogvinov/go-proxmox-rest/nodes"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 
 	"k8s.io/utils/cpuset"
 )

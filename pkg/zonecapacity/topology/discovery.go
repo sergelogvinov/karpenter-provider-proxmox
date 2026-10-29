@@ -23,7 +23,7 @@ import (
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"k8s.io/utils/cpuset"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 )
 
 func DiscoverFromSettings(settings *settings.NodeSettings) (*Topology, error) {
