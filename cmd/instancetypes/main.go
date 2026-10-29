@@ -28,7 +28,6 @@ import (
 	cobra "github.com/spf13/cobra"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 )
 
 var (
@@ -100,7 +99,6 @@ func buildGenerateCmd() *cobra.Command {
 	flags.StringP("cpus", "c", "1,2,4", "comma-separated list of vCPU counts")
 	flags.StringP("memfactor", "m", "2,3,4", "comma-separated list of memory multipliers per vCPU")
 	flags.IntP("storage", "s", 30, "storage size in GiB, omitted if zero")
-	flags.StringP("cpushare", "", "", "comma-separated list of CPU share seats (2,3,4); adds the e<N> family for each")
 
 	flags.BoolP("kubelet", "", false, "add resources allocated to kubernetes kubelet")
 	flags.BoolP("system", "", false, "add resources allocated to the OS system daemons")
@@ -127,18 +125,6 @@ func (c *generateCmd) parseArgs(cmd *cobra.Command, args []string) (err error) {
 			if i, err := strconv.Atoi(s); err == nil {
 				c.options.MemFactors = append(c.options.MemFactors, i)
 			}
-		}
-	}
-
-	c.options.CPUShares = []int{}
-	if sharesStr, err := flags.GetString("cpushare"); err == nil && sharesStr != "" {
-		for s := range strings.SplitSeq(sharesStr, ",") {
-			i, err := strconv.Atoi(strings.TrimSpace(s))
-			if err != nil || !zonecapacity.ValidCPUShare(i) {
-				return fmt.Errorf("invalid --cpushare value %q: must be 2, 3 or 4", s)
-			}
-
-			c.options.CPUShares = append(c.options.CPUShares, i)
 		}
 	}
 

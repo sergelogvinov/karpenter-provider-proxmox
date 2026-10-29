@@ -32,9 +32,14 @@ import (
 const gib = uint64(1 << 30)
 
 var (
-	shared = zonecapacity.Policy{CPUOvercommitRatio: 1}
-	static = zonecapacity.Policy{Pinned: true}
+	shared = zonecapacity.Policy{Kind: zonecapacity.PolicySimple}
+	static = zonecapacity.Policy{Kind: zonecapacity.PolicyStatic}
 )
+
+// overcommitAt is the CPU overcommit policy at ratio.
+func overcommitAt(ratio float64) zonecapacity.Policy {
+	return zonecapacity.Policy{Kind: zonecapacity.PolicyOvercommit, CPUOvercommitRatio: ratio}
+}
 
 // sharedHost is 16 CPUs over two NUMA nodes of 16GiB, CPUs 0-7 on node 0, 1GiB reserved.
 var sharedHost = settings.NodeSettings{
@@ -142,7 +147,7 @@ func TestZoneTrackOverlappingPinnedVMs(t *testing.T) {
 func TestZoneSharedOvercommit(t *testing.T) {
 	t.Parallel()
 
-	overcommit := zonecapacity.Policy{CPUOvercommitRatio: 1.5}
+	overcommit := overcommitAt(1.5)
 
 	z := newZone(t, sharedHost, 0, 1)
 	// 14 unreserved CPUs x 1.5.

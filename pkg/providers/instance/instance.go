@@ -39,7 +39,6 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -162,12 +161,10 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 					break
 				}
 
-				zone, reserved, err := p.cloudCapacityProvider.ChooseZone(ctx, region, candidates, nodeClass.Spec.PlacementStrategy, resources.VMResources{
-					ID:       newID,
-					CPUs:     int(instanceType.Capacity.Cpu().Value()),
-					Memory:   uint64(instanceType.Capacity.Memory().Value()),
-					CPUShare: p.instanceTypeProvider.CPUShare(instanceType.Name),
-				})
+				request := instancetype.VMRequest(instanceType.Capacity, p.instanceTypeProvider.CPUShare(instanceType.Name))
+				request.ID = newID
+
+				zone, reserved, err := p.cloudCapacityProvider.ChooseZone(ctx, region, candidates, nodeClass.Spec.PlacementStrategy, request)
 				if err != nil {
 					log.Info("No zone has room for instance type", "region", region, "instanceType", instanceType.Name, "reason", err.Error())
 

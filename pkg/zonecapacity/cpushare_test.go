@@ -150,11 +150,11 @@ func TestZoneCPUShareGroupsNeedRoom(t *testing.T) {
 }
 
 // TestZoneCPUShareNotOfferedUnderOvercommit checks that CPU overcommit offers no CPU share VM, and counts
-// one created by hand as a shared VM.
+// one created by hand with shared placement.
 func TestZoneCPUShareNotOfferedUnderOvercommit(t *testing.T) {
 	t.Parallel()
 
-	overcommit := zonecapacity.Policy{Overcommit: true, CPUOvercommitRatio: 1}
+	overcommit := overcommitAt(1)
 
 	z := newZone(t, sharedHost)
 
@@ -179,10 +179,10 @@ func TestZoneCPUShareTrack(t *testing.T) {
 		want    int
 	}{
 		{name: "token after other text", vm: zonecapacity.VM{ID: 1, CPUs: 4, Memory: gib, Description: "Karpenter managed instance, class=default, cpushare=3"}, want: 12},
-		{name: "token next to a multi-range affinity token", vm: zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Description: "affinity=1,9, cpushare=2"}, want: 14},
 		{name: "token with no affinity", vm: zonecapacity.VM{ID: 1, CPUs: 8, Memory: gib, Description: "class=default, cpushare=4"}, want: 8},
-		{name: "an affinity option makes it pinned", vm: zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Affinity: "0-1", Description: "cpushare=4"}, want: 14},
-		{name: "a constrained affinity wins too", vm: zonecapacity.VM{ID: 1, CPUs: 4, Memory: gib, Affinity: "0", Description: "cpushare=2"}, want: 15},
+		{name: "pinned by the affinity option", vm: zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Affinity: "0-1", Description: "cpushare=4"}, wantErr: zonecapacity.ErrTokenIgnored, want: 14},
+		{name: "pinned by the affinity token", vm: zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Description: "affinity=0,8, cpushare=4"}, wantErr: zonecapacity.ErrTokenIgnored, want: 14},
+		{name: "constrained affinity wins", vm: zonecapacity.VM{ID: 1, CPUs: 4, Memory: gib, Affinity: "0", Description: "cpushare=2"}, wantErr: zonecapacity.ErrTokenIgnored, want: 15},
 		{name: "malformed token counts as shared", vm: zonecapacity.VM{ID: 1, CPUs: 4, Memory: gib, Description: "cpushare=two"}, wantErr: zonecapacity.ErrInvalid, want: 12},
 		{name: "unsupported seats count as shared", vm: zonecapacity.VM{ID: 1, CPUs: 4, Memory: gib, Description: "cpushare=1"}, wantErr: zonecapacity.ErrInvalid, want: 12},
 	} {

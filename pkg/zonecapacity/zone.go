@@ -35,6 +35,9 @@ var (
 	// ErrNotOffered means the policy offers no VM of this kind, such as a CPU share VM under
 	// CPU overcommit. It holds for as long as the policy does.
 	ErrNotOffered = errors.New("not offered under the node policy")
+	// ErrTokenIgnored means Track recorded a VM but ignored a `cpushare` token next to its affinity:
+	// the VM holds its affinity. It is a warning, not a failure.
+	ErrTokenIgnored = errors.New("cpushare token ignored next to an affinity")
 	// ErrExists means Reserve was asked for a VM ID that already has a record.
 	ErrExists = errors.New("VM already has a record")
 	// ErrInvalid means a request or a VM config the zone cannot use: no ID, no CPUs or memory,
@@ -64,16 +67,30 @@ type Host struct {
 	HugePageSize uint64
 }
 
+// PolicyKind is one of the node policies.
+type PolicyKind int
+
+const (
+	// PolicySimple is shared placement, one shared vCPU per unpinned host CPU.
+	PolicySimple PolicyKind = iota
+	// PolicyStatic is pinned placement: each VM gets its own host CPUs.
+	PolicyStatic
+	// PolicyOvercommit is shared placement at the CPU overcommit ratio. It offers no CPU share VM,
+	// and one created by hand gets shared placement instead of a seat in a CPU share group.
+	PolicyOvercommit
+)
+
 // Policy is the node policy.
 type Policy struct {
-	// Pinned selects pinned placement: each VM gets its own host CPUs.
-	Pinned bool
-	// Overcommit is the CPU overcommit policy: CPU share VMs are not offered, and one created
-	// by hand counts as a shared VM instead of a CPU share group.
-	Overcommit bool
+	Kind PolicyKind
 	// CPUOvercommitRatio is how many shared vCPUs the zone offers per unpinned host CPU
-	// under shared placement; 0 means 1.
+	// under PolicyOvercommit; 0 means 1. The other policies ignore it.
 	CPUOvercommitRatio float64
+}
+
+// cpuShareGroups reports whether CPU share VMs sit in CPU share groups under p.
+func (p Policy) cpuShareGroups() bool {
+	return p.Kind != PolicyOvercommit
 }
 
 // Capacity is what a new shared VM could still get in a zone.
@@ -154,10 +171,10 @@ type record struct {
 type usage struct {
 	pinnedCPUs cpuset.CPUSet
 	sharedCPUs int
-	// eCPUs are the host CPUs the CPU share groups take.
-	eCPUs      int
-	memory     uint64
-	numaMemory map[int]uint64
+	// cpuShareCPUs are the host CPUs the CPU share groups take.
+	cpuShareCPUs int
+	memory       uint64
+	numaMemory   map[int]uint64
 }
 
 // New returns an empty zone on h.
@@ -208,7 +225,7 @@ func (z *Zone) Track(vm VM) error {
 	}
 
 	// An unreadable affinity or token still runs: classify holds its vCPUs and memory as shared,
-	// so the zone is not overcommitted.
+	// so the zone is not overcommitted. An ignored token is only a warning: the VM holds its affinity.
 	z.vms[vm.ID] = record{cpus: vm.CPUs, cpuSet: c.cpus, share: c.share, memory: vm.Memory, numaMemory: maps.Clone(vm.NUMAMemory)}
 
 	return err
@@ -295,7 +312,7 @@ func (z *Zone) Available(p Policy) Capacity {
 // ratio is how many shared vCPUs the zone offers per unpinned host CPU under p.
 func (z *Zone) ratio(p Policy) (float64, error) {
 	ratio := p.CPUOvercommitRatio
-	if p.Pinned || ratio == 0 {
+	if p.Kind != PolicyOvercommit || ratio == 0 {
 		return 1, nil
 	}
 
@@ -331,7 +348,7 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 		return record{}, nil, err
 	}
 
-	if share > 0 && p.Overcommit {
+	if share > 0 && !p.cpuShareGroups() {
 		return record{}, nil, fmt.Errorf("%w: CPU share VM %d under CPU overcommit", ErrNotOffered, vm.ID)
 	}
 
@@ -339,8 +356,8 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 
 	var numa map[int]NUMABinding
 
-	if p.Pinned && share == 0 {
-		rec.cpuSet, numa, err = placePinned(z.free(), vm.CPUs, vm.Memory)
+	if p.Kind == PolicyStatic && share == 0 {
+		rec.cpuSet, numa, err = placePinned(z.free(z.usage(p)), vm.CPUs, vm.Memory)
 		if err != nil {
 			return record{}, nil, noRoomError{err}
 		}
@@ -359,7 +376,7 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 		}
 	}
 
-	if z.unpinned(u) < u.eCPUs || u.sharedCPUs > z.sharedCapacity(u, ratio) {
+	if z.unpinned(u) < u.cpuShareCPUs || u.sharedCPUs > z.sharedCapacity(u, ratio) {
 		return record{}, nil, noRoomError{fmt.Errorf("not enough CPUs available: requested=%d, available=%d", vm.CPUs, z.available(z.usage(p), ratio).CPUs)}
 	}
 
@@ -385,7 +402,7 @@ func (z *Zone) freeMemory(u usage) uint64 {
 // sharedCapacity is how many shared vCPUs the unpinned, unreserved CPUs offer
 // once the CPU share groups have taken theirs.
 func (z *Zone) sharedCapacity(u usage, ratio float64) int {
-	return int(math.Floor(float64(max(0, z.unpinned(u)-u.eCPUs)) * ratio))
+	return int(math.Floor(float64(max(0, z.unpinned(u)-u.cpuShareCPUs)) * ratio))
 }
 
 // unpinned is how many unreserved CPUs no VM is pinned to.
@@ -393,10 +410,8 @@ func (z *Zone) unpinned(u usage) int {
 	return z.allCPUs.Difference(z.reservedCPUs).Difference(u.pinnedCPUs).Size()
 }
 
-// free is what the zone has left for a new pinned VM.
-func (z *Zone) free() freeResources {
-	u := z.usage(Policy{Pinned: true})
-
+// free is what usage u leaves the zone for a new pinned VM.
+func (z *Zone) free(u usage) freeResources {
 	zoneFree := z.freeMemory(u)
 
 	numaMemory := make(map[int]uint64, len(z.topo.NUMANodes))
@@ -419,17 +434,16 @@ func (z *Zone) free() freeResources {
 	}
 }
 
-// usage is the sum of all records under p: under CPU overcommit a CPU share VM counts as a shared VM.
+// usage is the sum of all records under p. Without CPU share groups, a CPU share VM gets shared placement.
 func (z *Zone) usage(p Policy) usage {
 	u := usage{pinnedCPUs: cpuset.New(), numaMemory: map[int]uint64{}}
 
-	// seated counts the CPU share VMs of each (seats, vCPUs) class.
-	seated := map[[2]int]int{}
+	seated := map[cpuShareClass]int{}
 
 	for _, rec := range z.vms {
 		switch {
-		case rec.share > 0 && !p.Overcommit:
-			seated[[2]int{rec.share, rec.cpus}]++
+		case rec.share > 0 && p.cpuShareGroups():
+			seated[cpuShareClass{seats: rec.share, vcpus: rec.cpus}]++
 		case rec.cpuSet.IsEmpty():
 			u.sharedCPUs += rec.cpus
 		default:
@@ -444,19 +458,24 @@ func (z *Zone) usage(p Policy) usage {
 	}
 
 	u.pinnedCPUs = u.pinnedCPUs.Intersection(z.allCPUs).Difference(z.reservedCPUs)
-	u.eCPUs = shareGroupCPUs(seated)
+	u.cpuShareCPUs = cpuShareGroupCPUs(seated)
 
 	return u
 }
 
-// shareGroupCPUs is the one count of host CPUs the CPU share groups take: each (seats, vCPUs)
-// class of count VMs needs ceil(count/seats) groups of vCPUs host CPUs.
-func shareGroupCPUs(seated map[[2]int]int) int {
+// cpuShareClass is the shape every member of a CPU share group has.
+type cpuShareClass struct {
+	seats int
+	vcpus int
+}
+
+// cpuShareGroupCPUs is the one count of host CPUs the CPU share groups take: each class of
+// count seated VMs needs ceil(count/seats) groups of vcpus host CPUs.
+func cpuShareGroupCPUs(seated map[cpuShareClass]int) int {
 	cpus := 0
 
-	for class, count := range seated {
-		seats, vcpus := class[0], class[1]
-		cpus += (count + seats - 1) / seats * vcpus
+	for c, count := range seated {
+		cpus += (count + c.seats - 1) / c.seats * c.vcpus
 	}
 
 	return cpus

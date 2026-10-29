@@ -17,6 +17,7 @@ limitations under the License.
 package resourcemanager
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -105,18 +106,20 @@ func (z *ZoneCapacity) Fit(op resources.VMResources) (zonecapacity.Fit, error) {
 }
 
 // Track records a VM that runs in the zone, replacing any earlier record or reservation.
+// An error wrapping zonecapacity.ErrTokenIgnored is a warning: the VM is tracked.
 func (z *ZoneCapacity) Track(vm zonecapacity.VM) error {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	if err := z.zone.Track(vm); err != nil {
+	err := z.zone.Track(vm)
+	if err != nil && !errors.Is(err, zonecapacity.ErrTokenIgnored) {
 		return err
 	}
 
 	z.tracked[vm.ID] = true
 	delete(z.pending, vm.ID)
 
-	return nil
+	return err
 }
 
 // Release forgets VM id. Releasing a VM without a record changes nothing.

@@ -60,6 +60,8 @@ type DefaultProvider struct {
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo []*InstanceTypeStatic
+	// cpuShares are the CPU shares of the instance types that have one, by name.
+	cpuShares map[string]int
 
 	log logr.Logger
 }
@@ -67,11 +69,13 @@ type DefaultProvider struct {
 func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("instancetype")
 
-	return &DefaultProvider{
+	p := &DefaultProvider{
 		cloudCapacityProvider: cloudCapacityProvider,
-		instanceTypesInfo:     loadDefaultInstanceTypes(),
 		log:                   log,
 	}
+	p.setInstanceTypes(loadDefaultInstanceTypes())
+
+	return p
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
@@ -130,13 +134,17 @@ func (p *DefaultProvider) CPUShare(name string) int {
 	p.muInstanceTypes.RLock()
 	defer p.muInstanceTypes.RUnlock()
 
-	for _, item := range p.instanceTypesInfo {
-		if item.Name == name {
-			return item.CPUShare
-		}
-	}
+	return p.cpuShares[name]
+}
 
-	return 0
+// VMRequest is the VM request for an instance type of capacity, seated in a CPU share group
+// of cpuShare seats unless it is 0.
+func VMRequest(capacity corev1.ResourceList, cpuShare int) resources.VMResources {
+	return resources.VMResources{
+		CPUs:     int(capacity.Cpu().Value()),
+		Memory:   uint64(capacity.Memory().Value()),
+		CPUShare: cpuShare,
+	}
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
@@ -149,7 +157,7 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 			return err
 		}
 
-		p.instanceTypesInfo = instanceTypes
+		p.setInstanceTypes(instanceTypes)
 	}
 
 	return nil
@@ -171,6 +179,18 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	log.V(1).Info("Instance type offerings updated", "instanceTypes", len(p.instanceTypesInfo), "offers", offers)
 
 	return nil
+}
+
+// setInstanceTypes replaces the instance types, with the lookup of their CPU shares. The caller holds the lock.
+func (p *DefaultProvider) setInstanceTypes(instanceTypes []*InstanceTypeStatic) {
+	p.instanceTypesInfo = instanceTypes
+	p.cpuShares = make(map[string]int, len(instanceTypes))
+
+	for _, item := range instanceTypes {
+		if item.CPUShare != 0 {
+			p.cpuShares[item.Name] = item.CPUShare
+		}
+	}
 }
 
 func priceFromResources(resources corev1.ResourceList) float64 {
@@ -207,11 +227,7 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
-			err := p.cloudCapacityProvider.FitInZone(region, zone, resources.VMResources{
-				CPUs:     int(opts.Capacity.Cpu().Value()),
-				Memory:   uint64(opts.Capacity.Memory().Value()),
-				CPUShare: opts.CPUShare,
-			})
+			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, opts.CPUShare))
 			if errors.Is(err, zonecapacity.ErrNotOffered) {
 				continue
 			}
@@ -275,7 +291,7 @@ func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {
 
 	for _, i := range instanceTypeStatic {
 		if i.CPUShare != 0 && !zonecapacity.ValidCPUShare(i.CPUShare) {
-			return nil, fmt.Errorf("instance type %s in %s: cpushare %d must be 0, 2, 3 or 4", i.Name, name, i.CPUShare)
+			return nil, fmt.Errorf("instance type %s in %s: cpushare %d must be 0 (dedicated CPUs), %s", i.Name, name, i.CPUShare, zonecapacity.CPUShareSeats)
 		}
 
 		if i.CapacityType == "" {
