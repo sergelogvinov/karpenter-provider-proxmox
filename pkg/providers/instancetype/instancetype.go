@@ -236,25 +236,41 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	// the static types are kept as they are.
 	p.instanceTypesInfo = append(slices.Clone(p.staticTypes), p.keepNUMATypesInUse(p.numaTypes(regions), p.nodeClaimUses)...)
 
-	offers := 0
-	available := make(map[string]int, len(p.instanceTypesInfo))
-	unavailable := []string{}
-
-	for _, item := range p.instanceTypesInfo {
-		n := len(item.Offerings.Available())
-		offers += n
-
-		if n > 0 {
-			available[item.Name] = n
-		} else {
-			unavailable = append(unavailable, item.Name)
-		}
-	}
+	available, unavailable, offers := offeringsReport(p.instanceTypesInfo)
 
 	log.V(1).Info("Instance type offerings updated", "instanceTypes", len(p.instanceTypesInfo), "offers", offers)
 	log.V(1).Info("Instance type offerings report", "available", available, "unavailable", unavailable)
 
 	return listErr
+}
+
+// offeringsReport returns the zones where each instance type is available and, for the instance types available
+// nowhere, the zones where they are offered, both sorted, with the number of available offerings.
+func offeringsReport(instanceTypes []*InstanceTypeStatic) (available, unavailable map[string][]string, offers int) {
+	available = make(map[string][]string, len(instanceTypes))
+	unavailable = map[string][]string{}
+
+	zones := func(offerings cloudprovider.Offerings) []string {
+		names := lo.Map(offerings, func(o *cloudprovider.Offering, _ int) string {
+			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
+		})
+		slices.Sort(names)
+
+		return slices.Compact(names)
+	}
+
+	for _, item := range instanceTypes {
+		offerings := item.Offerings.Available()
+		offers += len(offerings)
+
+		if len(offerings) > 0 {
+			available[item.Name] = zones(offerings)
+		} else {
+			unavailable[item.Name] = zones(item.Offerings)
+		}
+	}
+
+	return available, unavailable, offers
 }
 
 // setInstanceTypes replaces the instance types and NUMA templates, with the lookups of the static names,
