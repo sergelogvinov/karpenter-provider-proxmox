@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 
 	"k8s.io/utils/cpuset"
 )
@@ -221,4 +222,79 @@ func TestZonePinnedRejectsWhenNoDistributionFits(t *testing.T) {
 	_, err := z.Reserve(static, zonecapacity.VM{ID: 1, CPUs: 2, Memory: 13 * gib})
 	require.ErrorContains(t, err, "not enough memory")
 	require.Equal(t, zonecapacity.Capacity{CPUs: 14, Memory: 11 * gib}, z.Available(static))
+}
+
+// TestZonePinnedSoftPacksAroundSlots is docs/scheduler-numa.md §8: a small regular VM goes to the partly
+// used NUMA node, even when the empty one would be left fuller, and onto CPUs outside its free slots.
+func TestZonePinnedSoftPacksAroundSlots(t *testing.T) {
+	t.Parallel()
+
+	host := numaExampleHost
+	host.NUMANodes = settings.NUMANodes{
+		0: {CPUs: "0-15,32-47", MemSize: 64 * gib},
+		1: {CPUs: "16-31,48-63", MemSize: 128 * gib},
+	}
+
+	z := newZone(t, host, 0, 32)
+	// The last core of node 1 is pinned: node 1 keeps its first half and three quarters free.
+	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Affinity: "31,63", NUMAMemory: map[int]uint64{1: gib}}))
+
+	grant := reserve(t, z, static, zonecapacity.VM{ID: 2, CPUs: 2, Memory: 8 * gib})
+	require.True(t, grant.CPUSet.IsSubsetOf(mustParse(t, "28-31,60-63")), "in the quarter already touched: %s", grant.CPUSet)
+
+	require.Equal(t, map[[2]int]int{
+		{1, 30}: 1, {1, 32}: 0,
+		{2, 14}: 2, {2, 16}: 1,
+		{4, 6}: 4, {4, 8}: 3,
+	}, freeOf(z.Slots(static)), "the n1 slot of node 0 is still offerable")
+}
+
+// TestZonePinnedPlacesOnSlotCPUs is docs/scheduler-numa.md §8: soft packing never fails a regular VM.
+// With no CPU reserved every free CPU lies in a free slot, and a regular VM still takes them, spanning
+// NUMA nodes when that is the only fit.
+func TestZonePinnedPlacesOnSlotCPUs(t *testing.T) {
+	t.Parallel()
+
+	z := newZone(t, numaExampleHost)
+
+	small := reserve(t, z, static, zonecapacity.VM{ID: 1, CPUs: 2, Memory: 2 * gib})
+	require.Equal(t, 2, small.CPUSet.Size())
+	require.Len(t, small.NUMA, 1)
+
+	large := reserve(t, z, static, zonecapacity.VM{ID: 2, CPUs: 40, Memory: 40 * gib})
+	require.Equal(t, 40, large.CPUSet.Size())
+	require.Len(t, large.NUMA, 2, "spans both NUMA nodes")
+	require.True(t, large.CPUSet.Intersection(small.CPUSet).IsEmpty())
+
+	require.Equal(t, map[[2]int]int{
+		{1, 32}: 0,
+		{2, 16}: 1,
+		{4, 8}:  2,
+	}, freeOf(z.Slots(static)), "only the CPUs left are free slots")
+}
+
+// TestZonePinnedSoftPackingNeverSpansMoreNUMANodes is docs/noderesource.md: soft packing is a preference within
+// the NUMA nodes a VM would span anyway, never a reason to span more of them. One thread of every core of nodes
+// 0-2 is pinned, so their free siblings lie in no free slot, while node 3 is one free whole slot.
+func TestZonePinnedSoftPackingNeverSpansMoreNUMANodes(t *testing.T) {
+	t.Parallel()
+
+	host := settings.NodeSettings{
+		NumSockets:      4,
+		NumThreads:      2,
+		NumUncoreCaches: 4,
+		NUMANodes: settings.NUMANodes{
+			0: {CPUs: "0-3,16-19", MemSize: 16 * gib},
+			1: {CPUs: "4-7,20-23", MemSize: 16 * gib},
+			2: {CPUs: "8-11,24-27", MemSize: 16 * gib},
+			3: {CPUs: "12-15,28-31", MemSize: 16 * gib},
+		},
+	}
+
+	z := newZone(t, host)
+	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 12, Memory: 3 * gib, Affinity: "0-11", NUMAMemory: map[int]uint64{0: gib, 1: gib, 2: gib}}))
+
+	grant := reserve(t, z, static, zonecapacity.VM{ID: 2, CPUs: 10, Memory: 2 * gib})
+	require.Equal(t, 10, grant.CPUSet.Size())
+	require.Len(t, grant.NUMA, 2, "spans two NUMA nodes, not the three outside free slots: %s", grant.CPUSet)
 }

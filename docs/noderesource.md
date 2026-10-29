@@ -84,12 +84,54 @@ Only when no single NUMA node can hold the VM is it spread across NUMA nodes, wi
 Across zones, a zone where the VM stays on one NUMA node is always preferred over a zone where it would span several,
 whatever the node class's `placementStrategy` (see [NodeClass](nodeclass.md)).
 
+Within a Proxmox node, the VM also keeps off free NUMA slots (see [NUMA types](#numa-types)) when it can:
+a NUMA node already in use is tried before one whose whole slot is free, and the CPUs outside free slots are taken first,
+then the CPUs that break the fewest and smallest free slots.
+This is a preference only: a VM still takes slot CPUs, or spans NUMA nodes, when that is the only fit.
+It never makes a VM span more NUMA nodes than it would without it.
+
+## NUMA types
+
+With the `static` node policy, Karpenter also offers NUMA types: a VM that takes a whole NUMA node, an aligned half, or an aligned quarter of it
+(see [Instance types](instancetypes.md#numa-types)).
+Karpenter cuts each NUMA node into NUMA slots from its usable CPUs and memory:
+
+* **CPUs.** The CPUs of the NUMA node minus the `reservedcpus` that belong to it.
+  A reserved CPU reduces only the NUMA node that holds it, so NUMA node 0 is usually smaller than the others.
+  A slot has whole physical cores only: the CPUs left over by rounding stay usable by regular VMs, but no slot covers them.
+* **Memory.** The memory of the NUMA node minus its share of `reservedmemory` (see [NUMA reservations](#numa-reservations)),
+  or the NUMA node's hugepage pool when the Proxmox node has one.
+
+A slot is free, and its NUMA type available, while none of its CPUs is pinned, its NUMA node has the slot's memory free,
+and the Proxmox node keeps room for its CPU share groups and its VMs without CPU affinity next to it.
+A NUMA VM gets the CPUs of the lowest free slot of its shape (lowest NUMA node, then lowest slot),
+pinned one vCPU per CPU, and one guest NUMA node bound to the slot's NUMA node with all of its memory:
+
+```
+affinity: 1-15,33-47
+numa0: cpus=0-29,hostnodes=0,memory=129024,policy=bind
+```
+
+If the slot's CPUs are used by a CPU share group, the [Proxmox Scheduler](scheduler.md) moves the group on its next rebalance.
+
+Example:
+
+A Proxmox node has 2 NUMA nodes, each with 16 cores / 32 threads and 128 GiB of memory,
+with `reservedcpus` `[0,32]` (one core of NUMA node 0) and `reservedmemory` 4 GiB:
+
+| NUMA node | Usable CPUs | Usable memory | `n1` | `n2` | `n4` |
+|---|---|---|---|---|---|
+| 0 | 30 | 126 GiB | `n1.30VCPU-126GB` | `n2.14VCPU-63GB` | `n4.6VCPU-31GB` |
+| 1 | 32 | 126 GiB | `n1.32VCPU-126GB` | `n2.16VCPU-63GB` | `n4.8VCPU-31GB` |
+
+NUMA node 0 has 15 usable cores: its halves have 7 cores each, and the core left over is used by regular VMs only.
+
 ## CPU share types
 
 A VM of a CPU share type (see [Instance types](instancetypes.md#cpu-share-types)) does not get CPUs of its own: it takes a seat in a CPU share group.
 Karpenter never assigns CPUs to a CPU share VM, it only counts how many host CPUs the CPU share groups of a node need.
-Today the [Proxmox Scheduler](scheduler.md) runs CPU share VMs like any other VM without CPU affinity;
-building CPU share groups on host CPUs is planned in [#272](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/272).
+The [Proxmox Scheduler](scheduler.md) builds the CPU share groups on host CPUs, and puts a new group on the NUMA node with the most pinned CPUs first,
+so that groups rarely sit on free NUMA slots (see [NUMA types](#numa-types)).
 
 For each size class, the number of seats N and the vCPU count, with `count` VMs on the node:
 
@@ -152,11 +194,11 @@ The file structure looks like this:
       "nodes": {
         "0": {
           "cpus": "0-15",
-          "memory": 4294967296
+          "memsize": 4294967296
         },
         "1": {
           "cpus": "16-31",
-          "memory": 4294967296
+          "memsize": 4294967296
         }
       },
 
@@ -184,7 +226,8 @@ The file structure looks like this:
 - The top-level keys are region names (as defined in the Proxmox cluster configuration).
 - The second-level keys are node names (as shown in the Proxmox VE dashboard). You can use `*` as a wildcard to apply settings to all nodes in the region.
     * `reservedcpus`: An array of CPU core indices to reserve for system use on the node.
-    * `reservedmemory`: The amount of memory (in bytes) to reserve for system use on the node.
+    * `reservedmemory`: The amount of memory (in bytes) to reserve for system use on the node, split evenly across its NUMA nodes (see [NUMA reservations](#numa-reservations)).
+    * `hugepagesize`: (Optional) The page size (in bytes) of the node's hugepage pool (see [Hugepage pool](#hugepage-pool)).
 
 - NUMA topology settings (optional):
     * `sockets`: (Optional) The number of CPU sockets on the node.
@@ -194,7 +237,7 @@ The file structure looks like this:
         - The keys are NUMA node IDs.
         - Each value is an object with:
             * `cpus`: A string defining the CPU cores associated with the NUMA node (e.g., "0-15" for cores 0 to 15).
-            * `memory`: The amount of memory (in bytes) associated with the NUMA node.
+            * `memsize`: The amount of memory (in bytes) associated with the NUMA node, or its hugepage pool (see [Hugepage pool](#hugepage-pool)).
 
 This configuration allows you to optimize resource allocation on your Proxmox nodes by reserving specific CPU cores and memory for system use, as well as defining the NUMA topology for better VM performance.
 
@@ -208,4 +251,48 @@ Use the `lscpu -e` command on the Proxmox node to gather this information (outpu
 `cpus` field supports both individual CPU indices and ranges (e.g., "0,2,4-6" for cores 0, 2, 4, 5, and 6).
 It can be gathered from the Proxmox VE dashboard or by using the `lscpu | grep NUMA` command on the Proxmox node.
 
-`memory` values are specified in bytes. To define memory on each NUMA node, you can use `numactl --hardware` command on the Proxmox node to get the memory distribution across NUMA nodes.
+`memsize` values are specified in bytes. To define memory on each NUMA node, you can use `numactl --hardware` command on the Proxmox node to get the memory distribution across NUMA nodes.
+
+## NUMA reservations
+
+With the `static` node policy, reservations are accounted per NUMA node, not only for the whole Proxmox node:
+
+* `reservedcpus`: each reserved CPU is taken from the NUMA node it belongs to.
+* `reservedmemory`: split evenly across the NUMA nodes. Each NUMA node starts at its memory minus `reservedmemory / <number of NUMA nodes>`.
+  A Proxmox node with 2 NUMA nodes of 128 GiB and `reservedmemory` 4 GiB has 126 GiB usable on each NUMA node.
+
+Per-NUMA overrides of the reservations are not supported.
+
+### Hugepage pool
+
+A Proxmox node can hold its VM memory as preallocated hugepages of one size, a hugepage pool.
+The node-capacity VM of the [Proxmox Scheduler](scheduler.md) declares it with `hugepages` (the page size in MiB, `2` or `1024`),
+and its `numa[n]` memory is then the pool on each NUMA node, not ordinary memory:
+
+```yaml
+hugepages: 1024
+numa0: cpus=0-15,hostnodes=0,memory=102400
+numa1: cpus=16-31,hostnodes=1,memory=102400
+```
+
+The node settings file can declare it too, with `hugepagesize` (the page size in bytes) and the pool of each NUMA node as `memsize`:
+
+```json
+{
+  "region-1": {
+    "node1": {
+      "hugepagesize": 1073741824,
+      "nodes": {
+        "0": { "cpus": "0-15,32-47", "memsize": 107374182400 },
+        "1": { "cpus": "16-31,48-63", "memsize": 107374182400 }
+      }
+    }
+  }
+}
+```
+
+With a hugepage pool:
+
+* Each NUMA node's usable memory is its pool, and `reservedmemory` is ignored: the host's own memory lies outside the pool.
+* NUMA types are sized on the pool, e.g. `n1.32VCPU-100GB` and `n2.16VCPU-50GB` for a pool of 100 GiB.
+* NUMA VMs are created with `hugepages` set to the pool's page size.

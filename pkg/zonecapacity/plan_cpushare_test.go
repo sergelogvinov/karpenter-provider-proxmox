@@ -359,3 +359,26 @@ func wholeCores(cpus cpuset.CPUSet) bool {
 
 	return true
 }
+
+// TestPlanCPUShareSoftPacksAroundSlots is docs/scheduler-numa.md §8: a new CPU share group goes to the
+// NUMA node with the most pinned CPUs, so it stays where it is when a NUMA VM takes the empty node.
+func TestPlanCPUShareSoftPacksAroundSlots(t *testing.T) {
+	t.Parallel()
+
+	z := newZone(t, numaExampleHost, 0, 32)
+	track(t, z,
+		zonecapacity.VM{ID: 100, CPUs: 2, Memory: gib, Affinity: "31,63"},
+		zonecapacity.VM{ID: 301, CPUs: 4, Memory: gib, Description: "cpushare=2"},
+	)
+
+	plan := z.Plan(map[int]cpuset.CPUSet{100: cpuset.New(31, 63)}, zonecapacity.PlanOptions{})
+	group := plan.Changed[301].CPUs
+	require.True(t, group.IsSubsetOf(mustParse(t, "16-31,48-63")), "on the node with the pinned VM: %s", group)
+
+	// Karpenter launches a NUMA VM into the whole slot of node 0.
+	reserve(t, z, static, slotVM(200, numaExampleSlots[0].Shape))
+
+	plan = z.Plan(map[int]cpuset.CPUSet{100: cpuset.New(31, 63), 301: group, 200: mustParse(t, "1-15,33-47")}, zonecapacity.PlanOptions{})
+	require.Empty(t, plan.Changed, "the group does not move")
+	require.Empty(t, plan.Notes)
+}

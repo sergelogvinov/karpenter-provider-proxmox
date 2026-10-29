@@ -47,9 +47,7 @@ The digit after `e` is the number of seats, not a generation as in `c1` or `m1`.
 
 Even vCPU counts (2, 4, 8) are recommended, so that a CPU share group covers whole physical cores.
 
-Today the [Proxmox Scheduler](scheduler.md) runs CPU share VMs like any other VM without CPU affinity.
-Building CPU share groups, so that the VMs of a group share the same host CPUs, is planned in
-[#272](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/272),
+The [Proxmox Scheduler](scheduler.md) builds the CPU share groups, so that the VMs of a group share the same host CPUs,
 see [CPU share instance types design](scheduler-cpushare.md).
 
 ### Select CPU share types in a NodePool
@@ -87,6 +85,128 @@ A NodePool excludes the CPU share families with `NotIn`:
 The `NotIn` requirement matches family names only: the family is the part of the name before the dot, whatever its `cpushare`.
 A CPU share type with another family name, such as `custom.2VCPU-4GB` with `cpushare: 2`, stays eligible unless its family is excluded too.
 Give CPU share types and dedicated types distinct family names, so that this filter tells them apart.
+
+## NUMA types
+
+A NUMA type gives a VM a whole NUMA node of a Proxmox host, an aligned half of it, or an aligned quarter of it.
+Its size is not fixed in the instance types file: it is derived from the NUMA topology of the hosts,
+so every host offers its real usable size, after its reservations (see [Node resource allocation](noderesource.md#numa-reservations)).
+
+Each NUMA node is cut into aligned NUMA slots, and smaller slots nest inside larger ones:
+
+```
+n1  whole NUMA node  [ ............................ ]
+n2  halves           [ ............. ][ ............. ]
+n4  quarters         [ ...... ][ ...... ][ ...... ][ ...... ]
+```
+
+NUMA types come in three families, one per slot fraction:
+* `n1` family: a whole NUMA node (e.g., n1.30VCPU-126GB).
+* `n2` family: an aligned half of a NUMA node (e.g., n2.16VCPU-63GB).
+* `n4` family: an aligned quarter of a NUMA node (e.g., n4.8VCPU-31GB).
+
+The digit after `n` is the slot fraction, the number a NUMA node is divided by, not a generation as in `c1` or `m1`.
+
+* **Naming.** NUMA types use the usual convention `<family>.<vCPU>VCPU-<memory>GB`, with the CPUs and memory of the slot.
+  A slot has the usable CPUs of the node divided by the fraction, rounded down to whole physical cores,
+  and the node's memory divided by the fraction, rounded down to whole GiB.
+  Hosts with the same slot shape share one instance type, so a homogeneous cluster gets one type per family.
+  Reserved CPUs make NUMA node 0 smaller than the others, so it usually has types of its own,
+  e.g. `n1.30VCPU-126GB` for node 0 and `n1.32VCPU-126GB` for node 1.
+* **Placement.** A NUMA VM is pinned 1:1 to the CPUs of one free slot and its memory is bound to the slot's NUMA node.
+  It never spans NUMA nodes: when no slot of its shape is free, the launch fails and Karpenter tries elsewhere.
+  When the zone has a hugepage pool, the VM is created with hugepages.
+* **Availability.** A NUMA type is offered in the zones that have its slot shape, and is available while one such slot is free:
+  none of its CPUs is pinned, its NUMA node has the slot's memory free,
+  and the node keeps room for its CPU share groups and its VMs without CPU affinity.
+  Regular VMs keep off free slots when they can: they go to NUMA nodes already in use first, and to CPUs outside free slots first.
+  The [Proxmox Scheduler](scheduler.md) puts new CPU share groups on the NUMA node with the most pinned CPUs for the same reason.
+* **Node policy.** NUMA types are offered with the `static` node policy only.
+* **Pricing.** A NUMA type is priced by its CPUs and memory, as any other type.
+* **Opt-in.** NUMA types are not part of the predefined list. They exist only when the instance types file defines NUMA templates (see below).
+
+### NUMA templates
+
+An entry of the instance types file with a `numa` field is a NUMA template, not an instance type.
+Its name is the family of the NUMA types generated from it:
+
+```json
+[
+  {
+    "name": "n1",
+    "numa": 1,
+    "capacity": {
+      "ephemeral-storage": "30Gi",
+      "pods": "110"
+    }
+  },
+  {
+    "name": "n2",
+    "numa": 2,
+    "capacity": {
+      "ephemeral-storage": "30Gi",
+      "pods": "110"
+    }
+  },
+  {
+    "name": "n4",
+    "numa": 4,
+    "capacity": {
+      "ephemeral-storage": "30Gi",
+      "pods": "110"
+    }
+  }
+]
+```
+
+* `name`: The family. The name is free-form: the `numa` field, not the name, makes an entry a NUMA template.
+* `numa`: The slot fraction: `1`, `2` or `4`. The controller rejects the file if it has any other value.
+* `capacity`: `ephemeral-storage` and `pods` are taken from the template. `cpu` and `memory` are ignored, they come from the slot.
+* `overhead` (optional): When omitted, it is computed from the CPUs and memory of each generated type.
+
+NUMA templates and other entries can be mixed in one file.
+If a static entry has the same name as a generated NUMA type, the static entry is kept and the NUMA type is not offered.
+
+### Select NUMA types in a NodePool
+
+NodePools select the NUMA families with the `instance-family` label, without matching on the generated names:
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: numa
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.proxmox.sinextra.dev
+        kind: ProxmoxNodeClass
+        name: default
+      requirements:
+        - key: karpenter.proxmox.sinextra.dev/instance-family
+          operator: In
+          values: ["n1", "n2"]
+```
+
+A NodePool that does not name a family accepts NUMA types too.
+A NodePool excludes them with `NotIn`:
+
+```yaml
+      requirements:
+        - key: karpenter.proxmox.sinextra.dev/instance-family
+          operator: NotIn
+          values: ["n1", "n2", "n4"]
+```
+
+### Kept NUMA types
+
+When the slot shape of a host changes (new reservations, a hugepage pool, new hardware), its NUMA types get new names.
+Nodes of the old names are not replaced: a NUMA type stays listed, with unavailable offerings, as long as a NodeClaim still uses it.
+Nothing new launches on a kept NUMA type, and it is dropped with its last NodeClaim, so its nodes age out normally.
+To roll them anyway, delete the NodeClaims.
+
+Removing a NUMA template from the file drops its types, kept or not, so their nodes drift and are replaced.
 
 ## Customize instance types
 
@@ -126,6 +246,7 @@ The file structure looks like this:
 * `cpushare` (optional): The number of seats in the CPU share group of a CPU share type: `2`, `3` or `4`.
   Omit it, or set it to `0`, for dedicated CPUs. The controller rejects the file if it has any other value.
   This field, not the name, makes an instance type a CPU share type, so the family can be called anything.
+* `numa` (optional): The slot fraction of a NUMA template: `1`, `2` or `4` (see [NUMA templates](#numa-templates)).
 * `capacity`: The resource capacity of the instance type.
   * `cpu`: The number of virtual CPUs.
   * `ephemeral-storage`: The boot disk size.

@@ -216,10 +216,12 @@ If the slot's CPUs are currently used by a CPU share group, the scheduler moves 
 - **Strict slot allocation.** A new reserve path takes a fraction and slot shape, picks a free slot
   (deterministically: lowest NUMA node, then lowest slot index), and reserves exactly its CPUs and memory on that
   node, or returns an error.
-- **Soft packing for regular VMs.** When `op.NUMANodes` is not set, candidate NUMA nodes are tried in order of
-  *most used first*, and within a node CPUs outside fully free slots are preferred. A regular VM still falls back to
-  any CPUs, including spanning NUMA nodes, when that is the only fit. There is no hard partitioning: an `n1`
-  offering is simply unavailable while its node is touched.
+- **Soft packing for regular VMs.** When `op.NUMANodes` is not set, candidate NUMA nodes whose whole slot is free
+  are tried last; the others are tried first, ordered by what the VM leaves them (fullest first). Within a node,
+  CPUs are taken from those covered by the fewest free slots first, so a VM that must break a slot breaks the
+  smallest one. A regular VM still falls back to any CPUs, including spanning NUMA nodes, when that is the only
+  fit, and soft packing never makes it span more NUMA nodes than it would without it. There is no hard
+  partitioning: an `n1` offering is simply unavailable while its node is touched.
 
 Tracking existing VMs needs no new logic. A NUMA VM is observed as a pinned VM whose CPUs happen to cover a slot.
 
