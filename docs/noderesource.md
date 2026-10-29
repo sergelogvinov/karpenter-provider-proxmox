@@ -88,7 +88,8 @@ whatever the node class's `placementStrategy` (see [NodeClass](nodeclass.md)).
 
 A VM of a CPU share type (see [Instance types](instancetypes.md#cpu-share-types)) does not get CPUs of its own: it takes a seat in a CPU share group.
 Karpenter never assigns CPUs to a CPU share VM, it only counts how many host CPUs the CPU share groups of a node need.
-The [Proxmox Scheduler](scheduler.md) decides which host CPUs each group runs on.
+Today the [Proxmox Scheduler](scheduler.md) runs CPU share VMs like any other VM without CPU affinity;
+building CPU share groups on host CPUs is planned in [#272](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/272).
 
 For each size class, the number of seats N and the vCPU count, with `count` VMs on the node:
 
@@ -102,7 +103,6 @@ So a single `e2.2VCPU-4GB` VM costs 2 CPUs, and a second one on the same node co
 
 * `simple` mode: the CPU share groups' CPUs are subtracted from the available vCPUs before the other VMs without CPU affinity are counted.
 * `static` mode: a new pinned VM fits only if the CPUs not pinned by other VMs, minus the CPU share groups' CPUs, are enough for it.
-  The pinned VM may land on CPUs a CPU share group runs on; the scheduler then moves the group.
   CPU share VMs get no CPU affinity and no NUMA node affinity.
 * `simple-with-cpu-overcommit` mode: CPU share types are not offered.
   A VM created by hand with a `cpushare` token is counted as a regular VM without CPU affinity.
@@ -118,7 +118,7 @@ Karpenter managed instance, class=default, capacity-type=on-demand, cpushare=2
 
 A VM with both CPU affinity and a `cpushare` token is accounted as a pinned VM, and the token is ignored.
 
-Example:
+Example, in `simple` or `static` mode:
 
 A Proxmox node has 16 CPUs. Running VMs are:
 * three `e2.2VCPU-4GB` VMs: 2 groups, 4 CPUs

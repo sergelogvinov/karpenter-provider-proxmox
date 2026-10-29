@@ -29,25 +29,28 @@ The VMs that share the CPUs form a CPU share group: a set of host CPUs with N se
 Memory is never shared, each VM has its own.
 
 CPU share types come in three families:
-* `e2` family: a CPU share group of 2 seats, each VM is guaranteed 1/2 of its vCPUs (e.g., e2.2VCPU-4GB, e2.4VCPU-16GB).
-* `e3` family: a CPU share group of 3 seats, each VM is guaranteed 1/3 of its vCPUs (e.g., e3.2VCPU-4GB, e3.4VCPU-16GB).
-* `e4` family: a CPU share group of 4 seats, each VM is guaranteed 1/4 of its vCPUs (e.g., e4.2VCPU-4GB, e4.8VCPU-32GB).
+* `e2` family: a CPU share group of 2 seats, each VM is accounted as 1/2 of its vCPUs (e.g., e2.2VCPU-4GB, e2.4VCPU-16GB).
+* `e3` family: a CPU share group of 3 seats, each VM is accounted as 1/3 of its vCPUs (e.g., e3.2VCPU-4GB, e3.4VCPU-16GB).
+* `e4` family: a CPU share group of 4 seats, each VM is accounted as 1/4 of its vCPUs (e.g., e4.2VCPU-4GB, e4.8VCPU-32GB).
 
 The digit after `e` is the number of seats, not a generation as in `c1` or `m1`.
 
 * **Capacity.** The guest sees the full vCPU count, and the node's `cpu` capacity is the full vCPU count too.
-  The type is burstable: a VM may use all of its vCPUs while its neighbors are idle, but it is only guaranteed vCPU/N of them.
+  The type is burstable: a VM may use all of its vCPUs while its neighbors are idle, but no minimum of vCPU/N of them is enforced.
   Kubernetes may place up to vCPU cores of CPU requests on such a node, so choose CPU share types for workloads where that is acceptable.
 * **Pricing.** A CPU share type is priced as vCPU/N CPUs plus its full memory, so `e2.2VCPU-4GB` costs as much CPU as a 1 vCPU type.
   Karpenter therefore prefers CPU share types for any NodePool that allows them.
 * **Node policy.** CPU share types are offered with the `simple` and `static` node policies, and never with `simple-with-cpu-overcommit`
   (see [Node resource allocation](noderesource.md#cpu-share-types)).
-* **Opt-in.** CPU share types are not part of the predefined list. They exist only when the instance types file defines them (see below),
-  and a NodePool gets them only when its requirements allow them.
+* **Opt-in.** CPU share types are not part of the predefined list. They exist only when the instance types file defines them (see below).
+  Once they do, every NodePool that names no instance family accepts them; a NodePool excludes them with a `NotIn` requirement (see below).
 
 Even vCPU counts (2, 4, 8) are recommended, so that a CPU share group covers whole physical cores.
 
-The [Proxmox Scheduler](scheduler.md) decides at runtime which VMs share which host CPUs, see [CPU share instance types design](scheduler-cpushare.md).
+Today the [Proxmox Scheduler](scheduler.md) runs CPU share VMs like any other VM without CPU affinity.
+Building CPU share groups, so that the VMs of a group share the same host CPUs, is planned in
+[#272](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/272),
+see [CPU share instance types design](scheduler-cpushare.md).
 
 ### Select CPU share types in a NodePool
 
@@ -72,7 +75,7 @@ spec:
 ```
 
 A NodePool that does not name a family accepts the CPU share types of the instance types file too, and Karpenter prefers them because they cost less.
-To keep a NodePool on dedicated CPUs, exclude the CPU share families:
+A NodePool excludes the CPU share families with `NotIn`:
 
 ```yaml
       requirements:
@@ -80,6 +83,10 @@ To keep a NodePool on dedicated CPUs, exclude the CPU share families:
           operator: NotIn
           values: ["e2", "e3", "e4"]
 ```
+
+The `NotIn` requirement matches family names only: the family is the part of the name before the dot, whatever its `cpushare`.
+A CPU share type with another family name, such as `custom.2VCPU-4GB` with `cpushare: 2`, stays eligible unless its family is excluded too.
+Give CPU share types and dedicated types distinct family names, so that this filter tells them apart.
 
 ## Customize instance types
 
@@ -153,18 +160,20 @@ A CPU share type is an entry with the `cpushare` field:
 ]
 ```
 
-`capacity.cpu` is the full vCPU count the guest sees, not the guaranteed share.
+`capacity.cpu` is the full vCPU count the guest sees, not the vCPU/N share it is accounted as.
 
 ## Generate instance types
 
-The `instancetypes` command-line utility (`make build-instancetypes`) generates an instance types file:
+The `instancetypes` command-line utility generates an instance types file.
+`make build-instancetypes` builds it as `bin/instancetypes-$(ARCH)`:
 
 ```shell
-instancetypes generate --cpus 2,4,8 --memfactor 2,4 --kubelet --system --eviction > instancetypes.json
+bin/instancetypes-amd64 generate --cpus 2,4,8 --memfactor 2,4 --kubelet --system --eviction > instancetypes.json
 ```
 
 * `--cpus`: Comma-separated list of vCPU counts (default `1,2,4`).
-* `--memfactor`: Comma-separated list of memory multipliers per vCPU (default `2,3,4`).
+* `--memfactor`: Comma-separated list of memory multipliers per vCPU, each `2`, `3`, `4`, `8` or `16` (default `2,3,4`).
+  The multiplier picks the family: `c1`, `t1`, `s1`, `m1` or `x1`; any other value is rejected.
 * `--storage`: Boot disk size in GiB, omitted if zero (default `30`).
 * `--cpushare`: Comma-separated list of CPU share group seats, each `2`, `3` or `4`.
   For each value N it adds the `eN` family of the same sizes, with `cpushare` set.

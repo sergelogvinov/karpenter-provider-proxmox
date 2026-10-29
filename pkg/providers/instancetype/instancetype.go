@@ -314,7 +314,10 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 		EvictionThreshold: true,
 	}
 
-	for _, i := range options.Generate() {
+	// The options are constant and valid, which the unit tests check through NewDefaultProvider.
+	generated := lo.Must(options.Generate())
+
+	for _, i := range generated {
 		instance := InstanceTypeStatic{
 			Name:         i.Name,
 			Capacity:     i.Capacity,

@@ -27,7 +27,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 )
 
-func generate(args ...string) ([]*instancetype.InstanceTypeStatic, error) {
+func runGenerateCLI(args ...string) ([]*instancetype.InstanceTypeStatic, error) {
 	cmd := buildGenerateCmd()
 	cmd.SetArgs(args)
 
@@ -49,7 +49,7 @@ func generate(args ...string) ([]*instancetype.InstanceTypeStatic, error) {
 func TestGenerateCPUShare(t *testing.T) {
 	t.Parallel()
 
-	instanceTypes, err := generate("--cpus", "2", "--memfactor", "2,4", "--cpushare", "2,4")
+	instanceTypes, err := runGenerateCLI("--cpus", "2", "--memfactor", "2,4", "--cpushare", "2,4")
 	require.NoError(t, err)
 
 	got := map[string]int{}
@@ -70,8 +70,56 @@ func TestGenerateCPUShare(t *testing.T) {
 func TestGenerateRejectsInvalidCPUShare(t *testing.T) {
 	t.Parallel()
 
-	for _, value := range []string{"1", "5", "0", "two", "2,8"} {
-		_, err := generate("--cpushare", value)
+	for _, value := range []string{"1", "5", "0", "2,8"} {
+		_, err := runGenerateCLI("--cpushare", value)
 		require.ErrorContains(t, err, zonecapacity.CPUShareSeats, "--cpushare %s", value)
+	}
+
+	_, err := runGenerateCLI("--cpushare", "two")
+	require.ErrorContains(t, err, "--cpushare")
+}
+
+func TestGenerateDeduplicatesCPUShare(t *testing.T) {
+	t.Parallel()
+
+	instanceTypes, err := runGenerateCLI("--cpus", "2", "--memfactor", "2", "--cpushare", "2,2")
+	require.NoError(t, err)
+
+	names := []string{}
+	for _, it := range instanceTypes {
+		names = append(names, it.Name)
+	}
+
+	require.Equal(t, []string{"c1.2VCPU-4GB", "e2.2VCPU-4GB"}, names)
+}
+
+func TestGenerateTrimsLists(t *testing.T) {
+	t.Parallel()
+
+	instanceTypes, err := runGenerateCLI("--cpus", " 2, 4", "--memfactor", "2 ", "--cpushare", " 3")
+	require.NoError(t, err)
+
+	names := []string{}
+	for _, it := range instanceTypes {
+		names = append(names, it.Name)
+	}
+
+	require.Equal(t, []string{"c1.2VCPU-4GB", "c1.4VCPU-8GB", "e3.2VCPU-4GB", "e3.4VCPU-8GB"}, names)
+}
+
+func TestGenerateRejectsInvalidLists(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"--cpus", "2,x"}, want: "--cpus"},
+		{args: []string{"--cpus", "2,,4"}, want: "--cpus"},
+		{args: []string{"--memfactor", "two"}, want: "--memfactor"},
+		{args: []string{"--memfactor", "5"}, want: "memory factor"},
+	} {
+		_, err := runGenerateCLI(tc.args...)
+		require.ErrorContains(t, err, tc.want, "%v", tc.args)
 	}
 }
