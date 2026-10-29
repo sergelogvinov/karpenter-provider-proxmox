@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 )
 
 func TestNodeSettingsAMDEPYC(t *testing.T) {

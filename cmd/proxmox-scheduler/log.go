@@ -21,7 +21,7 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 	"go.uber.org/zap/zapcore"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )

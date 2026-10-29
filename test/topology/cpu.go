@@ -17,7 +17,7 @@ limitations under the License.
 package topology
 
 import (
-	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	cputopology "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 )
 
 var (

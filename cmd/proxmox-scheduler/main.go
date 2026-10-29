@@ -27,9 +27,9 @@ import (
 	"github.com/spf13/pflag"
 
 	local "github.com/sergelogvinov/go-proxmox-local"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
 

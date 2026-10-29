@@ -23,7 +23,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/klog/v2/ktesting"
 	"k8s.io/utils/cpuset"

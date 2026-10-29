@@ -27,10 +27,10 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager/settings"
 	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
 

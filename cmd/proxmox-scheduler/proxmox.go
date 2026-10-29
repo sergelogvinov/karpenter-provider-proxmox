@@ -28,7 +28,7 @@ import (
 
 	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 )

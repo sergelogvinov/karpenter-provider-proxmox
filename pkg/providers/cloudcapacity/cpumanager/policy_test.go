@@ -19,7 +19,7 @@ limitations under the License.
 package cpumanager
 
 import (
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 )
 
 var (

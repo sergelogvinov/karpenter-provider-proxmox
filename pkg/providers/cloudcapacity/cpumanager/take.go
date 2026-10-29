@@ -19,7 +19,7 @@ package cpumanager
 import (
 	"github.com/go-logr/logr"
 
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/cpumanager/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
 )
