@@ -197,11 +197,16 @@ func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, err
 
 	vm := zonecapacity.VM{
 		ID:          vmr.VMID,
+		Name:        vmr.Name,
 		CPUs:        vmr.MaxCPU,
 		Memory:      uint64(vmr.MaxMem),
 		Affinity:    cfg.Affinity,
 		Description: cfg.Description,
 		Tags:        vmr.Tags,
+	}
+
+	if cfg.Name != "" {
+		vm.Name = cfg.Name
 	}
 
 	if cfg.Tags != nil {

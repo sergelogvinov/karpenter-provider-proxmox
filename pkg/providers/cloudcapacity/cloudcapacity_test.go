@@ -173,6 +173,7 @@ func TestSyncIgnoresNodeCapacityGuest(t *testing.T) {
 
 	tags := qemu.Tags{"karpenter"}
 	cluster.Node(zone).AddVM(9000, &qemu.Config{
+		Name:   "node-capacity",
 		Cores:  new(8),
 		Memory: &qemu.Memory{Current: new(16384)},
 		Tags:   &tags,
@@ -181,6 +182,7 @@ func TestSyncIgnoresNodeCapacityGuest(t *testing.T) {
 		Cores:       new(2),
 		Memory:      &qemu.Memory{Current: new(2048)},
 		Description: "Karpenter managed instance, affinity=0,4",
+		Tags:        &tags,
 	}, fakeapi.WithStatus(qemu.VMStatusRunning))
 	require.NoError(t, p.SyncNodeCapacity(ctx))
 

@@ -64,8 +64,13 @@ func TestZoneTrackClassifiesVMs(t *testing.T) {
 		},
 		{
 			name: "node-capacity guest is never counted",
-			vm:   zonecapacity.VM{ID: 1, CPUs: 16, Memory: 32 * gib, Affinity: "0-15", Tags: []string{"karpenter"}},
+			vm:   zonecapacity.VM{ID: 1, Name: "node-capacity", CPUs: 16, Memory: 32 * gib, Affinity: "0-15", Tags: []string{"karpenter"}},
 			want: zonecapacity.Capacity{CPUs: 16, Memory: 31 * gib},
+		},
+		{
+			name: "workload VM with the karpenter tag is counted",
+			vm:   zonecapacity.VM{ID: 1, Name: "worker-1", CPUs: 4, Memory: 2 * gib, Affinity: "0-3", Tags: []string{"karpenter"}},
+			want: zonecapacity.Capacity{CPUs: 12, Memory: 29 * gib},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,17 +88,17 @@ func TestZoneTrackNodeCapacityGuestReplacesRecord(t *testing.T) {
 
 	z := newZone(t, sharedHost)
 	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 4, Memory: 2 * gib}))
-	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 4, Memory: 2 * gib, Tags: []string{"pool", "karpenter"}}))
+	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, Name: "node-capacity", CPUs: 4, Memory: 2 * gib, Tags: []string{"pool", "karpenter"}}))
 	require.Equal(t, zonecapacity.Capacity{CPUs: 16, Memory: 31 * gib}, z.Available(shared))
 }
 
-func TestZoneTrackRejectsUnparseableAffinity(t *testing.T) {
+func TestZoneTrackCountsUnparseableAffinityAsShared(t *testing.T) {
 	t.Parallel()
 
 	z := newZone(t, sharedHost)
 	require.ErrorIs(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 2, Memory: gib, Affinity: "0-x"}), zonecapacity.ErrInvalid)
 	require.ErrorIs(t, z.Track(zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib, Description: "affinity=junk"}), zonecapacity.ErrInvalid)
-	require.Equal(t, zonecapacity.Capacity{CPUs: 16, Memory: 31 * gib}, z.Available(shared))
+	require.Equal(t, zonecapacity.Capacity{CPUs: 12, Memory: 29 * gib}, z.Available(shared), "both VMs still hold their vCPUs and memory")
 }
 
 func TestZoneHugePagePoolTakesNoHostReserve(t *testing.T) {
