@@ -24,8 +24,8 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-// nodeCapacityTag marks the node-capacity guest, which describes the host and is never a workload.
-const nodeCapacityTag = "karpenter"
+// NodeCapacityTag marks the node-capacity guest, which describes the host and is never a workload.
+const NodeCapacityTag = "karpenter"
 
 // affinityToken is the description token that carries a VM's host CPUs when the affinity option is unset.
 const affinityToken = "affinity="
@@ -45,12 +45,13 @@ type VM struct {
 	NUMAMemory map[int]uint64
 }
 
-// class is what a VM is to the zone.
+// class is what a VM is to the zone (docs/zonecapacity.md §3.1). Accounting treats pinned and
+// constrained VMs alike, both holding their affinity; Plan tells them apart (1:1 pinning or a mask).
 type class int
 
 const (
-	// floating VMs run on any unpinned CPU.
-	classFloating class = iota
+	// shared VMs run on any unpinned CPU.
+	classShared class = iota
 	// pinned VMs own one host CPU per vCPU.
 	classPinned
 	// constrained VMs have an affinity of a different size than their vCPUs.
@@ -61,7 +62,7 @@ const (
 
 // classify returns vm's class and its host CPUs.
 func (vm VM) classify() (class, cpuset.CPUSet, error) {
-	if slices.Contains(vm.Tags, nodeCapacityTag) {
+	if slices.Contains(vm.Tags, NodeCapacityTag) {
 		return classIgnored, cpuset.New(), nil
 	}
 
@@ -71,16 +72,16 @@ func (vm VM) classify() (class, cpuset.CPUSet, error) {
 	}
 
 	if raw == "" {
-		return classFloating, cpuset.New(), nil
+		return classShared, cpuset.New(), nil
 	}
 
 	cpus, err := cpuset.Parse(raw)
 	if err != nil {
-		return classFloating, cpuset.New(), fmt.Errorf("%w: VM %d affinity %q: %v", ErrInvalid, vm.ID, raw, err)
+		return classShared, cpuset.New(), fmt.Errorf("%w: VM %d affinity %q: %v", ErrInvalid, vm.ID, raw, err)
 	}
 
 	if cpus.IsEmpty() {
-		return classFloating, cpus, nil
+		return classShared, cpus, nil
 	}
 
 	if cpus.Size() == vm.CPUs {

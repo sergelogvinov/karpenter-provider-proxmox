@@ -29,7 +29,8 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-const mib = uint64(1 << 20)
+// MiB is one mebibyte in bytes: Proxmox sizes VM and NUMA memory in MiB.
+const MiB = uint64(1 << 20)
 
 // errNUMAMemory means a CPU distribution puts more memory on a NUMA node than it has free.
 var errNUMAMemory = errors.New("not enough memory available on NUMA node")
@@ -75,7 +76,7 @@ func placePinned(free freeResources, cpus int, memory uint64) (cpuset.CPUSet, ma
 // takeByMemory gives each node no more of the VM's CPUs than its free memory can back,
 // filling the nodes that can back the most CPUs first.
 func takeByMemory(free freeResources, nodes cpuset.CPUSet, numCPUs int, memory uint64) (cpuset.CPUSet, map[int]NUMABinding, error) {
-	totalMiB := max(1, memory/mib)
+	totalMiB := max(1, memory/MiB)
 
 	type room struct {
 		node int
@@ -85,7 +86,7 @@ func takeByMemory(free freeResources, nodes cpuset.CPUSet, numCPUs int, memory u
 	rooms := make([]room, 0, nodes.Size())
 	for _, i := range nodes.List() {
 		freeCPUs := free.topo.CPUDetails.CPUsInNUMANodes(i).Intersection(free.cpus).Size()
-		backed := int(free.numaMemory[i] / mib * uint64(numCPUs) / totalMiB)
+		backed := int(free.numaMemory[i] / MiB * uint64(numCPUs) / totalMiB)
 
 		if n := min(freeCPUs, backed); n > 0 {
 			rooms = append(rooms, room{node: i, cpus: n})
@@ -114,7 +115,7 @@ func takeByMemory(free freeResources, nodes cpuset.CPUSet, numCPUs int, memory u
 	}
 
 	if left > 0 {
-		return cpuset.New(), nil, fmt.Errorf("not enough memory available across NUMA nodes for %d CPUs and %dM", numCPUs, memory/mib)
+		return cpuset.New(), nil, fmt.Errorf("not enough memory available across NUMA nodes for %d CPUs and %dM", numCPUs, memory/MiB)
 	}
 
 	numa, err := splitNUMAMemory(free, cpus, memory)
@@ -197,7 +198,7 @@ func take(free freeResources, nodes cpuset.CPUSet, numCPUs int, memory uint64) (
 // from the VM's point of view, in NUMA node order. It fails if a node's share exceeds its free memory.
 func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map[int]NUMABinding, error) {
 	topo := free.topo
-	totalMiB := memory / mib
+	totalMiB := memory / MiB
 	nodes := make(map[int]NUMABinding)
 
 	var (
@@ -224,20 +225,20 @@ func splitNUMAMemory(free freeResources, cpus cpuset.CPUSet, memory uint64) (map
 			vcpus[k] = vcpu + k
 		}
 
-		nodes[i] = NUMABinding{VCPUs: cpuset.New(vcpus...), Memory: memMiB * mib}
+		nodes[i] = NUMABinding{VCPUs: cpuset.New(vcpus...), Memory: memMiB * MiB}
 
 		vcpu += n
 	}
 
 	if lowest >= 0 {
 		node := nodes[lowest]
-		node.Memory += (totalMiB - assigned) * mib
+		node.Memory += (totalMiB - assigned) * MiB
 		nodes[lowest] = node
 	}
 
 	for i, node := range nodes {
 		if node.Memory > free.numaMemory[i] {
-			return nil, fmt.Errorf("%w %d: requested=%dM, available=%dM", errNUMAMemory, i, node.Memory/mib, free.numaMemory[i]/mib)
+			return nil, fmt.Errorf("%w %d: requested=%dM, available=%dM", errNUMAMemory, i, node.Memory/MiB, free.numaMemory[i]/MiB)
 		}
 	}
 

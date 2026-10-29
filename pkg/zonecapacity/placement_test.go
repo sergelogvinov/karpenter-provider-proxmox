@@ -95,7 +95,7 @@ func TestZonePinnedRespectsZoneMemory(t *testing.T) {
 	t.Parallel()
 
 	z := newZone(t, pinnedHost)
-	// A floating VM without NUMA binding takes 20GiB of the zone's 31GiB.
+	// A shared VM without NUMA binding takes 20GiB of the zone's 31GiB.
 	require.NoError(t, z.Track(zonecapacity.VM{ID: 1, CPUs: 2, Memory: 20 * gib}))
 
 	// Each NUMA node still has 16GiB, but only 11GiB is left in the zone.
@@ -114,7 +114,7 @@ func TestZoneOvercommittedNUMANodeDoesNotBlockOthers(t *testing.T) {
 	require.True(t, grant.CPUSet.IsSubsetOf(node1CPUs), "placed on NUMA node 1: %v", grant.CPUSet)
 }
 
-func TestZonePinnedKeepsRoomForFloatingVMs(t *testing.T) {
+func TestZonePinnedKeepsRoomForSharedVMs(t *testing.T) {
 	t.Parallel()
 
 	z := newZone(t, pinnedHost)

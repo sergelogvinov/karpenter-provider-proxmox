@@ -18,20 +18,20 @@ package resourcemanager
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+
+	"k8s.io/utils/cpuset"
 )
 
 // pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.
 const pendingGracePeriod = 10 * time.Minute
-
-const mib = uint64(1 << 20)
 
 // ZoneCapacity is one zone's capacity under the controller's node policy, plus its
 // pending reservations: VMs reserved here and not yet seen running.
@@ -184,20 +184,21 @@ func (z *ZoneCapacity) String() string {
 	free := z.zone.Available(z.policy)
 
 	return fmt.Sprintf("VMs: %d, Pending: %d, CPU: Free: %d, Mem: %dM",
-		len(z.tracked), len(z.pending), free.CPUs, free.Memory/mib)
+		len(z.tracked), len(z.pending), free.CPUs, free.Memory/zonecapacity.MiB)
 }
 
 // VMFromConfig is a running VM as the zone reads it: a field copy of its listing entry and config.
+// The zone parses the affinity and the description; only the numaN memory is summed per host node,
+// split evenly across a numaN entry's host nodes.
 func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, error) {
-	opt, err := vmresources.GetResourceFromVMConfig(vmr, cfg)
-	if err != nil {
-		return zonecapacity.VM{}, err
+	if vmr == nil || cfg == nil {
+		return zonecapacity.VM{}, fmt.Errorf("virtual machine resource and config cannot be nil")
 	}
 
 	vm := zonecapacity.VM{
-		ID:          opt.ID,
-		CPUs:        opt.CPUs,
-		Memory:      opt.Memory,
+		ID:          vmr.VMID,
+		CPUs:        vmr.MaxCPU,
+		Memory:      uint64(vmr.MaxMem),
 		Affinity:    cfg.Affinity,
 		Description: cfg.Description,
 		Tags:        vmr.Tags,
@@ -207,10 +208,22 @@ func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, err
 		vm.Tags = *cfg.Tags
 	}
 
-	if len(opt.NUMANodes) > 0 {
-		vm.NUMAMemory = make(map[int]uint64, len(opt.NUMANodes))
-		for node, state := range opt.NUMANodes {
-			vm.NUMAMemory[node] = state.Memory * mib
+	for idx, n := range cfg.NUMA {
+		if n.Memory == nil || *n.Memory <= 0 || len(n.HostNodes) == 0 {
+			continue
+		}
+
+		hostNodes, err := cpuset.Parse(strings.Join(n.HostNodes, ","))
+		if err != nil || hostNodes.IsEmpty() {
+			return zonecapacity.VM{}, fmt.Errorf("failed to parse host nodes of NUMA node numa%d: %v", idx, n.HostNodes)
+		}
+
+		if vm.NUMAMemory == nil {
+			vm.NUMAMemory = map[int]uint64{}
+		}
+
+		for _, node := range hostNodes.List() {
+			vm.NUMAMemory[node] += uint64(*n.Memory) / uint64(hostNodes.Size()) * zonecapacity.MiB
 		}
 	}
 
@@ -228,11 +241,8 @@ func vmFromGrant(vm zonecapacity.VM, grant zonecapacity.Grant) zonecapacity.VM {
 		vm.Affinity = grant.CPUSet.String()
 	}
 
-	if len(grant.NUMA) > 0 {
-		vm.NUMAMemory = make(map[int]uint64, len(grant.NUMA))
-		for node, b := range grant.NUMA {
-			vm.NUMAMemory[node] = b.Memory
-		}
+	if mem := grant.NUMAMemory(); mem != nil {
+		vm.NUMAMemory = mem
 	}
 
 	return vm
@@ -254,7 +264,7 @@ func applyGrant(op *resources.VMResources, grant zonecapacity.Grant) {
 
 		op.NUMANodes[node] = resources.NUMANodeState{
 			CPUs:   fmt.Sprintf("%d-%d", vcpus[0], vcpus[len(vcpus)-1]),
-			Memory: b.Memory / mib,
+			Memory: b.Memory / zonecapacity.MiB,
 			Policy: "bind",
 		}
 	}

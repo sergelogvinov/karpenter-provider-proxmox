@@ -34,7 +34,7 @@ import (
 const gib = uint64(1 << 30)
 
 var (
-	sharedPolicy = zonecapacity.Policy{Ratio: 1}
+	sharedPolicy = zonecapacity.Policy{CPUOvercommitRatio: 1}
 	staticPolicy = zonecapacity.Policy{Pinned: true}
 )
 
@@ -108,6 +108,17 @@ func TestVMFromConfig(t *testing.T) {
 		Tags:        []string{"karpenter"},
 		NUMAMemory:  map[int]uint64{1: 8 * gib},
 	}, vm)
+}
+
+func TestVMFromConfigLeavesAffinityToTheZone(t *testing.T) {
+	t.Parallel()
+
+	vm, err := VMFromConfig(&cluster.Resource{VMID: 7, MaxCPU: 2, MaxMem: int64(gib)}, &qemu.Config{Affinity: "0-x"})
+	require.NoError(t, err, "a field copy does not parse the affinity")
+	require.Equal(t, "0-x", vm.Affinity)
+
+	zone := newTestZone(t, sharedPolicy)
+	require.ErrorIs(t, zone.Track(vm), zonecapacity.ErrInvalid)
 }
 
 func noVMs(int) bool { return false }
