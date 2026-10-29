@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 
@@ -58,8 +59,13 @@ type Provider interface {
 type DefaultProvider struct {
 	cloudCapacityProvider cloudcapacity.Provider
 
-	muInstanceTypes   sync.RWMutex
+	muInstanceTypes sync.RWMutex
+	// instanceTypesInfo are the static types followed by the NUMA types generated on the last offerings refresh.
 	instanceTypesInfo []*InstanceTypeStatic
+	// staticTypes are the instance types as configured.
+	staticTypes []*InstanceTypeStatic
+	// numaTemplates are the configured NUMA templates, which the NUMA types are generated from.
+	numaTemplates []*InstanceTypeStatic
 	// cpuShares are the CPU shares of the instance types that have one, by name.
 	cpuShares map[string]int
 
@@ -95,17 +101,7 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloud
 			Name:      item.Name,
 			Offerings: item.Offerings.DeepCopy(),
 			Capacity:  item.Capacity.DeepCopy(),
-			Overhead: func() *cloudprovider.InstanceTypeOverhead {
-				if item.Overhead == nil {
-					return &cloudprovider.InstanceTypeOverhead{}
-				}
-
-				return &cloudprovider.InstanceTypeOverhead{
-					KubeReserved:      item.Overhead.KubeReserved.DeepCopy(),
-					SystemReserved:    item.Overhead.SystemReserved.DeepCopy(),
-					EvictionThreshold: item.Overhead.EvictionThreshold.DeepCopy(),
-				}
-			}(),
+			Overhead:  copyOverhead(item.Overhead),
 		}
 
 		if filter(instanceType) {
@@ -116,6 +112,19 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloud
 	}
 
 	return filtered
+}
+
+// copyOverhead is a deep copy of overhead, empty if overhead is nil.
+func copyOverhead(overhead *cloudprovider.InstanceTypeOverhead) *cloudprovider.InstanceTypeOverhead {
+	if overhead == nil {
+		return &cloudprovider.InstanceTypeOverhead{}
+	}
+
+	return &cloudprovider.InstanceTypeOverhead{
+		KubeReserved:      overhead.KubeReserved.DeepCopy(),
+		SystemReserved:    overhead.SystemReserved.DeepCopy(),
+		EvictionThreshold: overhead.EvictionThreshold.DeepCopy(),
+	}
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error) {
@@ -169,13 +178,20 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
 
+	regions := p.cloudCapacityProvider.Regions()
+
+	for _, item := range p.staticTypes {
+		p.createOfferings(item, regions)
+	}
+
+	// The NUMA types are rebuilt from the current slot shapes; the static types are kept as they are.
+	p.instanceTypesInfo = append(slices.Clone(p.staticTypes), p.numaTypes(regions)...)
+
 	offers := 0
 	available := make(map[string]int, len(p.instanceTypesInfo))
 	unavailable := []string{}
 
 	for _, item := range p.instanceTypesInfo {
-		p.createOfferings(item, p.cloudCapacityProvider.Regions(), item.CapacityType)
-
 		n := len(item.Offerings.Available())
 		offers += n
 
@@ -192,16 +208,28 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	return nil
 }
 
-// setInstanceTypes replaces the instance types, with the lookup of their CPU shares. The caller holds the lock.
+// setInstanceTypes replaces the instance types and NUMA templates, with the lookup of their CPU shares.
+// The NUMA types are generated on the next offerings refresh. The caller holds the lock.
 func (p *DefaultProvider) setInstanceTypes(instanceTypes []*InstanceTypeStatic) {
-	p.instanceTypesInfo = instanceTypes
+	p.staticTypes = []*InstanceTypeStatic{}
+	p.numaTemplates = []*InstanceTypeStatic{}
 	p.cpuShares = make(map[string]int, len(instanceTypes))
 
 	for _, item := range instanceTypes {
+		if item.NUMA != 0 {
+			p.numaTemplates = append(p.numaTemplates, item)
+
+			continue
+		}
+
+		p.staticTypes = append(p.staticTypes, item)
+
 		if item.CPUShare != 0 {
 			p.cpuShares[item.Name] = item.CPUShare
 		}
 	}
+
+	p.instanceTypesInfo = slices.Clone(p.staticTypes)
 }
 
 func priceFromResources(resources corev1.ResourceList) float64 {
@@ -232,9 +260,8 @@ func priceOf(opts *InstanceTypeStatic) float64 {
 	return priceFromResources(capacity)
 }
 
-func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []string, capacityType string) {
+func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []string) {
 	opts.Offerings = []*cloudprovider.Offering{}
-	price := priceOf(opts)
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
@@ -243,24 +270,32 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 				continue
 			}
 
-			available := err == nil
-
-			// We use capacityType array to allow multiple capacity types per instance type in the future
-			for _, ct := range lo.Uniq([]string{capacityType}) {
-				opts.Offerings = append(opts.Offerings, &cloudprovider.Offering{
-					Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
-					Available: available,
-					Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, opts.Name),
-						scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
-						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
-						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
-						scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(opts.Name, ".")[0]),
-					),
-				})
-			}
+			opts.Offerings = append(opts.Offerings, zoneOfferings(opts, region, zone, err == nil)...)
 		}
 	}
+}
+
+// zoneOfferings are the offerings of instance type it in one zone, one per capacity type.
+func zoneOfferings(it *InstanceTypeStatic, region, zone string, available bool) []*cloudprovider.Offering {
+	offerings := []*cloudprovider.Offering{}
+	name, price := it.Name, priceOf(it)
+
+	// We use capacityType array to allow multiple capacity types per instance type in the future
+	for _, ct := range lo.Uniq([]string{it.CapacityType}) {
+		offerings = append(offerings, &cloudprovider.Offering{
+			Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
+			Available: available,
+			Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, name),
+				scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
+				scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, strings.Split(name, ".")[0]),
+			),
+		})
+	}
+
+	return offerings
 }
 
 func computeRequirements(instanceTypeName string, offerings cloudprovider.Offerings, regions []string) scheduling.Requirements {
@@ -300,9 +335,27 @@ func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {
 		return nil, fmt.Errorf("failed to unmarshal instance types %s: %w", name, err)
 	}
 
+	templates := map[string]bool{}
+
 	for _, i := range instanceTypeStatic {
 		if i.CPUShare != 0 && !zonecapacity.ValidCPUShare(i.CPUShare) {
 			return nil, fmt.Errorf("instance type %s in %s: cpushare %d must be 0 (dedicated CPUs), %s", i.Name, name, i.CPUShare, zonecapacity.CPUShareSeats)
+		}
+
+		if i.NUMA != 0 && !zonecapacity.ValidSlotFraction(i.NUMA) {
+			return nil, fmt.Errorf("instance type %s in %s: numa %d must be 0 (not a NUMA template), %s", i.Name, name, i.NUMA, zonecapacity.SlotFractions)
+		}
+
+		if i.NUMA != 0 && i.CPUShare != 0 {
+			return nil, fmt.Errorf("instance type %s in %s: a NUMA template cannot have a cpushare", i.Name, name)
+		}
+
+		if i.NUMA != 0 {
+			if templates[i.Name] {
+				return nil, fmt.Errorf("instance type %s in %s: duplicate NUMA template name", i.Name, name)
+			}
+
+			templates[i.Name] = true
 		}
 
 		if i.CapacityType == "" {
@@ -333,13 +386,7 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 			Name:         i.Name,
 			Capacity:     i.Capacity,
 			CapacityType: i.CapacityType,
-			Overhead:     &cloudprovider.InstanceTypeOverhead{},
-		}
-
-		if i.Overhead != nil {
-			instance.Overhead.KubeReserved = i.Overhead.KubeReserved.DeepCopy()
-			instance.Overhead.SystemReserved = i.Overhead.SystemReserved.DeepCopy()
-			instance.Overhead.EvictionThreshold = i.Overhead.EvictionThreshold.DeepCopy()
+			Overhead:     copyOverhead(i.Overhead),
 		}
 
 		instanceTypes = append(instanceTypes, &instance)

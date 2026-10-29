@@ -85,10 +85,14 @@ func TestZoneReservePinnedAcrossNUMANodes(t *testing.T) {
 		1: {VCPUs: vcpus(8, 9), Memory: 2 * gib},
 	}, grant.NUMA)
 
-	// Node 1 has 14GiB left, so a 6-CPU VM with 14GiB fits there and nowhere else.
-	grant = reserve(t, z, static, zonecapacity.VM{ID: 2, CPUs: 6, Memory: 14 * gib})
+	// Node 1 has 13.5GiB left after its half of the 1GiB host reserve, so a 6-CPU VM
+	// with 13GiB fits there and nowhere else, and one with 14GiB does not fit.
+	_, err := z.Fit(static, zonecapacity.VM{CPUs: 6, Memory: 14 * gib})
+	require.ErrorIs(t, err, zonecapacity.ErrNoRoom)
+
+	grant = reserve(t, z, static, zonecapacity.VM{ID: 2, CPUs: 6, Memory: 13 * gib})
 	require.True(t, grant.CPUSet.IsSubsetOf(node1CPUs), "placed on NUMA node 1: %v", grant.CPUSet)
-	require.Equal(t, zonecapacity.Capacity{CPUs: 0, Memory: 7 * gib}, z.Available(static))
+	require.Equal(t, zonecapacity.Capacity{CPUs: 0, Memory: 8 * gib}, z.Available(static))
 }
 
 func TestZonePinnedRespectsZoneMemory(t *testing.T) {

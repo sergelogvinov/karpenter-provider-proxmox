@@ -131,6 +131,8 @@ A slot is **free** when all three hold:
 
 The third rule is needed because CPU share groups have no CPU set in Karpenter's books: the scheduler may have put a
 group on the slot's CPUs, and the group can only be moved away if the zone has room for it elsewhere.
+The same rule also subtracts the vCPUs of virtual machines under shared placement, so every free slot also passes
+Reserve's admit check.
 
 ## 6. Generated instance types
 

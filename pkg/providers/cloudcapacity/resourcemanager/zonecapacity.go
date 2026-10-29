@@ -137,6 +137,11 @@ func (z *ZoneCapacity) Available() zonecapacity.Capacity {
 	return z.zone.Available(z.policy)
 }
 
+// Slots is every NUMA slot shape of the zone with its free slots; nil under shared placement.
+func (z *ZoneCapacity) Slots() []zonecapacity.SlotOffer {
+	return z.zone.Slots(z.policy)
+}
+
 // KeepPending copies prev's pending reservations into z: reserved VMs that z has not tracked.
 // A reservation older than the grace period is dropped when its VM does not exist in the cluster.
 func (z *ZoneCapacity) KeepPending(prev *ZoneCapacity, exists func(id int) bool) {
