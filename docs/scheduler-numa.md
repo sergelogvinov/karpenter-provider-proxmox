@@ -41,7 +41,8 @@ does not fit large, latency-sensitive workloads:
 
 ## 3. Configuration
 
-NUMA types are opt-in through the existing instance types file (`-instance-types-file` / `INSTANCE_TYPES_FILE`).
+NUMA types are configured through the existing instance types file (`-instance-types-file` / `INSTANCE_TYPES_FILE`).
+Without an instance types file, the predefined list has the `n1` and `n2` templates.
 An entry with a `numa` field is a **template**, not an instance type:
 
 ```json

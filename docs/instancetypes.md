@@ -22,6 +22,9 @@ Instance families are defined as follows:
 Instance types are named using the following convention: `<family>.<vCPU>VCPU-<memory>GB`.
 For example, `c1.4VCPU-8GB` represents an instance type from the `c1` family with `4` virtual CPUs and `8` GB of memory.
 
+The predefined list also has the `n1` and `n2` [NUMA templates](#numa-templates),
+so hosts with the `static` node policy offer whole and half NUMA node types (see [NUMA types](#numa-types)).
+
 ## CPU share types
 
 A CPU share type gives a VM CPUs that it shares with up to N−1 other VMs of the same size, instead of CPUs of its own.
@@ -123,7 +126,8 @@ The digit after `n` is the slot fraction, the number a NUMA node is divided by, 
   The [Proxmox Scheduler](scheduler.md) puts new CPU share groups on the NUMA node with the most pinned CPUs for the same reason.
 * **Node policy.** NUMA types are offered with the `static` node policy only.
 * **Pricing.** A NUMA type is priced by its CPUs and memory, as any other type.
-* **Opt-in.** NUMA types are not part of the predefined list. They exist only when the instance types file defines NUMA templates (see below).
+* **Defaults.** The predefined list has the `n1` and `n2` NUMA templates.
+  An instance types file replaces the predefined list, so it has NUMA types only if it defines NUMA templates (see below).
 
 ### NUMA templates
 

@@ -449,6 +449,7 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 		CPUs:              []int{1, 2, 4, 8, 16},
 		MemFactors:        []int{2, 3, 4, 8},
 		Storage:           30,
+		NUMA:              []int{1, 2},
 		KubeletOverhead:   true,
 		SystemOverhead:    true,
 		EvictionThreshold: true,
@@ -463,6 +464,12 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 			Capacity:     i.Capacity,
 			CapacityType: i.CapacityType,
 			Overhead:     copyOverhead(i.Overhead),
+			NUMA:         i.NUMA,
+		}
+
+		// A NUMA template has no overhead of its own: it is computed for each NUMA type.
+		if i.NUMA != 0 {
+			instance.Overhead = nil
 		}
 
 		instanceTypes = append(instanceTypes, &instance)

@@ -95,8 +95,12 @@ func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cl
 	settingsFile := filepath.Join(dir, "nodes.json")
 	require.NoError(t, os.WriteFile(settingsFile, []byte(nodes), 0o600))
 
-	typesFile := filepath.Join(dir, "instancetypes.json")
-	require.NoError(t, os.WriteFile(typesFile, []byte(file), 0o600))
+	// An empty file is no instance types file: the provider keeps the predefined list.
+	typesFile := ""
+	if file != "" {
+		typesFile = filepath.Join(dir, "instancetypes.json")
+		require.NoError(t, os.WriteFile(typesFile, []byte(file), 0o600))
+	}
 
 	ctx := options.ToContext(context.Background(), &options.Options{
 		NodePolicy:            policy,

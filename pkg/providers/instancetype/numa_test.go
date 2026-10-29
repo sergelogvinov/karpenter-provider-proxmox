@@ -112,6 +112,24 @@ func TestNUMATypesWorkedExample(t *testing.T) {
 	require.Equal(t, map[string]bool{zone: true}, zonesOf(t, p, "n2.14VCPU-63GB"))
 }
 
+// TestDefaultNUMATypes checks that the predefined list, used without an instance types file, has the n1 and n2
+// NUMA templates: the §9 host offers its whole and half NUMA types, and no quarters.
+func TestDefaultNUMATypes(t *testing.T) {
+	t.Parallel()
+
+	p, err := newProviderOn(t, "static", hosts(map[string]string{zone: numaExampleHost}), "", nil, zone)
+	require.NoError(t, err)
+
+	numa := lo.Filter(names(t, p), func(name string, _ int) bool { return strings.HasPrefix(name, "n") })
+	require.ElementsMatch(t, []string{"n1.30VCPU-126GB", "n2.14VCPU-63GB", "n1.32VCPU-126GB", "n2.16VCPU-63GB"}, numa)
+	require.Contains(t, names(t, p), "c1.2VCPU-4GB")
+	require.Equal(t, map[string]bool{zone: true}, zonesOf(t, p, "n1.32VCPU-126GB"))
+
+	it, err := p.Get(context.Background(), "n2.16VCPU-63GB")
+	require.NoError(t, err)
+	require.NotEmpty(t, it.Overhead.KubeReserved, "the overhead is computed from the slot's capacity")
+}
+
 // TestNUMATypesMerge checks that identical slot shapes on different hosts are one type offered in both zones,
 // and that a half of a big host never merges with a whole small host of the same size.
 func TestNUMATypesMerge(t *testing.T) {
