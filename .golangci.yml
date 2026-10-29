@@ -128,9 +128,9 @@ linters:
     paths:
       # Copied from kubernetes repo
       - pkg/zonecapacity/topology
-      - pkg/providers/cloudcapacity/cpumanager/policy_test.go
-      - pkg/providers/cloudcapacity/cpumanager/cpu_assignment_test.go
-      - pkg/providers/cloudcapacity/cpumanager/cpu_assignment.go
+      - pkg/zonecapacity/internal/cpumanager/policy_test.go
+      - pkg/zonecapacity/internal/cpumanager/cpu_assignment_test.go
+      - pkg/zonecapacity/internal/cpumanager/cpu_assignment.go
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

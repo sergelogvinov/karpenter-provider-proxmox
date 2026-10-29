@@ -50,7 +50,7 @@ the placement of already-running VMs when the set of VMs on the host changes.
 - When the sum of vCPUs no longer fits, degrade gracefully and deterministically: shrink and overlap in a
   controlled way instead of falling back to "everyone on every CPU".
 - Keep placement topology-aware (NUMA node, uncore cache / CCX, physical core) by reusing the existing
-  `pkg/providers/cloudcapacity/cpumanager` machinery instead of writing a second allocator.
+  `pkg/zonecapacity/internal/cpumanager` machinery instead of writing a second allocator.
 - Re-evaluate on VM start, VM stop and resync, while keeping churn on running VMs minimal.
 
 ### Non-goals
@@ -85,7 +85,7 @@ already has this concept in `settings.NodeSettings.ReservedCPUs`; the daemon nee
 A pure function, easy to unit-test, that turns the observed state into a placement plan:
 
 ```go
-// pkg/providers/cloudcapacity/cpumanager/planner.go
+// pkg/zonecapacity/internal/cpumanager/planner.go
 type SharedRequest struct {
     VMID    int
     CPUs    int            // cores from the VM config
@@ -279,11 +279,12 @@ sharedPool    = 1-7,16-31,33-39,40-63      (54 CPUs)
 sum(shared CPUs) = 24 ≤ 54                 → fitting mode
 
 VM 202 → 16-23,48-55   (node 2, all 8 cores with their siblings)
-VM 200 → 24,25,56,57   (node 3)   ← width 4 = 2 physical cores + their siblings
-VM 201 → 26,27,58,59   (node 3, disjoint from VM 200)
+VM 200 → 1,2,33,34     (node 0)   ← width 4 = 2 physical cores + their siblings
+VM 201 → 3,4,35,36     (node 0, disjoint from VM 200)
 ```
 
-No two guests share a CPU, VM 100 finally has 8-15 to itself, and each shared VM sits inside one NUMA node.
+No two guests share a CPU, VM 100 finally has 8-15 to itself, and each shared VM sits inside one NUMA node. The
+packed strategy fills the partly used node 0 before breaking into node 3, which stays whole for the next large VM.
 Start a 32-vCPU VM 203 and the total becomes 56 > 54: the planner switches to oversubscribed mode, scales
 widths by ~0.96, groups the pool by NUMA node, and only VMs inside the same node group overlap.
 
