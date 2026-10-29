@@ -233,7 +233,7 @@ func TestFitInZoneAgreesWithReserve(t *testing.T) {
 
 	ctx, p := newZonesProvider(t, "static", unevenNUMAZones, map[string]int{"pve-1": 10})
 
-	// Each NUMA node of pve-1 keeps 3GiB free, the zone 5GiB.
+	// Each NUMA node of pve-1 keeps 2.5GiB free after its half of the 1GiB host reserve, the zone 5GiB.
 	for id := 100; id < 102; id++ {
 		_, err := p.Reserve(ctx, region, "pve-1", resources.VMResources{ID: id, CPUs: 1, Memory: 5 * gib})
 		require.NoError(t, err)
@@ -243,9 +243,9 @@ func TestFitInZoneAgreesWithReserve(t *testing.T) {
 		return resources.VMResources{CPUs: 1, Memory: memory}
 	}
 
-	require.NoError(t, p.FitInZone(region, "pve-1", request(3*gib)))
-	require.Error(t, p.FitInZone(region, "pve-1", request(4*gib)), "one CPU cannot take 4GiB from a NUMA node with 3GiB free")
+	require.NoError(t, p.FitInZone(region, "pve-1", request(2*gib)))
+	require.Error(t, p.FitInZone(region, "pve-1", request(3*gib)), "one CPU cannot take 3GiB from a NUMA node with 2.5GiB free")
 
-	_, err := p.Reserve(ctx, region, "pve-1", resources.VMResources{ID: 102, CPUs: 1, Memory: 4 * gib})
+	_, err := p.Reserve(ctx, region, "pve-1", resources.VMResources{ID: 102, CPUs: 1, Memory: 3 * gib})
 	require.Error(t, err)
 }

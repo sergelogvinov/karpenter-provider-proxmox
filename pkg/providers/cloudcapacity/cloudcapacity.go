@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -64,6 +65,9 @@ type Provider interface {
 	// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
 	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, any other error otherwise.
 	FitInZone(region, zone string, req resources.VMResources) error
+	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
+	// or under shared placement, which offers no NUMA slot.
+	Slots(region, zone string) []zonecapacity.SlotOffer
 
 	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
 	GetNetwork(region string, node string, filter ...func(*NodeNetworkIfaceInfo) bool) *NodeNetworkIfaceInfo
@@ -491,4 +495,18 @@ func (p *DefaultProvider) FitInZone(region, zone string, req resources.VMResourc
 	_, err := info.Capacity.Fit(req)
 
 	return err
+}
+
+// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
+// or under shared placement, which offers no NUMA slot.
+func (p *DefaultProvider) Slots(region, zone string) []zonecapacity.SlotOffer {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	info, ok := p.capacityInfo[zoneKey(region, zone)]
+	if !ok || info.Capacity == nil || info.omitted {
+		return nil
+	}
+
+	return info.Capacity.Slots()
 }

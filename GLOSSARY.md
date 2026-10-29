@@ -119,6 +119,18 @@ _Avoid_: numa size, split
 The CPU and memory size of a NUMA slot on a given NUMA node.
 _Avoid_: size class
 
+**NUMA template**:
+An instance types file entry with a slot fraction (`numa`); its name is the family of the NUMA types generated from it, which take their CPUs and memory from the slot and the rest from the template.
+_Avoid_: numa instance type, slot template
+
+**NUMA type**:
+An instance type generated from a NUMA template for one slot shape, named `<family>.<vCPU>VCPU-<memory>GB` and sized exactly as the slot.
+_Avoid_: slot type, NUMA instance
+
+**Slot offer**:
+A zone's slot shape together with how many free NUMA slots of that shape it has; a NUMA type is available in a zone when its slot offer has at least one.
+_Avoid_: slot availability, free slots (for the pair)
+
 **CPU share group**:
 A set of host CPUs with a fixed number of seats, used only by the virtual machines seated in it; every member has the same vCPU count and sees all of the group's CPUs.
 _Avoid_: shared pool, shared placement, share group

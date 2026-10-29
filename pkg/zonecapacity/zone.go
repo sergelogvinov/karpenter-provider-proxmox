@@ -152,6 +152,11 @@ type Zone struct {
 	reservedCPUs cpuset.CPUSet
 	// memory is the zone memory left after the host reserve.
 	memory uint64
+	// numaMemory is each NUMA node's memory left after its even share of the host reserve,
+	// or its hugepage pool.
+	numaMemory map[int]uint64
+	// slots are the zone's NUMA slots, fixed by the topology and the host reserve.
+	slots []slot
 
 	vms map[int]record
 }
@@ -198,11 +203,22 @@ func New(h Host) (*Zone, error) {
 		return nil, fmt.Errorf("%w: reserved memory %d must be less than max memory %d", ErrInvalid, reservedMemory, topo.TotalMemory)
 	}
 
+	// The host reserve is split evenly across the NUMA nodes.
+	numaMemory := make(map[int]uint64, len(topo.NUMANodes))
+	for i, mem := range topo.NUMANodes {
+		share := reservedMemory / uint64(len(topo.NUMANodes))
+		numaMemory[i] = mem - min(mem, share)
+	}
+
+	allCPUs := topo.CPUDetails.CPUs()
+
 	return &Zone{
 		topo:         topo,
-		allCPUs:      topo.CPUDetails.CPUs(),
+		allCPUs:      allCPUs,
 		reservedCPUs: h.ReservedCPUs.Clone(),
 		memory:       topo.TotalMemory - reservedMemory,
+		numaMemory:   numaMemory,
+		slots:        carveSlots(topo, allCPUs.Difference(h.ReservedCPUs), numaMemory),
 		vms:          map[int]record{},
 	}, nil
 }
@@ -381,7 +397,7 @@ func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
 	}
 
 	for i := range rec.numaMemory {
-		if u.numaMemory[i] > z.topo.NUMANodes[i] {
+		if u.numaMemory[i] > z.numaMemory[i] {
 			return record{}, nil, noRoomError{fmt.Errorf("not enough memory available on NUMA node %d", i)}
 		}
 	}
@@ -424,8 +440,8 @@ func (z *Zone) unpinned(u usage) int {
 func (z *Zone) free(u usage) freeResources {
 	zoneFree := z.freeMemory(u)
 
-	numaMemory := make(map[int]uint64, len(z.topo.NUMANodes))
-	for i, mem := range z.topo.NUMANodes {
+	numaMemory := make(map[int]uint64, len(z.numaMemory))
+	for i, mem := range z.numaMemory {
 		var nodeFree uint64
 		if u.numaMemory[i] < mem {
 			nodeFree = mem - u.numaMemory[i]

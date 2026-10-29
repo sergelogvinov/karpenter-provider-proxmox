@@ -54,9 +54,17 @@ const instanceTypes = `[
 func newProvider(t *testing.T, policy, file string) (*instancetype.DefaultProvider, error) {
 	t.Helper()
 
+	return newProviderOn(t, policy, nodeSettings, file, nil, zone)
+}
+
+// newProviderOn is newProvider on the zones of region, described by the node settings file nodes,
+// with the VMs setup adds to the cluster, if any, before the sync.
+func newProviderOn(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cluster), zones ...string) (*instancetype.DefaultProvider, error) {
+	t.Helper()
+
 	dir := t.TempDir()
 	settingsFile := filepath.Join(dir, "nodes.json")
-	require.NoError(t, os.WriteFile(settingsFile, []byte(nodeSettings), 0o600))
+	require.NoError(t, os.WriteFile(settingsFile, []byte(nodes), 0o600))
 
 	typesFile := filepath.Join(dir, "instancetypes.json")
 	require.NoError(t, os.WriteFile(typesFile, []byte(file), 0o600))
@@ -68,8 +76,14 @@ func newProvider(t *testing.T, policy, file string) (*instancetype.DefaultProvid
 		InstanceTypesFilePath: typesFile,
 	})
 
-	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes(zone))
-	cluster.Node(zone).SetResources(8, int64(16<<30))
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes(zones...))
+	for _, z := range zones {
+		cluster.Node(z).SetResources(8, int64(16<<30))
+	}
+
+	if setup != nil {
+		setup(cluster)
+	}
 
 	pool, err := pxpool.NewProxmoxPool([]*pxpool.ClusterConfig{{
 		Region:      region,

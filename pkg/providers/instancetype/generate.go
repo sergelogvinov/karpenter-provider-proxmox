@@ -51,6 +51,8 @@ type InstanceTypeStatic struct {
 	Offerings    cloudprovider.Offerings             `json:"offerings,omitempty"`
 	// CPUShare is the number of VMs that share the instance's CPUs: 2, 3 or 4. Zero means dedicated CPUs.
 	CPUShare int `json:"cpushare,omitempty"`
+	// NUMA marks the entry as a NUMA template and is its slot fraction: 1, 2 or 4.
+	NUMA int `json:"numa,omitempty"`
 }
 
 type InstanceTypeOptions struct {
@@ -111,7 +113,7 @@ func (o *InstanceTypeOptions) generate(share int) []*InstanceTypeStatic {
 
 			capacity := corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", mem*1024*1024*1024)),
+				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%d", uint64(mem)*zonecapacity.GiB)),
 				corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", pods)),
 				// corev1.ResourceHugePagesPrefix + "1Gi": resource.MustParse(fmt.Sprintf("%dGi", 1)),
 			}
@@ -159,7 +161,12 @@ func makeGenericInstanceTypeName(cpu, memFactor, share int) string {
 		family, digit = cpuShareFamily, share
 	}
 
-	return fmt.Sprintf("%s%d.%dVCPU-%dGB", family, digit, cpu, cpu*memFactor)
+	return instanceTypeName(fmt.Sprintf("%s%d", family, digit), cpu, cpu*memFactor)
+}
+
+// instanceTypeName is the name <family>.<vCPU>VCPU-<memory>GB of every generated instance type (see ADR 0002).
+func instanceTypeName(family string, cpu, memoryGB int) string {
+	return fmt.Sprintf("%s.%dVCPU-%dGB", family, cpu, memoryGB)
 }
 
 func systemReservedResources(_ *corev1.ResourceList) corev1.ResourceList {
