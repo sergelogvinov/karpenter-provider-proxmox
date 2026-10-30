@@ -73,7 +73,7 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 		vmr := vms[idx]
 		i.vms[vmr.VMID] = true
 
-		if zonecapacity.IsNodeCapacityGuest(vmr.Name, vmr.Tags) {
+		if vmr.Template == 0 && zonecapacity.IsNodeCapacityGuest(vmr.Name, vmr.Tags) {
 			i.nodeCapacityGuest = true
 		}
 

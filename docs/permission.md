@@ -55,15 +55,15 @@ when a call fails with a permission error, the Proxmox task log names the missin
 |---|---|---|
 | `POST /nodes/{node}/qemu/{vmid}/clone` | cloning the VM template into a new VM, with `pool` and `storage` | `VM.Clone` on the template, `VM.Allocate` on `/vms/{newid}` or the pool, `Datastore.AllocateSpace` on the target storage |
 | `PUT /nodes/{node}/qemu/{vmid}/resize` | growing the boot disk | `VM.Config.Disk` on the VM, `Datastore.AllocateSpace` on its storage |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `cores`, `numa`, `numaN` | vCPUs and the NUMA binding of a slot | `VM.Config.CPU` |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `memory` | memory | `VM.Config.Memory` |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `affinity`, `hugepages` | written only as root | `root@pam` only |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `tags`, `description` | node class tags, also on tag updates | `VM.Config.Options` |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `smbios1` | instance type and node name for the guest | `VM.Config.HWType` _(uncertain: `VM.Config.Options` on some releases)_ |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `netN` (multi-queue), `ipconfigN`, `nameserver` | the node's network and address | `VM.Config.Network`, `SDN.Use` on the bridge (PVE 8+) _(uncertain: whether `ipconfigN` and `nameserver` need `VM.Config.Cloudinit` instead)_ |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `cores`, `numa`, `numaN` | vCPUs and the NUMA binding of a slot | `VM.Config.CPU` |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `memory` | memory | `VM.Config.Memory` |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `affinity`, `hugepages` | written only as root | `root@pam` only |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `tags`, `description` | node class tags, also on tag updates | `VM.Config.Options` |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `smbios1` | instance type and node name for the guest | `VM.Config.HWType` _(uncertain: `VM.Config.Options` on some releases)_ |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `netN` (multi-queue), `ipconfigN`, `nameserver` | the node's network and address | `VM.Config.Network`, `SDN.Use` on the bridge (PVE 8+) _(uncertain: whether `ipconfigN` and `nameserver` need `VM.Config.Cloudinit` instead)_ |
 | `PUT /nodes/{node}/qemu/{vmid}/cloudinit` | regenerating the cloud-init drive | `VM.Config.Cloudinit` |
 | `POST /nodes/{node}/storage/{storage}/upload` | uploading the cloud-init ISO (`metadataOptions.type: cdrom`) | `Datastore.AllocateTemplate` on `/storage/{storage}` |
-| `POST /nodes/{node}/qemu/{vmid}/config`: `ide2` | attaching and detaching the cloud-init ISO | `VM.Config.CDROM`; `Datastore.Audit` on the ISO's storage _(uncertain)_ |
+| `PUT /nodes/{node}/qemu/{vmid}/config`: `ide2` | attaching and detaching the cloud-init ISO | `VM.Config.CDROM`; `Datastore.Audit` on the ISO's storage _(uncertain)_ |
 | `DELETE /nodes/{node}/storage/{storage}/content/{volume}` | deleting the cloud-init ISO | `Datastore.Allocate` on `/storage/{storage}` _(uncertain: `Datastore.AllocateSpace` may suffice)_ |
 | `PUT /nodes/{node}/qemu/{vmid}/firewall/options`, `POST`/`DELETE .../firewall/rules` | security groups | `VM.Config.Network` on the VM |
 | `PUT /pools/{pool}` | moving a node between resource pools | `Pool.Allocate` on `/pool/{pool}`, `VM.Allocate` on the VM _(uncertain)_ |
@@ -79,7 +79,7 @@ Only needed when the controller builds its own VM templates; `ProxmoxUnmanagedTe
 |---|---|---|
 | `POST /nodes/{node}/storage/{storage}/download-url` | downloading the source image | `Datastore.AllocateTemplate` on `/storage/{storage}`, `Sys.Audit` and `Sys.Modify` on `/` |
 | `POST /nodes/{node}/qemu` with `import-from` and `pool` | creating the VM template from the image | `VM.Allocate` on `/vms/{vmid}` or the pool, `Datastore.AllocateSpace` on the target storage, `VM.Config.Disk`, `VM.Config.CPU`, `VM.Config.Memory`, `VM.Config.Network`, `VM.Config.Cloudinit`, `VM.Config.Options`, `VM.Config.HWType`, `SDN.Use` on each bridge (PVE 8+); access to the imported image _(uncertain: `Datastore.Audit` or `Datastore.AllocateSpace` on the image storage)_ |
-| `POST /nodes/{node}/qemu/{vmid}/config` | updating a template's in-place fields | the `VM.Config.*` privilege of each option, as above |
+| `PUT /nodes/{node}/qemu/{vmid}/config` | updating a template's in-place fields | the `VM.Config.*` privilege of each option, as above |
 | `hostpciN` with `mapping` | PCI devices of the template | `Mapping.Use` on `/mapping/pci/{id}` _(uncertain: also `VM.Config.HWType`)_ |
 | `DELETE /nodes/{node}/qemu/{vmid}` | replacing or deleting a template | `VM.Allocate` on `/vms/{vmid}` |
 | `DELETE /nodes/{node}/storage/{storage}/content/{volume}` | deleting the downloaded image | `Datastore.Allocate` on `/storage/{storage}` _(uncertain)_ |
