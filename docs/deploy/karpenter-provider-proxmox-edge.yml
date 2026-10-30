@@ -534,10 +534,13 @@ spec:
                     description: |-
                       ZoneBalance determines how nodes are distributed across zones
                       Valid values are:
-                      - "Balanced" (default) - Nodes are evenly distributed across zones
+                      - "Balanced" (default) - Nodes go to the zone with the most capacity left after them
+                      - "BestFit" - Nodes go to the zone with the least capacity left after them
                       - "AvailabilityFirst" - Prioritize zone availability over even distribution
+                      A zone where the node stays on one NUMA node is always preferred.
                     enum:
                     - Balanced
+                    - BestFit
                     - AvailabilityFirst
                     type: string
                 type: object
@@ -2442,10 +2445,10 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
 
@@ -2456,10 +2459,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2508,10 +2511,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2540,10 +2543,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2561,10 +2564,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2582,10 +2585,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2603,10 +2606,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2625,10 +2628,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2676,10 +2679,10 @@ metadata:
   name: karpenter-provider-proxmox:bootstrap
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2735,10 +2738,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.4.12
+    helm.sh/chart: karpenter-provider-proxmox-0.5.0
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.14.0"
+    app.kubernetes.io/version: "v0.15.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1
@@ -2798,7 +2801,7 @@ spec:
                   divisor: "0"
                   resource: limits.memory
             - name: FEATURE_GATES
-              value: "ReservedCapacity=true,SpotToSpotConsolidation=false,NodeRepair=false"
+              value: "ReservedCapacity=false,SpotToSpotConsolidation=false,NodeRepair=false"
             - name: BATCH_MAX_DURATION
               value: "10s"
             - name: BATCH_IDLE_DURATION
