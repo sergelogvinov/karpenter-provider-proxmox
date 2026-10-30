@@ -27,6 +27,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodetemplateunmanagedclass/lifecycle"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -98,10 +99,19 @@ func newKubeClient(t *testing.T, tpl *v1alpha1.ProxmoxUnmanagedTemplate, funcs i
 		Build()
 }
 
+// root is root in every region the tests use.
+var root = config.Privileges{"region-1": true, "region-2": true}
+
 func reconcile(t *testing.T, kubeClient client.Client, provider *fakeProvider) (time.Duration, error) {
 	t.Helper()
 
-	res, err := lifecycle.NewController(kubeClient, provider).Reconcile(t.Context(), get(t, kubeClient))
+	return reconcileAs(t, kubeClient, provider, root)
+}
+
+func reconcileAs(t *testing.T, kubeClient client.Client, provider *fakeProvider, privileges config.Privileges) (time.Duration, error) {
+	t.Helper()
+
+	res, err := lifecycle.NewController(kubeClient, provider, privileges).Reconcile(t.Context(), get(t, kubeClient))
 
 	return res.RequeueAfter, err
 }
@@ -330,4 +340,121 @@ func TestStatusConflictRequeues(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 5*time.Second, requeue)
+}
+
+// Without root a VM template with affinity set is dropped: every clone would
+// inherit CPUs the controller can neither replace nor clear.
+func TestAffinityVMTemplateDroppedWithoutRoot(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{withAffinity(talosZone1), talosZone2}}
+
+	_, err := reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone2.Placement()}, tpl.TemplatePlacements())
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{}, tpl.Status.Template)
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsTrue())
+	assert.Equal(t, v1alpha1.ReasonTemplateCPUAffinityDropped, ready.Reason)
+	assert.Contains(t, ready.Message, "region-1/zone-1/1000")
+}
+
+func TestAllVMTemplatesWithAffinityMakeTemplateUnreadyWithoutRoot(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"})
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{talosZone1.Placement()})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{withAffinity(talosZone1)}}
+
+	requeue, err := reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Empty(t, tpl.TemplatePlacements())
+	assert.Nil(t, tpl.Status.Template)
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsFalse())
+	assert.Equal(t, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Reason)
+	assert.Contains(t, ready.Message, "root")
+	assert.Contains(t, ready.Message, "region-1/zone-1/1000")
+	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestTemplatePlacementReturnsOnceAffinityIsRemovedWithoutRoot(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{withAffinity(talosZone1)}}
+
+	_, err := reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+	require.Empty(t, get(t, kubeClient).TemplatePlacements())
+
+	provider.inventory[0].Affinity = false
+
+	_, err = reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement()}, tpl.TemplatePlacements())
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{}, tpl.Status.Template)
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsTrue())
+	assert.Empty(t, ready.Message)
+}
+
+func TestTemplateReadyClearsCPUAffinityDroppedOnceAffinityIsRemovedWithoutRoot(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{withAffinity(talosZone1), talosZone2}}
+
+	_, err := reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+	require.Equal(t, v1alpha1.ReasonTemplateCPUAffinityDropped, get(t, kubeClient).StatusConditions().Get(v1alpha1.ConditionTemplateReady).Reason)
+
+	provider.inventory[0].Affinity = false
+
+	_, err = reconcileAs(t, kubeClient, provider, config.Privileges{})
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement(), talosZone2.Placement()}, tpl.TemplatePlacements())
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsTrue())
+	assert.NotEqual(t, v1alpha1.ReasonTemplateCPUAffinityDropped, ready.Reason)
+	assert.Empty(t, ready.Message)
+}
+
+// Privilege is per region: only the region without root drops its VM
+// template with affinity set.
+func TestAffinityVMTemplateDroppedOnlyInRegionWithoutRoot(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{withAffinity(talosZone1), withAffinity(talosRegion2)}}
+
+	_, err := reconcileAs(t, kubeClient, provider, config.Privileges{"region-2": true})
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosRegion2.Placement()}, tpl.TemplatePlacements())
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Affinity: true}, tpl.Status.Template)
+
+	ready := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+	assert.True(t, ready.IsTrue())
+	assert.Equal(t, v1alpha1.ReasonTemplateCPUAffinityDropped, ready.Reason)
+	assert.Contains(t, ready.Message, "region-1/zone-1/1000")
+	assert.NotContains(t, ready.Message, "region-2")
+}
+
+// withAffinity returns info with the affinity option set in its VM config.
+func withAffinity(info instancetemplate.InstanceTemplateInfo) instancetemplate.InstanceTemplateInfo {
+	info.Affinity = true
+
+	return info
 }
