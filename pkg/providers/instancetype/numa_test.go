@@ -229,3 +229,18 @@ func TestNUMATypeNameTakenByStaticEntry(t *testing.T) {
 	require.Zero(t, p.SlotFraction("n2.14VCPU-63GB"), "the static entry launches without a NUMA slot")
 	require.Equal(t, 2, p.SlotFraction("n2.16VCPU-63GB"))
 }
+
+// TestNUMATypesSkipLowMemoryShapes checks that a slot shape with less than 1GiB of memory per vCPU is not offered,
+// while the slot shapes of other zones still are.
+func TestNUMATypesSkipLowMemoryShapes(t *testing.T) {
+	t.Parallel()
+
+	// 8 cores / 16 threads and 12GiB: every slot shape has less memory than vCPUs.
+	lowMemoryHost := `{"sockets": 1, "threads": 2, "nodes": {"0": {"cpus": "0-15", "memsize": 12884901888}}}`
+
+	p, err := newProviderOn(t, "static", hosts(map[string]string{"pve-1": numaExampleHost, "pve-2": lowMemoryHost}),
+		numaTemplates, nil, "pve-1", "pve-2")
+	require.NoError(t, err)
+
+	require.ElementsMatch(t, append([]string{"c1.2VCPU-4GB"}, numaExampleTypes...), names(t, p))
+}

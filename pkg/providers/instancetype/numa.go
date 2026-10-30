@@ -96,11 +96,13 @@ func (p *DefaultProvider) keptNUMAType(name string) *InstanceTypeStatic {
 // numaTypes generates the NUMA types of the templates from the slot shapes of every zone of regions, by name
 // (docs/scheduler-numa.md §6). Each distinct (template, slot shape) is one type, named
 // <family>.<cpu>VCPU-<memory>GB, offered in the zones that have that shape, and available where
-// the zone has a free slot of it. The caller holds the lock.
+// the zone has a free slot of it. A slot shape with less than 1GiB of memory per vCPU is not offered.
+// The caller holds the lock.
 func (p *DefaultProvider) numaTypes(regions []string) map[string]*InstanceTypeStatic {
 	byName := map[string]*InstanceTypeStatic{}
 
 	taken := map[string]bool{}
+	small := map[string]bool{}
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
@@ -112,6 +114,16 @@ func (p *DefaultProvider) numaTypes(regions []string) map[string]*InstanceTypeSt
 
 					family := tmpl.Name
 					name := numaTypeName(family, offer.Shape)
+
+					if offer.Shape.Memory < uint64(offer.Shape.CPUs)*zonecapacity.GiB {
+						if !small[name] {
+							small[name] = true
+
+							p.log.Info("NUMA type has less than 1GiB of memory per vCPU, skipping it", "name", name, "template", tmpl.Name)
+						}
+
+						continue
+					}
 
 					// A static entry keeps its name; the NUMA type of the same name is not offered.
 					if p.staticNames[name] {
