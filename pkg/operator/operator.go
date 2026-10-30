@@ -47,6 +47,7 @@ type Operator struct {
 	InstanceTemplateProvider    instancetemplate.Provider
 	InstanceTypeProvider        instancetype.Provider
 	NodeIpamController          nodeipam.Provider
+	Privileges                  providerconfig.Privileges
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -127,5 +128,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		InstanceTypeProvider:        instanceTypeProvider,
 		InstanceProvider:            instanceProvider,
 		NodeIpamController:          nodeIpamController,
+		Privileges:                  privileges,
 	}
 }

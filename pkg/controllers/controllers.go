@@ -32,6 +32,7 @@ import (
 	cloudcapacitynodeload "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/providers/cloudcapacity/nodeload"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
@@ -54,6 +55,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 	instanceTypeProvider instancetype.Provider,
 	cloudCapacityProvider cloudcapacity.Provider,
 	nodeIpamProvider nodeipam.Provider,
+	privileges config.Privileges,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		nodeclaiminplaceupdate.NewController(kubeClient, instanceProvider),
@@ -61,7 +63,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock,
 		nodeclasshash.NewController(kubeClient),
 		nodeclaasstatus.NewController(kubeClient, cloudCapacityProvider),
 		nodetemplateclasslifecycle.NewController(kubeClient, instanceTemplateProvider),
-		nodetemplateunmanagedclasslifecycle.NewController(kubeClient, instanceTemplateProvider),
+		nodetemplateunmanagedclasslifecycle.NewController(kubeClient, instanceTemplateProvider, privileges),
 		cloudcapacitynode.NewController(cloudCapacityProvider),
 		cloudcapacitynodeload.NewController(cloudCapacityProvider, instanceTypeProvider),
 		nodeipamctl.NewController(kubeClient, nodeIpamProvider),

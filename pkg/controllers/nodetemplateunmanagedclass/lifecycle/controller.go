@@ -19,12 +19,14 @@ package lifecycle
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/awslabs/operatorpkg/reasonable"
 	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 
 	corev1 "k8s.io/api/core/v1"
@@ -51,13 +53,15 @@ const (
 type Controller struct {
 	kubeClient               client.Client
 	instanceTemplateProvider instancetemplate.Provider
+	privileges               config.Privileges
 }
 
 // NewController constructs a controller instance
-func NewController(kubeClient client.Client, instanceTemplateProvider instancetemplate.Provider) *Controller {
+func NewController(kubeClient client.Client, instanceTemplateProvider instancetemplate.Provider, privileges config.Privileges) *Controller {
 	return &Controller{
 		kubeClient:               kubeClient,
 		instanceTemplateProvider: instanceTemplateProvider,
+		privileges:               privileges,
 	}
 }
 
@@ -110,7 +114,9 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 
 // syncTemplates records the placements of the VM templates that match the
 // spec by name, region and tags, the hugepages and affinity keys of their
-// VM config, and the outcome in the Ready condition.
+// VM config, and the outcome in the Ready condition. Without root in its
+// region a VM template with affinity set is left out (ADR 0003): every clone
+// would inherit CPUs the controller can neither replace nor clear.
 func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) reconcile.Result {
 	if err := templateClass.Validate(); err != nil {
 		templateClass.SetVMTemplates(nil)
@@ -144,8 +150,28 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 		return reconcile.Result{RequeueAfter: templateScanPeriod}
 	}
 
-	templateClass.SetVMTemplates(instancetemplate.PlacedVMTemplates(templates))
-	templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
+	usable, dropped := lo.FilterReject(templates, func(info instancetemplate.InstanceTemplateInfo, _ int) bool {
+		return !info.Affinity || c.privileges.Root(info.Region)
+	})
+
+	templateClass.SetVMTemplates(instancetemplate.PlacedVMTemplates(usable))
+
+	switch {
+	case len(dropped) == 0:
+		templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
+	case len(usable) == 0:
+		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, v1alpha1.ReasonTemplateCPUAffinitySet, droppedMessage(dropped))
+	default:
+		templateClass.StatusConditions().SetTrueWithReason(v1alpha1.ConditionTemplateReady, v1alpha1.ReasonTemplateCPUAffinityDropped, droppedMessage(dropped))
+	}
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}
+}
+
+// droppedMessage names the VM templates left out because their affinity is set.
+func droppedMessage(dropped []instancetemplate.InstanceTemplateInfo) string {
+	return "affinity is root-only, so VM templates with it set are not used: " +
+		strings.Join(lo.Map(dropped, func(info instancetemplate.InstanceTemplateInfo, _ int) string {
+			return info.Placement().String()
+		}), ", ")
 }

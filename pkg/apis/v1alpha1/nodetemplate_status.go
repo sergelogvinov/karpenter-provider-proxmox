@@ -32,6 +32,15 @@ const (
 
 	ConditionTemplateReady = "ProxmoxVirtualMachineTemplateReady"
 
+	// ReasonTemplateCPUAffinitySet is the ConditionTemplateReady reason when it
+	// is false because, without root, every matching VM template is dropped
+	// for having affinity set (ADR 0003).
+	ReasonTemplateCPUAffinitySet = "TemplateCPUAffinitySet"
+	// ReasonTemplateCPUAffinityDropped is the ConditionTemplateReady reason when
+	// it is true but, without root, some matching VM templates are dropped
+	// for having affinity set (ADR 0003).
+	ReasonTemplateCPUAffinityDropped = "TemplateCPUAffinityDropped"
+
 	// ConditionTemplateConsistent is true when the VM templates at the
 	// template placements in Zones agree on the hugepages and affinity keys
 	// of their VM config, false when any two of them disagree (also

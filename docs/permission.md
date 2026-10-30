@@ -23,6 +23,13 @@ Without root a launch never writes `affinity` or `hugepages`; everything else is
   It cannot tell whether the scheduler is actually running.
 * A VM in a NUMA slot still gets `numaN` with `hostnodes` and `policy=bind`, which needs no root, so its memory stays bound to the slot's NUMA node.
   Its `hugepages` must come from the VM template it is cloned from, a `ProxmoxUnmanagedTemplate` with `hugepages` set.
+* A `ProxmoxUnmanagedTemplate` drops the template placement of each VM template with `affinity` set,
+  since every clone would inherit CPUs the controller can neither replace nor clear, so NodeClasses using it lose that zone.
+  The template placement comes back on the next sync once `affinity` is removed from the VM template.
+  When every matching VM template is dropped, the template's Ready condition is false with reason `TemplateCPUAffinitySet`.
+  When only some are dropped, Ready stays true with reason `TemplateCPUAffinityDropped` and a message naming them.
+  A NodeClass left with no template placements, for example because its region lost all of them,
+  has its `InstanceTemplateReady` condition false with reason `TemplateCPUAffinitySet` and the template's message.
 
 ## Privileges for a non-root user
 

@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
@@ -86,6 +87,12 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 	nodeClass.SetTemplatePlacements(availablePlacements)
 
 	if len(availablePlacements) == 0 {
+		if ready := templateReady(template); ready != nil && droppedForCPUAffinity(ready.Reason) {
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Message)
+
+			return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
+		}
+
 		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
@@ -94,6 +101,23 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionInstanceTemplateReady)
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
+}
+
+// templateReady returns the template's Ready condition, nil when it has none.
+func templateReady(template v1alpha1.ProxmoxCommonTemplate) *status.Condition {
+	obj, ok := template.(status.Object)
+	if !ok {
+		return nil
+	}
+
+	return obj.StatusConditions().Get(v1alpha1.ConditionTemplateReady)
+}
+
+// droppedForCPUAffinity reports whether a template Ready reason says VM
+// templates were dropped for having affinity set, so a NodeClass left with
+// no template placements may have lost them to it, e.g. in its region.
+func droppedForCPUAffinity(reason string) bool {
+	return reason == v1alpha1.ReasonTemplateCPUAffinitySet || reason == v1alpha1.ReasonTemplateCPUAffinityDropped
 }
 
 func (i *InstanceTemplate) resolveProxmoxTemplateFromNodeClass(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (v1alpha1.ProxmoxCommonTemplate, error) {

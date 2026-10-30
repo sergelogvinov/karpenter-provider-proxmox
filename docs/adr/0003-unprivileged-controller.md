@@ -2,10 +2,7 @@
 
 Proxmox lets only `root@pam` set some VM options; the controller writes two of them on launch, `affinity` and `hugepages`. The controller decides per region whether it is privileged: logging in as `root@pam` is root, any API token or other user is not. As root nothing changes. Without root the controller never writes `affinity` or `hugepages`: a pinned VM's host CPUs travel only in the `affinity=` description token, and the proxmox-scheduler, which already reads that token, pins the VM's threads at runtime. Hugepages come from the template the VM is cloned from. The controller still writes `numaN` with `hostnodes` and `policy=bind`, which needs no root, so a strict slot allocation still binds the VM's memory to its NUMA node and one template per page size serves every NUMA node.
 
-A NUMA NodePool therefore uses its own NodeClass whose template, a `ProxmoxUnmanagedTemplate`, has `hugepages` set. Without root, `GetInstanceTypes` checks the NodeClass's template against each zone and drops what it cannot launch correctly, setting a status condition on the NodeClass; as root the controller sets or clears these options itself, so no check applies:
-
-- in a zone with a hugepage pool, NUMA types need a template whose `hugepages` matches the pool's page size, and regular types need a template without `hugepages`;
-- without root, a template with `affinity` set offers no types, since every clone would inherit CPUs the controller can neither replace nor clear.
+A NUMA NodePool therefore uses its own NodeClass whose template, a `ProxmoxUnmanagedTemplate`, has `hugepages` set. Without root, `GetInstanceTypes` checks the NodeClass's template against each zone and drops what it cannot launch correctly, setting a status condition on the NodeClass: in a zone with a hugepage pool, NUMA types need a template whose `hugepages` matches the pool's page size, and regular types need a template without `hugepages`. A VM template with `affinity` set is unusable for every type, so the `ProxmoxUnmanagedTemplate` drops it from its template placements instead (see Consequences). As root the controller sets or clears these options itself, so no check applies.
 
 ## Considered Options
 
@@ -22,6 +19,8 @@ A NUMA NodePool therefore uses its own NodeClass whose template, a `ProxmoxUnman
 Without root, the proxmox-scheduler is required for pinned placement: the `affinity` option on a VM is no longer the source of truth, the description token is, and nothing pins a VM on a host where the scheduler is not running. The controller logs a warning for a pinned zone without a node-capacity guest, but cannot prove the scheduler is alive.
 
 The template becomes part of the placement contract: a NodeClass is valid only for the instance types its template fits, so operators keep separate NodeClasses for NUMA and regular NodePools in hugepage zones. The template records the `hugepages` and `affinity` its VM templates share in `status.template`, and a `ProxmoxVirtualMachineTemplateConsistent` condition on the template, not the NodeClass and not part of Ready, turns false when its VM templates disagree.
+
+Without root, the `ProxmoxUnmanagedTemplate` drops VM templates with `affinity` set from its template placements, since every clone would inherit CPUs the controller can neither replace nor clear; NodeClasses using it lose those zones.
 
 Two Proxmox behaviours this rests on were verified (#294): only `root@pam` itself may set `affinity`, `hugepages`, `keephugepages` and `args`, and an API token of `root@pam` does not pass that check; `numaN`, `hostnodes` included, needs no root. The controller writes neither `keephugepages` nor `args`. If a PVE release changes either behaviour, this decision is reopened: root tokens passing would make privilege "the user is `root@pam`, with or without a token", and `hostnodes` needing root would need one template per NUMA node.
 
