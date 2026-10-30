@@ -18,7 +18,8 @@ This is a single-context repo:
 ├── GLOSSARY.md
 ├── docs/adr/
 │   ├── 0001-zone-choice-by-reserved-capacity.md
-│   └── 0002-family-digit-encodes-fraction.md
+│   ├── 0002-family-digit-encodes-fraction.md
+│   └── 0003-unprivileged-controller.md
 ├── cmd/
 └── pkg/
 ```
