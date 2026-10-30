@@ -35,6 +35,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
@@ -69,6 +70,8 @@ type DefaultProvider struct {
 	nodeIpamProvider            nodeipam.Provider
 	instanceTemplateProvider    instancetemplate.Provider
 	instanceTypeProvider        instancetype.Provider
+	// privileges tells per region whether launches may write the root-only options affinity and hugepages.
+	privileges config.Privileges
 }
 
 func NewProvider(
@@ -80,6 +83,7 @@ func NewProvider(
 	nodeIpamController nodeipam.Provider,
 	instanceTemplateProvider instancetemplate.Provider,
 	instanceTypeProvider instancetype.Provider,
+	privileges config.Privileges,
 ) (*DefaultProvider, error) {
 	return &DefaultProvider{
 		kubernetesInterface:         kubernetesInterface,
@@ -89,6 +93,7 @@ func NewProvider(
 		nodeIpamProvider:            nodeIpamController,
 		instanceTemplateProvider:    instanceTemplateProvider,
 		instanceTypeProvider:        instanceTypeProvider,
+		privileges:                  privileges,
 	}, nil
 }
 

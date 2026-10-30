@@ -136,6 +136,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		tags:             nodeClass.Spec.Tags,
 		instanceTypeName: instanceType.Name,
 		vmName:           nodeClaim.Name,
+		root:             p.privileges.Root(region),
 	}); err != nil {
 		return nil, err
 	}
@@ -268,6 +269,8 @@ type cloneVMParams struct {
 	tags             []string
 	instanceTypeName string
 	vmName           string
+	// root is whether the region's credentials are root@pam, which alone may set affinity and hugepages.
+	root bool
 }
 
 // cloneAndConfigureVM clones vmTemplateID into newID, resizes its boot disk
@@ -316,7 +319,7 @@ func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone strin
 		return fmt.Errorf("failed to resize disk %s for vm %d: %v", bootDisk, newID, err)
 	}
 
-	vmConfig := cloneConfigOverrides(params.resources, params.tags, params.instanceTypeName, params.vmName, newID, cfg)
+	vmConfig := cloneConfigOverrides(params, newID, cfg)
 
 	if err = px.Nodes(zone).Qemu().UpdateConfig(ctx, newID, vmConfig); err != nil {
 		return fmt.Errorf("unable to configure vm: %w", err)
@@ -344,18 +347,26 @@ func detectBootDisk(cfg *qemu.Config) string {
 }
 
 // cloneConfigOverrides builds the typed config update applied to a freshly
-// cloned VM: CPU/memory/affinity/NUMA pinning from opt, the node class's
+// cloned VM vmid, whose cloned config is cfg: CPU/memory/affinity/NUMA
+// pinning from params.resources, the node class's
 // tags, and two cosmetic tweaks the old goproxmox.CloneVM also applied
 // (SMBIOS serial/SKU identifying the instance, and multi-queue virtio NICs
 // sized to the vCPU count).
-func cloneConfigOverrides(opt *resources.VMResources, tags []string, instanceTypeName string, vmName string, vmid int, cfg *qemu.Config) *qemu.Config {
+//
+// Only root@pam may set affinity and hugepages (ADR 0003), so without root
+// (params.root false) neither is written: a pinned VM's host CPUs travel only in the `affinity=`
+// description token, which the proxmox-scheduler applies, and hugepages come
+// from the template. numaN, hostnodes and policy included, needs no root and
+// is written either way.
+func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qemu.Config {
+	opt := params.resources
 	update := &qemu.Config{}
 
 	if opt.CPUs != 0 {
 		update.Cores = new(opt.CPUs)
 	}
 
-	if !opt.CPUSet.IsEmpty() {
+	if params.root && !opt.CPUSet.IsEmpty() {
 		update.Affinity = opt.CPUSet.String()
 	}
 
@@ -385,12 +396,12 @@ func cloneConfigOverrides(opt *resources.VMResources, tags []string, instanceTyp
 		}
 	}
 
-	if opt.HugePageSize > 0 {
+	if params.root && opt.HugePageSize > 0 {
 		update.Hugepages = new(strconv.FormatUint(opt.HugePageSize/zonecapacity.MiB, 10))
 	}
 
-	if len(tags) > 0 {
-		vmTags := qemu.Tags(tags)
+	if len(params.tags) > 0 {
+		vmTags := qemu.Tags(params.tags)
 		update.Tags = &vmTags
 	}
 
@@ -412,8 +423,8 @@ func cloneConfigOverrides(opt *resources.VMResources, tags []string, instanceTyp
 	}
 
 	smbios.Base64 = new(true)
-	smbios.SKU = base64.StdEncoding.EncodeToString([]byte(instanceTypeName))
-	smbios.Serial = base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "h=%s;i=%d", vmName, vmid))
+	smbios.SKU = base64.StdEncoding.EncodeToString([]byte(params.instanceTypeName))
+	smbios.Serial = base64.StdEncoding.EncodeToString(fmt.Appendf(nil, "h=%s;i=%d", params.vmName, vmid))
 	update.SMBios1 = &smbios
 
 	if len(cfg.Net) > 0 {

@@ -138,6 +138,11 @@ func (z *ZoneCapacity) Available() zonecapacity.Capacity {
 	return z.zone.Available(z.policy)
 }
 
+// Pinned reports whether the zone places new VMs under pinned placement.
+func (z *ZoneCapacity) Pinned() bool {
+	return z.policy.Kind == zonecapacity.PolicyStatic
+}
+
 // Slots is every NUMA slot shape of the zone with its free slots; nil under shared placement.
 func (z *ZoneCapacity) Slots() []zonecapacity.SlotOffer {
 	return z.zone.Slots(z.policy)

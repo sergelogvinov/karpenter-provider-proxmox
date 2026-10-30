@@ -40,11 +40,13 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/bootstrap"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +55,7 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	"k8s.io/utils/cpuset"
 
 	crfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -92,6 +95,8 @@ type launchSetup struct {
 	numa int
 	// hugePages gives each zone a hugepage pool of 2MiB pages on its NUMA nodes.
 	hugePages bool
+	// nonRoot makes the region's credentials something other than root@pam, such as an API token.
+	nonRoot bool
 }
 
 // numaZoneSettings is the node settings file of launchSetup.numa: two NUMA nodes of 4 CPUs and 8GiB.
@@ -211,7 +216,7 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 
 	ctx := options.ToContext(t.Context(), operatorOptions)
 
-	capacity := cloudcapacity.NewProvider(ctx, pool)
+	capacity := cloudcapacity.NewProvider(ctx, pool, nil)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
 	require.NoError(t, capacity.SyncNodeStorageCapacity(ctx))
 
@@ -235,7 +240,7 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	require.NoError(t, instanceTypes.UpdateInstanceTypes(ctx))
 
 	p, err := instance.NewProvider(ctx, kube, bootstrap.NewProvider(ctx, kube), pool, capacity,
-		nodeipam.NewDefaultProvider(ctx, capacity), templates, instanceTypes)
+		nodeipam.NewDefaultProvider(ctx, capacity), templates, instanceTypes, config.Privileges{testRegion: !setup.nonRoot})
 	require.NoError(t, err)
 
 	size := resource.MustParse("10G")
@@ -590,7 +595,7 @@ func TestCreateNUMASlotResyncs(t *testing.T) {
 	_, err := f.create(f.ctx, "node-1")
 	require.NoError(t, err)
 
-	synced := cloudcapacity.NewProvider(f.ctx, f.pool)
+	synced := cloudcapacity.NewProvider(f.ctx, f.pool, nil)
 	require.NoError(t, synced.SyncNodeCapacity(f.ctx))
 
 	assert.Equal(t, f.capacity.Slots(testRegion, "pve1"), synced.Slots(testRegion, "pve1"))
@@ -662,6 +667,71 @@ func TestCreateNUMASlotZoneLeftStatic(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, cloudprovider.IsInsufficientCapacityError(err), "a zone without NUMA slots has no room: %v", err)
 	assert.Empty(t, f.guests()["pve1"])
+}
+
+// TestCreateWithoutRootPinned checks that without root a pinned VM gets no affinity option: its host CPUs
+// travel only in the description token, which a capacity sync that never saw the launch reads back, so a
+// restart neither counts the VM twice nor loses its CPUs.
+func TestCreateWithoutRootPinned(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", cpus: 2, memory: "2Gi", nonRoot: true})
+
+	node, err := f.create(f.ctx, "node-1")
+	require.NoError(t, err)
+
+	cfg := f.vmConfig(node)
+	assert.Empty(t, cfg.Affinity, "only root@pam may set affinity")
+
+	_, token, found := strings.Cut(cfg.Description, ", affinity=")
+	require.True(t, found, "description %q carries the affinity token", cfg.Description)
+
+	pinned, err := cpuset.Parse(token)
+	require.NoError(t, err)
+	require.Equal(t, 2, pinned.Size())
+
+	synced := cloudcapacity.NewProvider(f.ctx, f.pool, nil)
+	require.NoError(t, synced.SyncNodeCapacity(f.ctx))
+
+	// The zone has 4 CPUs: a second 2-vCPU VM takes the two the first left, and then none is left.
+	for name, p := range map[string]*cloudcapacity.DefaultProvider{"running": f.capacity, "restarted": synced} {
+		reserved, err := p.Reserve(f.ctx, testRegion, "pve1", resources.VMResources{ID: 2000, CPUs: 2, Memory: 1 << 30})
+		require.NoError(t, err, name)
+		assert.True(t, reserved.CPUSet.Intersection(pinned).IsEmpty(), "%s: the first VM still holds %s, got %s", name, pinned, reserved.CPUSet)
+
+		_, err = p.Reserve(f.ctx, testRegion, "pve1", resources.VMResources{ID: 2001, CPUs: 1, Memory: 1 << 30})
+		require.Error(t, err, "%s: no CPU is left", name)
+	}
+}
+
+// TestCreateWithoutRootNUMASlot checks that without root a NUMA VM gets neither affinity nor hugepages,
+// which come from its template, but still one guest NUMA node bound to its slot's host node; a capacity
+// sync that never saw the launch tracks it as covering its slot.
+func TestCreateWithoutRootNUMASlot(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 2, hugePages: true, nonRoot: true})
+
+	for _, tc := range []struct{ affinity, hostNode string }{{"0-1", "0"}, {"2-3", "0"}, {"4-5", "1"}} {
+		node, err := f.create(f.ctx, "node-"+tc.affinity)
+		require.NoError(t, err)
+
+		cfg := f.vmConfig(node)
+		assert.Empty(t, cfg.Affinity, "only root@pam may set affinity")
+		assert.Nil(t, cfg.Hugepages, "only root@pam may set hugepages")
+		assert.True(t, strings.HasSuffix(cfg.Description, ", affinity="+tc.affinity), "description %q carries the affinity token", cfg.Description)
+		require.NotNil(t, cfg.NUMAEnabled)
+		assert.True(t, *cfg.NUMAEnabled)
+		require.Len(t, cfg.NUMA, 1)
+		assert.Equal(t, []string{tc.hostNode}, cfg.NUMA[0].HostNodes)
+		assert.Equal(t, "bind", cfg.NUMA[0].Policy)
+	}
+
+	synced := cloudcapacity.NewProvider(f.ctx, f.pool, nil)
+	require.NoError(t, synced.SyncNodeCapacity(f.ctx))
+
+	assert.Equal(t, f.capacity.Slots(testRegion, "pve1"), synced.Slots(testRegion, "pve1"))
+	assert.Equal(t, []zonecapacity.SlotOffer{
+		{Shape: zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 8 << 30}, Free: 0},
+		{Shape: zonecapacity.SlotShape{Fraction: 2, CPUs: 2, Memory: 4 << 30}, Free: 1},
+		{Shape: zonecapacity.SlotShape{Fraction: 4, CPUs: 1, Memory: 2 << 30}, Free: 2},
+	}, synced.Slots(testRegion, "pve1"), "three of the four halves are taken")
 }
 
 func TestCreateWithoutCloudInitISO(t *testing.T) {

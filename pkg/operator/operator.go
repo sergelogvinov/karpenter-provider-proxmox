@@ -59,6 +59,16 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		os.Exit(1)
 	}
 
+	privileges := cfg.Privileges()
+	for _, c := range cfg.Clusters {
+		if privileges.Root(c.Region) {
+			log.FromContext(ctx).Info("Region credentials are root@pam: launches set affinity and hugepages", "region", c.Region)
+		} else {
+			log.FromContext(ctx).Info("Region credentials are not root@pam: launches leave affinity to the proxmox-scheduler and hugepages to the template",
+				"region", c.Region)
+		}
+	}
+
 	pxPool, err := pxpool.NewProxmoxPool(cfg.Clusters)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed to create proxmox cluster client")
@@ -68,7 +78,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 
 	kubernetesBootstrapProvider := bootstrap.NewProvider(ctx, operator.KubernetesInterface)
 
-	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool)
+	cloudCapacityProvider := cloudcapacity.NewProvider(ctx, pxPool, privileges)
 	cloudCapacityProvider.SyncNodeCapacity(ctx)
 	cloudCapacityProvider.SyncNodeStorageCapacity(ctx)
 
@@ -100,6 +110,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		nodeIpamController,
 		instanceTemplateProvider,
 		instanceTypeProvider,
+		privileges,
 	)
 	if err != nil {
 		log.FromContext(ctx).Error(err, "failed creating instance provider")

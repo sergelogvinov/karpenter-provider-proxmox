@@ -66,7 +66,7 @@ func NewProxmoxClient(ctx context.Context, cfg Config) (*ProxmoxClient, error) {
 		return nil, fmt.Errorf("failed to build proxmox pool from %s: %w", cfg.ProxmoxConfig, err)
 	}
 
-	capacity := cloudcapacity.NewProvider(ctx, pool)
+	capacity := cloudcapacity.NewProvider(ctx, pool, nil)
 
 	if err := capacity.SyncNodeStorageCapacity(ctx); err != nil {
 		return nil, fmt.Errorf("failed to sync proxmox node storage capacity: %w", err)

@@ -19,7 +19,6 @@ package resourcemanager
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -157,7 +156,7 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 		Node:          zone,
 		SkipTemplates: true,
 		Match: func(r *cluster.Resource) (bool, error) {
-			return r.Name == zonecapacity.NodeCapacityName && slices.Contains(r.Tags, zonecapacity.NodeCapacityTag), nil
+			return zonecapacity.IsNodeCapacityGuest(r.Name, r.Tags), nil
 		},
 	})
 	if err != nil {

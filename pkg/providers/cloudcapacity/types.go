@@ -33,6 +33,8 @@ type NodeCapacityInfo struct {
 
 	// vms is the set of the node's VMs in any state, as of the sync that built Capacity.
 	vms vmIDs
+	// nodeCapacityGuest marks a node with a node-capacity guest, in any state, as of that sync.
+	nodeCapacityGuest bool
 	// omitted marks a node missing from the last sync, kept only to hold its pending
 	// reservations until it returns; it is not available for placement.
 	omitted bool
