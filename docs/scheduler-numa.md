@@ -149,6 +149,8 @@ Each distinct `(family, slot shape)` becomes one Karpenter instance type, named 
 - **Merging.** Identical slot shapes on different hosts or NUMA nodes produce the same name, so a homogeneous
   cluster gets exactly three types. The fraction is the family, so a half of a big host never merges with a whole
   small host even when their sizes are equal (`n2.16VCPU-63GB` vs `n1.16VCPU-63GB`).
+- **Minimum memory.** A slot shape with less than 1GiB of memory per vCPU (memory GiB < vCPUs) gets no type:
+  the slot shape is skipped in every NUMA family.
 - **Offerings.** Each type has an offering only in the zones that have that slot shape. The offering is available
   when that zone has at least one free slot of that shape (§5).
 - **Labels.** Requirements carry the usual `instance-type`, `instance-family`, region, zone and capacity type. No
