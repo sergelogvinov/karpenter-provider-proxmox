@@ -51,10 +51,13 @@ func TestSyncWarnsPinnedZoneWithoutNodeCapacityGuest(t *testing.T) {
 		policy string
 		root   bool
 		guest  bool
-		warns  bool
+		// template makes the node-capacity guest a VM template, which is not a guest.
+		template bool
+		warns    bool
 	}{
 		{name: "pinned without guest", policy: "static", warns: true},
 		{name: "pinned with guest", policy: "static", guest: true},
+		{name: "pinned with only a node-capacity template", policy: "static", guest: true, template: true, warns: true},
 		{name: "pinned as root", policy: "static", root: true},
 		{name: "shared", policy: "simple"},
 	} {
@@ -87,7 +90,7 @@ func TestSyncWarnsPinnedZoneWithoutNodeCapacityGuest(t *testing.T) {
 
 			if tc.guest {
 				tags := qemu.Tags{"karpenter"}
-				cluster.Node(zone).AddVM(9000, &qemu.Config{Name: "node-capacity", Cores: new(1), Tags: &tags})
+				cluster.Node(zone).AddVM(9000, &qemu.Config{Name: "node-capacity", Cores: new(1), Tags: &tags, Template: new(tc.template)})
 			}
 
 			pool, err := pxpool.NewProxmoxPool([]*pxpool.ClusterConfig{{Region: region, URL: "https://127.0.0.1:8006/api2/json"}})
