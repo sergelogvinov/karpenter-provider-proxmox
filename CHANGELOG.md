@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.15.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.14.0...v0.15.0) (2026-10-30)
+
+
+### Features
+
+* add CPU share instance types ([ad322e8](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/ad322e8c4d6521340e0ecef5b1a3c3d14c7ab919)), closes [#271](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/271)
+* add n1 and n2 NUMA types to the default instance types ([cf60068](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/cf6006804001eb6cbd718869906a912060fddfd3))
+* add the cpushare generator option and docs ([d2824a9](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/d2824a9a2dbd40012728c85a864aa996ad1f563b)), closes [#273](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/273)
+* add the NUMA template generator option ([4dcab3b](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/4dcab3b17ea8c1a5d9b3a3786c53c71bc2ec7117))
+* choose the launch zone by fit and placement strategy ([64d294a](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/64d294ab5fabb1c26fddb32ddc169769d0e66f1f))
+* keep NUMA types that live NodeClaims still use ([eb882ac](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/eb882ac6877d3c21a122d036b72b8943edfbd3f5)), closes [#276](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/276)
+* launch NUMA VMs into a strict NUMA slot ([65b37ba](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/65b37ba7138ffb07384496f21a61db88a3b03e76)), closes [#275](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/275)
+* name the zones in the offerings report ([4a73a59](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/4a73a595e826d4f8924dadab46dde168e4c50adc))
+* numa slot offerings ([d469b3e](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/d469b3e78bc8e4d0fc2ff2a829ef5e40c5e27bf0)), closes [#274](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/274)
+* report the hugepage pool in the node-capacity guest ([ffb19f2](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/ffb19f21ae41523d7ca0db114c4e8612f8d268ea))
+* scheduler builds CPU share groups ([dba33e1](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/dba33e1fb44df72b4005b19abef47916b87fc1e6)), closes [#272](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/272)
+* scheduler plans through the zone capacity module ([7eb8e81](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/7eb8e81d0d4a483d1574bc8a4a7724adf7439dd6)), closes [#270](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/270)
+* skip NUMA slot shapes with less than 1GiB per vCPU ([2d08a8a](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/2d08a8a4d3d96da45dbbaabfbb904f13ebc456ca))
+* soft pack regular VMs around NUMA slots ([8f1ca58](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8f1ca5813152958a217e5ca5175f5f0ccaebfec2)), closes [#277](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/277)
+* zone capacity module serves the controller ([48a1563](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/48a1563c390cb52128760f27477e967cad1640f0)), closes [#269](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/269)
+
+
+### Bug Fixes
+
+* address CPU share types review findings ([9b4cfb2](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/9b4cfb2b72052112a6252fb3af9e15d519cd572b)), closes [#271](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/271)
+* address cpushare generator review findings ([6654f70](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/6654f7036326083536184655db090766835a81ff)), closes [#273](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/273)
+* disable unsupport feature ([162ea7c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/162ea7cc6f2ae6b6032bdf29f61e1317fdf38b09))
+* drop only the dead process in a rebalance ([d6fae09](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/d6fae096bfa68172813a96f7c843696893bc39b3)), closes [#270](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/270)
+* goreleaser ([dfaaacd](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/dfaaacd1b0c0569da06477ffbde7c5bebd5fc535))
+* ignore only the node-capacity guest, count unreadable affinities ([8659c1d](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8659c1df5412828dbfa4add318a0f31e78c1a772)), closes [#269](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/269)
+* instance types generation and update offerings logging ([d6cc7a0](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/d6cc7a0f29bcede4a9f867e0c8238387f7fec0a5))
+* keep pending reservations across capacity sync ([f5f0f64](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f5f0f646df665ba4d8394ff714e08c01d2233e01))
+* let pinned VMs span NUMA nodes that cannot each hold all their memory ([b70b32d](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b70b32d7cc8ff3fffde7bab737193e996ea5068f))
+* only replace or delete VM templates Karpenter created ([b17e64b](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b17e64b2f965c1335f0f0c4fe18d776f8fa14cc4))
+* remove the cloud-init ISO temp file when building it fails ([f20d54a](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f20d54a19f2c74f9d44881e02ab4a669e328012a))
+* reuse a VM template the cache has not listed yet ([9439ac8](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/9439ac811251043d39249742b301bb2b161a88a9))
+* roll back every side effect of a failed instance launch ([16a9c54](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/16a9c54055ac34823c125d7e1e8cba42a3a32ac2))
+* scheduler keeps its behavior on the zone capacity plan ([63f5712](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/63f57126bbcf46ec05fe12b0fcc9fad9aaf7ed6e)), closes [#270](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/270)
+* spread pinned CPUs by free NUMA memory when packing does not fit ([d72744b](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/d72744b3644a0ae75f6773937856ecf80a4a1869))
+* zone capacity module review findings ([f32bf0c](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f32bf0c070b1bcf8ebd5427e001ae3bd0b0bf492)), closes [#269](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/269)
+
 ## [0.14.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.13.0...v0.14.0) (2026-10-27)
 
 
