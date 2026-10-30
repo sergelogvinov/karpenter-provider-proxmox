@@ -33,6 +33,11 @@ const (
 	NodeCapacityTag  = "karpenter"
 )
 
+// IsNodeCapacityGuest reports whether a guest of this name and tags is the node-capacity guest.
+func IsNodeCapacityGuest(name string, tags []string) bool {
+	return name == NodeCapacityName && slices.Contains(tags, NodeCapacityTag)
+}
+
 // affinityToken is the description token that carries a VM's host CPUs when the affinity option is unset.
 const affinityToken = "affinity="
 
@@ -100,7 +105,7 @@ type classified struct {
 func (vm VM) classify() (classified, error) {
 	shared := classified{class: classShared, cpus: cpuset.New()}
 
-	if vm.Name == NodeCapacityName && slices.Contains(vm.Tags, NodeCapacityTag) {
+	if IsNodeCapacityGuest(vm.Name, vm.Tags) {
 		return classified{class: classIgnored, cpus: cpuset.New()}, nil
 	}
 

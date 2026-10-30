@@ -71,7 +71,7 @@ func newZonesProvider(t *testing.T, policy, nodeSettings string, cpus map[string
 	require.NoError(t, err)
 	pool.Set(region, cluster.Client(t))
 
-	p := cloudcapacity.NewProvider(ctx, pool)
+	p := cloudcapacity.NewProvider(ctx, pool, nil)
 	require.NoError(t, p.SyncNodeCapacity(ctx))
 
 	return ctx, p

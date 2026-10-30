@@ -46,3 +46,6 @@ You can define multiple clusters in the `clusters` section.
 * `token_secret` - The Proxmox API token.
 * `token_secret_file` - The path to a file containing the Proxmox API token secret.
 * `region` - The name of the region, which is also used as `topology.kubernetes.io/region` label.
+
+A region whose credentials are `username: root@pam` with a `password` is root, even with `token_id_file` or `token_secret_file` also set, since the client then logs in with the password; any API token, a `root@pam` token included, is not.
+Without root, launches leave pinning to the proxmox-scheduler and hugepages to the VM template, see [Permissions](permission.md).

@@ -28,6 +28,7 @@ import (
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
@@ -95,16 +96,26 @@ type DefaultProvider struct {
 
 	log logr.Logger
 
+	// privileges tells per region whether the controller logs in as root@pam.
+	privileges config.Privileges
+	// warnedNoNodeCapacityGuest are the zones already warned about pinned placement without a
+	// node-capacity guest, guarded by muSync.
+	warnedNoNodeCapacityGuest map[string]bool
+
 	// afterBuild, if set, runs between building the new zones and swapping them in.
 	afterBuild func()
 }
 
-func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool) *DefaultProvider {
+// NewProvider returns a provider over pool. privileges tells per region whether the controller is root;
+// a region missing from it, or a nil privileges, is not root.
+func NewProvider(ctx context.Context, pool *pxpool.ProxmoxPool, privileges config.Privileges) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("cloudcapacity")
 
 	return &DefaultProvider{
-		pool: pool,
-		log:  log,
+		pool:                      pool,
+		log:                       log,
+		privileges:                privileges,
+		warnedNoNodeCapacityGuest: map[string]bool{},
 	}
 }
 
@@ -226,6 +237,8 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 			}
 
 			capacityInfo[key] = nodeCapacity
+
+			p.warnNoNodeCapacityGuest(log, key, nodeCapacity)
 
 			nodeIfaces, err := getNodeNetwork(ctx, cl, region, &item)
 			if err != nil {
@@ -509,4 +522,27 @@ func (p *DefaultProvider) Slots(region, zone string) []zonecapacity.SlotOffer {
 	}
 
 	return info.Capacity.Slots()
+}
+
+// warnNoNodeCapacityGuest warns when a zone under pinned placement has no node-capacity guest and the
+// region is not root: the VMs' affinity is then only a description token, and nothing pins them unless
+// the proxmox-scheduler runs on the zone. The controller cannot tell whether it does.
+// It warns once each time the zone enters that condition, and again if the zone leaves and re-enters it.
+// It runs under muSync.
+func (p *DefaultProvider) warnNoNodeCapacityGuest(log logr.Logger, key string, info NodeCapacityInfo) {
+	pinnedWithoutGuest := !p.privileges.Root(info.Region) && info.Capacity.Pinned() && !info.nodeCapacityGuest
+	if !pinnedWithoutGuest {
+		delete(p.warnedNoNodeCapacityGuest, key)
+
+		return
+	}
+
+	if p.warnedNoNodeCapacityGuest[key] {
+		return
+	}
+
+	p.warnedNoNodeCapacityGuest[key] = true
+
+	log.Info("Warning: pinned zone has no node-capacity guest; without root only the proxmox-scheduler pins its VMs",
+		"region", info.Region, "zone", info.Name)
 }

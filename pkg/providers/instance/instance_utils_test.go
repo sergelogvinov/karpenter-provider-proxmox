@@ -100,7 +100,9 @@ func TestCloneConfigOverrides(t *testing.T) {
 	// cloneConfigOverrides joins tags in the order given — sorting, if
 	// wanted, is the caller's job (nodeClass.Spec.Tags isn't sorted before
 	// reaching here today, matching the old goproxmox.CloneVM's behavior).
-	update := cloneConfigOverrides(opt, []string{"web", "prod"}, "cx4.medium", "node-1", 123, cfg)
+	update := cloneConfigOverrides(cloneVMParams{
+		resources: opt, tags: []string{"web", "prod"}, instanceTypeName: "cx4.medium", vmName: "node-1", root: true,
+	}, 123, cfg)
 
 	assert.Equal(t, 4, *update.Cores)
 	assert.Equal(t, "0-1,8-9", update.Affinity)
@@ -129,6 +131,30 @@ func TestCloneConfigOverrides(t *testing.T) {
 	assert.Contains(t, smbios, "base64=1")
 }
 
+// TestCloneConfigOverridesWithoutRoot checks that without root a pinned NUMA VM gets neither affinity nor
+// hugepages, which only root@pam may set (ADR 0003), while its vCPUs and its NUMA binding stay set.
+func TestCloneConfigOverridesWithoutRoot(t *testing.T) {
+	t.Parallel()
+
+	opt := &resources.VMResources{
+		CPUs:         4,
+		Memory:       8192 * 1024 * 1024,
+		CPUSet:       cpuset.New(0, 1, 8, 9),
+		HugePageSize: 2 * 1024 * 1024,
+		NUMANodes: map[int]resources.NUMANodeState{
+			1: {CPUs: "0-3", Memory: 8192, Policy: "bind"},
+		},
+	}
+
+	update := cloneConfigOverrides(cloneVMParams{resources: opt, instanceTypeName: "cx4.medium", vmName: "node-1"}, 123, &qemu.Config{})
+
+	assert.Empty(t, update.Affinity, "only root@pam may set affinity")
+	assert.Nil(t, update.Hugepages, "only root@pam may set hugepages")
+	assert.Equal(t, 4, *update.Cores)
+	assert.True(t, *update.NUMAEnabled)
+	assert.Equal(t, "cpus=0-3,hostnodes=1,memory=8192,policy=bind", update.NUMA[0].String())
+}
+
 func TestCloneConfigOverridesSMBiosAlreadyBase64(t *testing.T) {
 	t.Parallel()
 
@@ -146,7 +172,7 @@ func TestCloneConfigOverridesSMBiosAlreadyBase64(t *testing.T) {
 		},
 	}
 
-	update := cloneConfigOverrides(opt, nil, "cx4.medium", "node-1", 123, cfg)
+	update := cloneConfigOverrides(cloneVMParams{resources: opt, instanceTypeName: "cx4.medium", vmName: "node-1", root: true}, 123, cfg)
 
 	// Already-encoded fields must not be encoded a second time, and the
 	// plain UUID must survive untouched (Proxmox never base64-encodes it).
@@ -163,7 +189,7 @@ func TestCloneConfigOverridesEmpty(t *testing.T) {
 	opt := &resources.VMResources{CPUSet: cpuset.New()}
 	cfg := &qemu.Config{}
 
-	update := cloneConfigOverrides(opt, nil, "cx4.medium", "node-1", 123, cfg)
+	update := cloneConfigOverrides(cloneVMParams{resources: opt, instanceTypeName: "cx4.medium", vmName: "node-1", root: true}, 123, cfg)
 
 	assert.Nil(t, update.Cores)
 	assert.Empty(t, update.Affinity)

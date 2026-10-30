@@ -74,7 +74,7 @@ func newProviderWithPolicy(t *testing.T, policy string) (context.Context, *fakea
 	require.NoError(t, err)
 	pool.Set(region, cluster.Client(t))
 
-	p := cloudcapacity.NewProvider(ctx, pool)
+	p := cloudcapacity.NewProvider(ctx, pool, nil)
 	require.NoError(t, p.SyncNodeCapacity(ctx))
 	require.True(t, fits(p, 8, 15*gib), "empty zone fits 8 CPUs and 15GiB")
 

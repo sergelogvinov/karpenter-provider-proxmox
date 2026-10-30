@@ -81,6 +81,35 @@ func ReadCloudConfig(config io.Reader) (ClustersConfig, error) {
 	return cfg, nil
 }
 
+// RootUser is the only Proxmox login that may set the root-only VM options
+// (affinity, hugepages, keephugepages, args). An API token of it may not.
+const RootUser = "root@pam"
+
+// Privileges tells, per region, whether the controller logs in as root.
+type Privileges map[string]bool
+
+// Root reports whether the region's credentials log in as root@pam itself.
+// A region without credentials is not root.
+func (p Privileges) Root(region string) bool {
+	return p[region]
+}
+
+// Privileges returns each region's privilege, decided from the login the pool
+// client makes with its credentials: username root@pam with a password is root;
+// any API token, a root@pam token included, or any other user is not (ADR 0003).
+// The pool client logs in with username and password whenever both are set and
+// only otherwise with a token, so token_id_file or token_secret_file next to
+// root@pam's password still logs in as root.
+func (c ClustersConfig) Privileges() Privileges {
+	privileges := make(Privileges, len(c.Clusters))
+
+	for _, cl := range c.Clusters {
+		privileges[cl.Region] = cl.Username == RootUser && cl.Password != ""
+	}
+
+	return privileges
+}
+
 // ReadCloudConfigFromFile reads cloud config from a file.
 func ReadCloudConfigFromFile(file string) (ClustersConfig, error) {
 	f, err := os.Open(filepath.Clean(file))

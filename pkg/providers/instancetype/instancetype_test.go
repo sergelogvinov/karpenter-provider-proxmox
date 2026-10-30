@@ -127,7 +127,7 @@ func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cl
 	require.NoError(t, err)
 	pool.Set(region, cluster.Client(t))
 
-	capacity := cloudcapacity.NewProvider(ctx, pool)
+	capacity := cloudcapacity.NewProvider(ctx, pool, nil)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
 
 	f := &fixture{t: t, ctx: ctx, nodesFile: settingsFile, typesFile: typesFile, capacity: capacity}
