@@ -33,6 +33,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/templatecheck"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
@@ -63,8 +64,8 @@ type Provider interface {
 
 type DefaultProvider struct {
 	cloudCapacityProvider cloudcapacity.Provider
-	// kubeClient reads the NodeClaims, whose NUMA types are kept while they use them.
-	kubeClient client.Reader
+	// readers read the NodeClaims and the node class templates.
+	readers Readers
 
 	muInstanceTypes sync.RWMutex
 	// instanceTypesInfo are the static types followed by the NUMA types generated on the last offerings refresh
@@ -86,12 +87,22 @@ type DefaultProvider struct {
 	log logr.Logger
 }
 
-func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider, kubeClient client.Reader) *DefaultProvider {
+// Readers are the Kubernetes readers of the provider, named so that they cannot be swapped silently.
+type Readers struct {
+	// API reads the NodeClaims, whose NUMA types are kept while they use them, straight from the API server:
+	// the offerings are first refreshed before the manager's cache starts.
+	API client.Reader
+	// Cached reads the templates of the node classes List checks from the manager's cache.
+	Cached client.Reader
+}
+
+// NewDefaultProvider returns a provider on the zones of cloudCapacityProvider.
+func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity.Provider, readers Readers) *DefaultProvider {
 	log := log.FromContext(ctx).WithName("instancetype")
 
 	p := &DefaultProvider{
 		cloudCapacityProvider: cloudCapacityProvider,
-		kubeClient:            kubeClient,
+		readers:               readers,
 		log:                   log,
 	}
 	p.setInstanceTypes(loadDefaultInstanceTypes())
@@ -99,10 +110,46 @@ func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity
 	return p
 }
 
+// List is every instance type with the offerings nodeClass can launch: without root, the offerings in a zone
+// where nodeClass's template cannot launch the instance type's kind are dropped (templatecheck).
+// A nodeClass without template placements has no offerings; a nil nodeClass keeps every offering.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
-	return p.ListWithFilter(ctx, func(_ *cloudprovider.InstanceType) bool {
+	instanceTypes := p.ListWithFilter(ctx, func(_ *cloudprovider.InstanceType) bool {
 		return true
-	}), nil
+	})
+
+	if nodeClass == nil {
+		return instanceTypes, nil
+	}
+
+	// Without template placements, nodeClass launches nowhere.
+	if len(nodeClass.TemplatePlacements("")) == 0 {
+		for _, it := range instanceTypes {
+			it.Offerings = cloudprovider.Offerings{}
+			it.Requirements = computeRequirements(it.Name, it.Offerings, p.cloudCapacityProvider.Regions())
+		}
+
+		return instanceTypes, nil
+	}
+
+	checked := templatecheck.ForNodeClass(ctx, p.readers.Cached, nodeClass, p.cloudCapacityProvider)
+	if len(checked.Drops()) == 0 {
+		return instanceTypes, nil
+	}
+
+	for _, it := range instanceTypes {
+		kind := lo.Ternary(p.SlotFraction(it.Name) != 0, templatecheck.NUMATypes, templatecheck.NonNUMATypes)
+
+		it.Offerings = lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
+			return checked.Offers(templatecheck.ZoneID{
+				Region: o.Requirements.Get(corev1.LabelTopologyRegion).Any(),
+				Zone:   o.Requirements.Get(corev1.LabelTopologyZone).Any(),
+			}, kind)
+		})
+		it.Requirements = computeRequirements(it.Name, it.Offerings, p.cloudCapacityProvider.Regions())
+	}
+
+	return instanceTypes, nil
 }
 
 func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType {

@@ -53,8 +53,15 @@ func newProvider(t *testing.T) (context.Context, *fakeapi.Cluster, *cloudcapacit
 func newProviderWithPolicy(t *testing.T, policy string) (context.Context, *fakeapi.Cluster, *cloudcapacity.DefaultProvider) {
 	t.Helper()
 
+	return newProviderWithSettings(t, policy, nodeSettings)
+}
+
+// newProviderWithSettings is newProviderWithPolicy with the node settings file settings.
+func newProviderWithSettings(t *testing.T, policy, settings string) (context.Context, *fakeapi.Cluster, *cloudcapacity.DefaultProvider) {
+	t.Helper()
+
 	settingsFile := filepath.Join(t.TempDir(), "nodes.json")
-	require.NoError(t, os.WriteFile(settingsFile, []byte(nodeSettings), 0o600))
+	require.NoError(t, os.WriteFile(settingsFile, []byte(settings), 0o600))
 
 	ctx := options.ToContext(context.Background(), &options.Options{
 		NodePolicy:          policy,
@@ -271,4 +278,51 @@ func TestReleaseOnOmittedZone(t *testing.T) {
 	require.NoError(t, p.SyncNodeCapacity(ctx))
 
 	require.True(t, fits(p, 8, 15*gib), "the release while omitted sticks")
+}
+
+// hugepageSettings is nodeSettings with a pool of 1GiB hugepages.
+const hugepageSettings = `{"region-1": {"pve-1": {"hugepagesize": 1073741824, "nodes": {"0": {"cpus": "0-7", "memsize": 17179869184}}}}}`
+
+// TestHugePageSizeKeptWhileZoneUnavailable checks that a zone missing from a sync, with or without pending
+// reservations, keeps reporting the page size of its hugepage pool, while it stays unavailable for placement.
+func TestHugePageSizeKeptWhileZoneUnavailable(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		pending bool
+	}{
+		{name: "zone without reservations"},
+		{name: "zone with a pending reservation", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cluster, p := newProviderWithSettings(t, "simple", hugepageSettings)
+			require.Equal(t, gib, p.HugePageSize(region, zone))
+
+			if tc.pending {
+				require.NoError(t, reserve(ctx, p, resources.VMResources{ID: 100, CPUs: 1, Memory: gib}))
+			}
+
+			cluster.FailNode(zone, fakeapi.FailureUnreachable)
+			require.NoError(t, p.SyncNodeCapacity(ctx))
+
+			require.NotContains(t, p.Zones(region), zone)
+			require.False(t, fits(p, 1, gib), "the zone is unavailable for placement")
+			require.Equal(t, gib, p.HugePageSize(region, zone), "the last known page size is kept")
+
+			cluster.RecoverNode(zone)
+			require.NoError(t, p.SyncNodeCapacity(ctx))
+			require.Equal(t, gib, p.HugePageSize(region, zone))
+		})
+	}
+}
+
+// TestHugePageSizeOfUnknownZone checks that a zone never synced has no hugepage pool.
+func TestHugePageSizeOfUnknownZone(t *testing.T) {
+	t.Parallel()
+
+	_, _, p := newProviderWithSettings(t, "simple", hugepageSettings)
+	require.Zero(t, p.HugePageSize(region, "pve-9"))
 }

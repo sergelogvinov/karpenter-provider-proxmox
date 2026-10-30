@@ -82,7 +82,7 @@ func TestTemplateCPUAffinitySetShownOnNodeClass(t *testing.T) {
 	nodeClass := newNodeClass()
 	reconcileInstanceTemplate(t, newKubeClient(t, tpl), nodeClass)
 
-	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady)
+	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady)
 	assert.True(t, ready.IsFalse())
 	assert.Equal(t, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Reason)
 	assert.Equal(t, message, ready.Message)
@@ -96,7 +96,7 @@ func TestNoTemplatePlacementsIsTemplatesNotFound(t *testing.T) {
 	nodeClass := newNodeClass()
 	reconcileInstanceTemplate(t, newKubeClient(t, tpl), nodeClass)
 
-	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady)
+	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady)
 	assert.True(t, ready.IsFalse())
 	assert.Equal(t, "TemplatesNotFound", ready.Reason)
 }
@@ -110,7 +110,7 @@ func TestTemplateCPUAffinityDroppedKeepsNodeClassReady(t *testing.T) {
 	nodeClass := newNodeClass()
 	reconcileInstanceTemplate(t, newKubeClient(t, tpl), nodeClass)
 
-	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady)
+	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady)
 	assert.True(t, ready.IsTrue())
 	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: "region-1", Zone: "zone-1", TemplateID: 1001}}, nodeClass.TemplatePlacements("region-1"))
 }
@@ -128,7 +128,7 @@ func TestTemplateCPUAffinityDroppedInNodeClassRegionShownOnNodeClass(t *testing.
 	nodeClass.Spec.Region = "region-1"
 	reconcileInstanceTemplate(t, newKubeClient(t, tpl), nodeClass)
 
-	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady)
+	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady)
 	assert.True(t, ready.IsFalse())
 	assert.Equal(t, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Reason)
 	assert.Equal(t, message, ready.Message)
@@ -144,7 +144,7 @@ func TestNodeClassReadyOnceTemplateCPUAffinityIsRemoved(t *testing.T) {
 	kubeClient := newKubeClient(t, tpl)
 	nodeClass := newNodeClass()
 	reconcileInstanceTemplate(t, kubeClient, nodeClass)
-	require.True(t, nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady).IsFalse())
+	require.True(t, nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady).IsFalse())
 
 	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{{Region: "region-1", Zone: "zone-1", TemplateID: 1000}})
 	tpl.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
@@ -152,7 +152,7 @@ func TestNodeClassReadyOnceTemplateCPUAffinityIsRemoved(t *testing.T) {
 
 	reconcileInstanceTemplate(t, kubeClient, nodeClass)
 
-	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionInstanceTemplateReady)
+	ready := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateReady)
 	assert.True(t, ready.IsTrue())
 	assert.Equal(t, []v1alpha1.TemplatePlacement{{Region: "region-1", Zone: "zone-1", TemplateID: 1000}}, nodeClass.TemplatePlacements("region-1"))
 }

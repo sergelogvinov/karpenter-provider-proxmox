@@ -100,9 +100,9 @@ Status:
     Last Transition Time:  2025-09-13T03:28:47Z
     Message:
     Observed Generation:   49
-    Reason:                InstanceMetadataOptionsReady
+    Reason:                MetadataReady
     Status:                True
-    Type:                  InstanceMetadataOptionsReady
+    Type:                  MetadataReady
     Last Transition Time:  2025-09-15T05:12:05Z
     Message:
     Observed Generation:   49

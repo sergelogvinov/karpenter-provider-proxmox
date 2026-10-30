@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -52,6 +53,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/version"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -216,7 +218,9 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 
 	ctx := options.ToContext(t.Context(), operatorOptions)
 
-	capacity := cloudcapacity.NewProvider(ctx, pool, nil)
+	privileges := config.Privileges{testRegion: !setup.nonRoot}
+
+	capacity := cloudcapacity.NewProvider(ctx, pool, privileges)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
 	require.NoError(t, capacity.SyncNodeStorageCapacity(ctx))
 
@@ -236,11 +240,20 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	)
 	kube.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{GitVersion: "v1.34.0"}
 
-	instanceTypes := instancetype.NewDefaultProvider(ctx, capacity, crfake.NewClientBuilder().Build())
+	// The node class's template has the hugepages of the zones' pool, so that without root it offers the NUMA type.
+	scheme := runtime.NewScheme()
+	require.NoError(t, v1alpha1.AddToScheme(scheme))
+
+	vmTemplate := &v1alpha1.ProxmoxUnmanagedTemplate{Name: "talos"}
+	vmTemplate.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: lo.Ternary(setup.hugePages, "2", "")}
+	templateReader := crfake.NewClientBuilder().WithScheme(scheme).WithObjects(vmTemplate).Build()
+
+	instanceTypes := instancetype.NewDefaultProvider(ctx, capacity,
+		instancetype.Readers{API: crfake.NewClientBuilder().Build(), Cached: templateReader})
 	require.NoError(t, instanceTypes.UpdateInstanceTypes(ctx))
 
 	p, err := instance.NewProvider(ctx, kube, bootstrap.NewProvider(ctx, kube), pool, capacity,
-		nodeipam.NewDefaultProvider(ctx, capacity), templates, instanceTypes, config.Privileges{testRegion: !setup.nonRoot})
+		nodeipam.NewDefaultProvider(ctx, capacity), templates, instanceTypes, privileges)
 	require.NoError(t, err)
 
 	size := resource.MustParse("10G")
@@ -248,10 +261,11 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 	nodeClass := &v1alpha1.ProxmoxNodeClass{
 		Name: "default",
 		Spec: v1alpha1.ProxmoxNodeClassSpec{
-			BootDevice:     &v1alpha1.BlockDevice{Size: &size},
-			Tags:           []string{"karpenter", "web"},
-			SecurityGroups: []v1alpha1.SecurityGroups{{Name: "sg-web", Interface: "net0"}, {Name: "sg-ssh"}},
-			ResourcePool:   "karpenter",
+			InstanceTemplateRef: &v1alpha1.InstanceTemplateClassReference{Kind: "ProxmoxUnmanagedTemplate", Name: "talos"},
+			BootDevice:          &v1alpha1.BlockDevice{Size: &size},
+			Tags:                []string{"karpenter", "web"},
+			SecurityGroups:      []v1alpha1.SecurityGroups{{Name: "sg-web", Interface: "net0"}, {Name: "sg-ssh"}},
+			ResourcePool:        "karpenter",
 			MetadataOptions: &v1alpha1.MetadataOptions{
 				Type:         setup.metadataType,
 				TemplatesRef: &corev1.SecretReference{Name: "cloud-init", Namespace: metav1.NamespaceSystem},

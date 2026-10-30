@@ -324,6 +324,11 @@ func (z *Zone) Fit(p Policy, vm VM) (Fit, error) {
 	}, nil
 }
 
+// HugePageSize is hugePageSize, in bytes.
+func (z *Zone) HugePageSize() uint64 {
+	return z.hugePageSize
+}
+
 // Available is what a new shared VM could still get under p, clamped at zero.
 // A bad CPU overcommit ratio offers nothing.
 func (z *Zone) Available(p Policy) Capacity {
