@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/go-logr/logr"
+	"github.com/samber/lo"
 	"go.uber.org/multierr"
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
@@ -93,6 +94,11 @@ type InstanceTemplateInfo struct {
 	TemplateStorageID string
 	// Status of the template, e.g. "available", "disabled", etc.
 	Status string
+	// Hugepages is the hugepages key of the VM config ("2", "1024"
+	// or "any"), empty when it has none.
+	Hugepages string
+	// Affinity reports whether the affinity key of the VM config is set.
+	Affinity bool
 }
 
 // CreateResult is what Create left in Proxmox for one ProxmoxTemplate.
@@ -289,18 +295,28 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter ...func(*In
 	instanceTemplates := []InstanceTemplateInfo{}
 
 	for _, region := range p.pool.List() {
-		for _, info := range p.instanceTemplate[region] {
-			if info.Status == InstanceTemplateStatusAvailable {
-				for _, f := range filter {
-					if f(&info) {
-						instanceTemplates = append(instanceTemplates, info)
-					}
-				}
-			}
-		}
+		instanceTemplates = append(instanceTemplates, Filter(p.instanceTemplate[region], filter...)...)
 	}
 
 	return instanceTemplates
+}
+
+// Filter returns the available templates that match every filter, in order.
+// ListWithFilter lists the cached templates through it.
+func Filter(templates []InstanceTemplateInfo, filter ...func(*InstanceTemplateInfo) bool) []InstanceTemplateInfo {
+	matched := []InstanceTemplateInfo{}
+
+	for _, info := range templates {
+		if info.Status != InstanceTemplateStatusAvailable {
+			continue
+		}
+
+		if lo.EveryBy(filter, func(f func(*InstanceTemplateInfo) bool) bool { return f(&info) }) {
+			matched = append(matched, info)
+		}
+	}
+
+	return matched
 }
 
 func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...string) error {
@@ -371,8 +387,9 @@ func (p *DefaultProvider) SyncInstanceTemplates(ctx context.Context, regions ...
 
 // newInstanceTemplateInfo describes the VM template vmid in zone from its
 // config: its template hash, whether its description carries one, its tags,
-// and the storage of its disks. A template whose disks span several storages
-// gets no storage and the status InstanceTemplateStatusMultipleStorageIDs.
+// its hugepages and affinity keys, and the storage of its disks. A
+// template whose disks span several storages gets no storage and the status
+// InstanceTemplateStatusMultipleStorageIDs.
 func newInstanceTemplateInfo(region, zone string, vmid int, cfg *qemu.Config) InstanceTemplateInfo {
 	hash, described := templateHash(vmid, cfg)
 
@@ -384,6 +401,11 @@ func newInstanceTemplateInfo(region, zone string, vmid int, cfg *qemu.Config) In
 		TemplateHash:    hash,
 		HasTemplateHash: described,
 		Status:          InstanceTemplateStatusAvailable,
+		Affinity:        cfg.Affinity != "",
+	}
+
+	if cfg.Hugepages != nil {
+		info.Hugepages = *cfg.Hugepages
 	}
 
 	if cfg.Tags != nil {

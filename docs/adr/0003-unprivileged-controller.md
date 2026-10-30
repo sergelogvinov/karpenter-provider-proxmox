@@ -21,7 +21,7 @@ A NUMA NodePool therefore uses its own NodeClass whose template, a `ProxmoxUnman
 
 Without root, the proxmox-scheduler is required for pinned placement: the `affinity` option on a VM is no longer the source of truth, the description token is, and nothing pins a VM on a host where the scheduler is not running. The controller logs a warning for a pinned zone without a node-capacity guest, but cannot prove the scheduler is alive.
 
-The template becomes part of the placement contract: a NodeClass is valid only for the instance types its template fits, so operators keep separate NodeClasses for NUMA and regular NodePools in hugepage zones.
+The template becomes part of the placement contract: a NodeClass is valid only for the instance types its template fits, so operators keep separate NodeClasses for NUMA and regular NodePools in hugepage zones. The template records the `hugepages` and `affinity` its VM templates share in `status.template`, and a `ProxmoxVirtualMachineTemplateConsistent` condition on the template, not the NodeClass and not part of Ready, turns false when its VM templates disagree.
 
 Two Proxmox behaviours are assumed and must hold on supported PVE versions: `numaN` `hostnodes` needs no root, and an API token of `root@pam` does not pass the root-only check. If root tokens do pass, privilege becomes "the user is `root@pam`, with or without a token"; if `hostnodes` turns out to need root, NUMA slots need one template per NUMA node and this decision is reopened.
 

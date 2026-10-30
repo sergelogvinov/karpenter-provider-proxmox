@@ -109,10 +109,11 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 }
 
 // syncTemplates records the placements of the VM templates that match the
-// spec by name, region and tags, and the outcome in the Ready condition.
+// spec by name, region and tags, the hugepages and affinity keys of their
+// VM config, and the outcome in the Ready condition.
 func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.ProxmoxUnmanagedTemplate) reconcile.Result {
 	if err := templateClass.Validate(); err != nil {
-		templateClass.SetTemplatePlacements(nil)
+		templateClass.SetVMTemplates(nil)
 		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplateValidation", err.Error())
 
 		return reconcile.Result{}
@@ -137,18 +138,13 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 		return true
 	})
 	if len(templates) == 0 {
-		templateClass.SetTemplatePlacements(nil)
+		templateClass.SetVMTemplates(nil)
 		templateClass.StatusConditions().SetFalse(v1alpha1.ConditionTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}
 	}
 
-	placements := make([]v1alpha1.TemplatePlacement, 0, len(templates))
-	for _, template := range templates {
-		placements = append(placements, template.Placement())
-	}
-
-	templateClass.SetTemplatePlacements(placements)
+	templateClass.SetVMTemplates(instancetemplate.PlacedVMTemplates(templates))
 	templateClass.StatusConditions().SetTrue(v1alpha1.ConditionTemplateReady)
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}
