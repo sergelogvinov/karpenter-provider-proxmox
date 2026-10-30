@@ -74,17 +74,7 @@ func (p *fakeProvider) SyncInstanceTemplates(_ context.Context, _ ...string) err
 }
 
 func (p *fakeProvider) ListWithFilter(_ context.Context, filter ...func(*instancetemplate.InstanceTemplateInfo) bool) []instancetemplate.InstanceTemplateInfo {
-	templates := []instancetemplate.InstanceTemplateInfo{}
-
-	for _, info := range p.inventory {
-		for _, f := range filter {
-			if f(&info) {
-				templates = append(templates, info)
-			}
-		}
-	}
-
-	return templates
+	return instancetemplate.Filter(p.inventory, filter...)
 }
 
 func newTemplate(spec v1alpha1.ProxmoxUnmanagedTemplateSpec) *v1alpha1.ProxmoxUnmanagedTemplate {
@@ -207,6 +197,125 @@ func TestSyncFailureKeepsStatus(t *testing.T) {
 	tpl = get(t, kubeClient)
 	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement()}, tpl.TemplatePlacements())
 	assert.Equal(t, 5*time.Minute, requeue)
+}
+
+func TestVMTemplateWithoutHugepagesOrAffinity(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, talosZone2}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{}, tpl.Status.Template)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent).IsTrue())
+}
+
+func TestVMTemplateWithHugepagesAndAffinity(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	zone1, zone2 := talosZone1, talosZone2
+	zone1.Hugepages, zone1.Affinity = "1024", true
+	zone2.Hugepages, zone2.Affinity = "1024", true
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{zone1, zone2}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Hugepages: "1024", Affinity: true}, tpl.Status.Template)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent).IsTrue())
+}
+
+func TestVMTemplateRefreshesWhenItsConfigChanges(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	provider.inventory[0].Hugepages = "2"
+
+	_, err = reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Hugepages: "2"}, get(t, kubeClient).Status.Template)
+}
+
+func TestDisagreeingVMTemplatesRaiseCondition(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"})
+	tpl.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: "2"}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+
+	zone2 := talosZone2
+	zone2.Hugepages = "2"
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, zone2}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+
+	consistent := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent)
+	assert.True(t, consistent.IsFalse())
+	assert.Equal(t, "VMTemplatesDisagree", consistent.Reason)
+	assert.Contains(t, consistent.Message, "region-1/zone-1/1000: hugepages=none affinity=false")
+	assert.Contains(t, consistent.Message, "region-1/zone-2/1001: hugepages=2 affinity=false")
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue(), "disagreement does not make the template unready")
+}
+
+func TestNoMatchClearsVMTemplate(t *testing.T) {
+	tpl := newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{Tags: []string{"flatcar"}})
+	tpl.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: "2"}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+	assert.Nil(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent))
+}
+
+// A tags-only selector can match several VM templates in one zone; they are
+// compared like VM templates in different zones.
+func TestDisagreeingVMTemplatesInOneZoneRaiseCondition(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{Tags: []string{"talos"}}), interceptor.Funcs{})
+
+	other := talosZone1
+	other.Name, other.TemplateID, other.Affinity = "talos-numa", 1003, true
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, other}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+
+	consistent := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent)
+	assert.True(t, consistent.IsFalse())
+	assert.Contains(t, consistent.Message, "region-1/zone-1/1000: hugepages=none affinity=false")
+	assert.Contains(t, consistent.Message, "region-1/zone-1/1003: hugepages=none affinity=true")
+}
+
+// Unavailable VM templates are not listed, even when the selector matches them.
+func TestUnavailableVMTemplateIsNotMatched(t *testing.T) {
+	kubeClient := newKubeClient(t, newTemplate(v1alpha1.ProxmoxUnmanagedTemplateSpec{TemplateName: "talos"}), interceptor.Funcs{})
+
+	disabled := talosZone2
+	disabled.Status, disabled.Hugepages = instancetemplate.InstanceTemplateStatusMultipleStorageIDs, "2"
+	provider := &fakeProvider{inventory: []instancetemplate.InstanceTemplateInfo{talosZone1, disabled}}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl := get(t, kubeClient)
+	assert.Equal(t, []v1alpha1.TemplatePlacement{talosZone1.Placement()}, tpl.TemplatePlacements())
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{}, tpl.Status.Template)
 }
 
 func TestStatusConflictRequeues(t *testing.T) {

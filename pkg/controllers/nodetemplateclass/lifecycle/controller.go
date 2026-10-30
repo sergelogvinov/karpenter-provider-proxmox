@@ -152,7 +152,8 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 		if err != nil {
 			log.FromContext(ctx).Error(err, "Failed to delete outdated Proxmox Templates", "templateClass", templateClass.Name)
 
-			templateClass.SetTemplatePlacements(remaining)
+			// Delete did not refresh the VM template cache.
+			templateClass.SetVMTemplates(c.vmTemplates(ctx, remaining, nil))
 			templateClass.StatusConditions().SetFalse(
 				v1alpha1.ConditionTemplateReady,
 				NodeTemplateClassResolutionReason,
@@ -189,6 +190,8 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 
 	c.deleteStale(ctx, templateClass, current, created)
 
+	templateClass.SetVMTemplates(c.vmTemplates(ctx, templateClass.TemplatePlacements(), created.Targets))
+
 	// Every placement in status needs the in-place fields, not only the ones
 	// Create returned, or a zone that failed in this pass would never get them.
 	reused, _ := lo.Difference(templateClass.TemplatePlacements(), created.Created)
@@ -210,6 +213,28 @@ func (c *Controller) syncTemplates(ctx context.Context, templateClass *v1alpha1.
 	}
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, reused
+}
+
+// vmTemplates pairs each of placements with the hugepages and affinity keys
+// of its VM template, read from the VM template cache. Only the regions in
+// synced, the ones Create refreshed in this pass, are read: in any other
+// region, or when the cache does not list the VM template, the keys are
+// unknown.
+func (c *Controller) vmTemplates(ctx context.Context, placements []v1alpha1.TemplatePlacement, synced map[string][]string) []v1alpha1.PlacedVMTemplate {
+	listed := instancetemplate.PlacedVMTemplates(c.instanceTemplateProvider.ListWithFilter(ctx, func(info *instancetemplate.InstanceTemplateInfo) bool {
+		_, ok := synced[info.Region]
+
+		return ok && slices.Contains(placements, info.Placement())
+	}))
+
+	return lo.Map(placements, func(p v1alpha1.TemplatePlacement, _ int) v1alpha1.PlacedVMTemplate {
+		found, ok := lo.Find(listed, func(t v1alpha1.PlacedVMTemplate) bool { return t.Placement == p })
+		if !ok {
+			return v1alpha1.PlacedVMTemplate{Placement: p}
+		}
+
+		return found
+	})
 }
 
 // deleteStale deletes the VM templates in zones the spec no longer targets.

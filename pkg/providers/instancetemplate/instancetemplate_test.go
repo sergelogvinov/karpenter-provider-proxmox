@@ -425,3 +425,49 @@ func TestCreateOnSharedStorageIgnoresTemplateItDidNotCreate(t *testing.T) {
 
 	assert.Equal(t, map[string][]string{region: {"pve-1"}}, result.Targets)
 }
+
+// TestSyncReadsHugepagesAndAffinity lists VM templates with and without the
+// hugepages and affinity options; each carries the options of its own config.
+func TestSyncReadsHugepagesAndAffinity(t *testing.T) {
+	t.Parallel()
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes("pve-1"))
+	cluster.Node("pve-1").AddVM(1000, &qemu.Config{Name: "plain", Template: new(true)})
+	cluster.Node("pve-1").AddVM(1001, &qemu.Config{Name: "numa", Template: new(true), Hugepages: new("1024"), Affinity: "0-3"})
+
+	p := newProvider(t, cluster, &fakeCloudCapacity{})
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	templates := p.ListWithFilter(context.Background(), func(*instancetemplate.InstanceTemplateInfo) bool { return true })
+	require.Len(t, templates, 2)
+
+	byName := map[string]instancetemplate.InstanceTemplateInfo{}
+	for _, info := range templates {
+		byName[info.Name] = info
+	}
+
+	assert.Empty(t, byName["plain"].Hugepages)
+	assert.False(t, byName["plain"].Affinity)
+	assert.Equal(t, "1024", byName["numa"].Hugepages)
+	assert.True(t, byName["numa"].Affinity)
+}
+
+// TestListWithFilterMatchesEveryFilter lists each VM template once, and only
+// when it matches every filter.
+func TestListWithFilterMatchesEveryFilter(t *testing.T) {
+	t.Parallel()
+
+	cluster := fakeapi.NewCluster(t, fakeapi.WithNodes("pve-1"))
+	cluster.Node("pve-1").AddVM(1000, &qemu.Config{Name: "talos", Template: new(true)})
+	cluster.Node("pve-1").AddVM(1001, &qemu.Config{Name: "ubuntu", Template: new(true)})
+
+	p := newProvider(t, cluster, &fakeCloudCapacity{})
+	require.NoError(t, p.SyncInstanceTemplates(context.Background()))
+
+	templates := p.ListWithFilter(context.Background(),
+		func(*instancetemplate.InstanceTemplateInfo) bool { return true },
+		func(info *instancetemplate.InstanceTemplateInfo) bool { return info.Name == "talos" },
+	)
+	require.Len(t, templates, 1)
+	assert.Equal(t, "talos", templates[0].Name)
+}

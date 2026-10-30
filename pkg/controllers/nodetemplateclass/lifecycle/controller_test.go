@@ -56,6 +56,7 @@ type fakeProvider struct {
 	deleteErr error
 	updateErr error
 	onCreate  func()
+	inventory []instancetemplate.InstanceTemplateInfo
 
 	calls   []string
 	deleted []v1alpha1.TemplatePlacement
@@ -111,6 +112,18 @@ func (p *fakeProvider) Update(_ context.Context, _ *v1alpha1.ProxmoxTemplate, pl
 	p.updated = append(p.updated, placements...)
 
 	return p.updateErr
+}
+
+func (p *fakeProvider) ListWithFilter(_ context.Context, filter ...func(*instancetemplate.InstanceTemplateInfo) bool) []instancetemplate.InstanceTemplateInfo {
+	return instancetemplate.Filter(p.inventory, filter...)
+}
+
+// vmTemplate is the listed VM template at placement p.
+func vmTemplate(p v1alpha1.TemplatePlacement, hugepages string, affinity bool) instancetemplate.InstanceTemplateInfo {
+	return instancetemplate.InstanceTemplateInfo{
+		Name: "talos", Region: p.Region, Zone: p.Zone, TemplateID: p.TemplateID, HasTemplateHash: true,
+		Status: instancetemplate.InstanceTemplateStatusAvailable, Hugepages: hugepages, Affinity: affinity,
+	}
 }
 
 func newTemplate() *v1alpha1.ProxmoxTemplate {
@@ -574,4 +587,151 @@ func TestInPlaceUpdateCoversFailedZone(t *testing.T) {
 	tpl = get(t, kubeClient)
 	assert.Equal(t, []v1alpha1.TemplatePlacement{placement, placement2}, provider.updated)
 	assert.Equal(t, tpl.InPlaceHash(), tpl.Annotations[v1alpha1.AnnotationProxmoxTemplateInPlaceUpdateHash])
+}
+
+func TestVMTemplateOptionsAreRecorded(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+
+	other := vmTemplate(v1alpha1.TemplatePlacement{Region: "region-1", Zone: "zone-1", TemplateID: 999}, "", true)
+	other.Name = "ubuntu"
+	provider := &fakeProvider{
+		result:    reused(placement, placement2),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "2", false), vmTemplate(placement2, "2", false), other},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Hugepages: "2"}, tpl.Status.Template)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent).IsTrue())
+}
+
+func TestVMTemplateWithoutHugepagesOrAffinityIsRecorded(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: "1024", Affinity: true}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    reused(placement),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "", false)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{}, get(t, kubeClient).Status.Template)
+}
+
+func TestDisagreeingVMTemplatesRaiseCondition(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placementR})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    reused(placement, placementR),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "", false), vmTemplate(placementR, "", true)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+
+	consistent := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent)
+	assert.True(t, consistent.IsFalse())
+	assert.Equal(t, "VMTemplatesDisagree", consistent.Reason)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
+}
+
+func TestVMTemplatesWithAffinityAgreeAcrossZones(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placement2})
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    reused(placement, placement2),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "1024", true), vmTemplate(placement2, "1024", true)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Hugepages: "1024", Affinity: true}, tpl.Status.Template)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent).IsTrue())
+}
+
+func TestVMTemplateRefreshesWhenItsConfigChanges(t *testing.T) {
+	kubeClient := newKubeClient(t, readyTemplate(), interceptor.Funcs{})
+	provider := &fakeProvider{
+		result:    reused(placement),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "", false)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	provider.inventory[0].Hugepages, provider.inventory[0].Affinity = "2", true
+
+	_, err = reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	assert.Equal(t, &v1alpha1.VMTemplateInfo{Hugepages: "2", Affinity: true}, get(t, kubeClient).Status.Template)
+}
+
+// A failed image replacement leaves the outdated VM templates, and Delete did
+// not refresh the cache, so their hugepages and affinity are unknown.
+func TestFailedImageReplacementLeavesVMTemplateUnknown(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.Status.ImageID = "talos-1.raw"
+	tpl.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: "2"}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		remaining: []v1alpha1.TemplatePlacement{placement},
+		deleteErr: errors.New("proxmox unavailable"),
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "2", false)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent).IsUnknown())
+	assert.Equal(t, []v1alpha1.TemplatePlacement{placement}, tpl.TemplatePlacements())
+}
+
+// Create did not refresh the cache of a region it did not resolve, so the
+// hugepages and affinity of the VM template there are unknown.
+func TestUnresolvedRegionLeavesVMTemplateUnknown(t *testing.T) {
+	tpl := readyTemplate()
+	tpl.SetTemplatePlacements([]v1alpha1.TemplatePlacement{placement, placementR})
+	tpl.Status.Template = &v1alpha1.VMTemplateInfo{Hugepages: "2"}
+
+	kubeClient := newKubeClient(t, tpl, interceptor.Funcs{})
+	provider := &fakeProvider{
+		result: instancetemplate.CreateResult{
+			Placements: []v1alpha1.TemplatePlacement{placement},
+			Targets:    targets(placement),
+			Unresolved: []string{"region-2"},
+		},
+		inventory: []instancetemplate.InstanceTemplateInfo{vmTemplate(placement, "2", false), vmTemplate(placementR, "2", false)},
+	}
+
+	_, err := reconcile(t, kubeClient, provider)
+	require.NoError(t, err)
+
+	tpl = get(t, kubeClient)
+	assert.Nil(t, tpl.Status.Template)
+
+	consistent := tpl.StatusConditions().Get(v1alpha1.ConditionTemplateConsistent)
+	assert.True(t, consistent.IsUnknown())
+	assert.Contains(t, consistent.Message, "region-2/zone-1/2000")
+	assert.True(t, tpl.StatusConditions().Get(v1alpha1.ConditionTemplateReady).IsTrue())
 }
