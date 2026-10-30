@@ -33,7 +33,7 @@ type nodeClaimUse struct {
 // listNodeClaimUses lists the instance types the cluster's NodeClaims use, each with its capacity type and where it runs.
 func (p *DefaultProvider) listNodeClaimUses(ctx context.Context) ([]nodeClaimUse, error) {
 	nodeClaims := &karpv1.NodeClaimList{}
-	if err := p.kubeClient.List(ctx, nodeClaims); err != nil {
+	if err := p.readers.API.List(ctx, nodeClaims); err != nil {
 		return nil, fmt.Errorf("listing NodeClaims, %w", err)
 	}
 

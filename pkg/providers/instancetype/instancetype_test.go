@@ -27,13 +27,20 @@ import (
 
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/go-proxmox-rest/fakeapi"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 )
 
@@ -91,6 +98,13 @@ type fixture struct {
 func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cluster), zones ...string) (*fixture, error) {
 	t.Helper()
 
+	return newFixtureAs(t, nil, policy, nodes, file, setup, zones...)
+}
+
+// newFixtureAs is newFixture with privileges telling whether the controller is root in region.
+func newFixtureAs(t *testing.T, privileges config.Privileges, policy, nodes, file string, setup func(*fakeapi.Cluster), zones ...string) (*fixture, error) {
+	t.Helper()
+
 	dir := t.TempDir()
 	settingsFile := filepath.Join(dir, "nodes.json")
 	require.NoError(t, os.WriteFile(settingsFile, []byte(nodes), 0o600))
@@ -127,11 +141,11 @@ func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cl
 	require.NoError(t, err)
 	pool.Set(region, cluster.Client(t))
 
-	capacity := cloudcapacity.NewProvider(ctx, pool, nil)
+	capacity := cloudcapacity.NewProvider(ctx, pool, privileges)
 	require.NoError(t, capacity.SyncNodeCapacity(ctx))
 
 	f := &fixture{t: t, ctx: ctx, nodesFile: settingsFile, typesFile: typesFile, capacity: capacity}
-	f.kube = fake.NewClientBuilder().WithInterceptorFuncs(interceptor.Funcs{
+	f.kube = fake.NewClientBuilder().WithScheme(testScheme(t)).WithInterceptorFuncs(interceptor.Funcs{
 		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			if f.listErr != nil {
 				return f.listErr
@@ -141,7 +155,7 @@ func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cl
 		},
 	}).Build()
 
-	f.p = instancetype.NewDefaultProvider(ctx, capacity, f.kube)
+	f.p = instancetype.NewDefaultProvider(ctx, capacity, instancetype.Readers{API: f.kube, Cached: f.kube})
 	if err := f.p.UpdateInstanceTypes(ctx); err != nil {
 		return nil, err
 	}
@@ -149,6 +163,19 @@ func newFixture(t *testing.T, policy, nodes, file string, setup func(*fakeapi.Cl
 	require.NoError(t, f.p.UpdateInstanceTypeOfferings(ctx))
 
 	return f, nil
+}
+
+// testScheme knows the NodeClaims and the Proxmox templates.
+func testScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+
+	s := runtime.NewScheme()
+	gv := schema.GroupVersion{Group: "karpenter.sh", Version: "v1"}
+	s.AddKnownTypes(gv, &karpv1.NodeClaim{}, &karpv1.NodeClaimList{})
+	metav1.AddToGroupVersion(s, gv)
+	require.NoError(t, v1alpha1.AddToScheme(s))
+
+	return s
 }
 
 // setHosts replaces the node settings file with nodes, then syncs the zones and refreshes the offerings.

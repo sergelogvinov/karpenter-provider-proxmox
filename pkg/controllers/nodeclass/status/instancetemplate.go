@@ -31,7 +31,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/types"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -47,10 +46,10 @@ type InstanceTemplate struct {
 }
 
 func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (reconcile.Result, error) {
-	template, err := i.resolveProxmoxTemplateFromNodeClass(ctx, nodeClass)
+	template, err := nodeClass.ReadTemplate(ctx, i.kubeClient)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template resource reference did not find")
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionNodeClassTemplateReady, "TemplatesNotFound", "Proxmox Template resource reference did not find")
 		}
 
 		return reconcile.Result{}, fmt.Errorf("resolving TemplateClass from nodeClass failed: %w", err)
@@ -88,17 +87,17 @@ func (i *InstanceTemplate) Reconcile(ctx context.Context, nodeClass *v1alpha1.Pr
 
 	if len(availablePlacements) == 0 {
 		if ready := templateReady(template); ready != nil && droppedForCPUAffinity(ready.Reason) {
-			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Message)
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionNodeClassTemplateReady, v1alpha1.ReasonTemplateCPUAffinitySet, ready.Message)
 
 			return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
 		}
 
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionInstanceTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
+		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionNodeClassTemplateReady, "TemplatesNotFound", "Proxmox Template did not match the node class requirements")
 
 		return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
 	}
 
-	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionInstanceTemplateReady)
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionNodeClassTemplateReady)
 
 	return reconcile.Result{RequeueAfter: templateScanPeriod}, nil
 }
@@ -118,33 +117,4 @@ func templateReady(template v1alpha1.ProxmoxCommonTemplate) *status.Condition {
 // no template placements may have lost them to it, e.g. in its region.
 func droppedForCPUAffinity(reason string) bool {
 	return reason == v1alpha1.ReasonTemplateCPUAffinitySet || reason == v1alpha1.ReasonTemplateCPUAffinityDropped
-}
-
-func (i *InstanceTemplate) resolveProxmoxTemplateFromNodeClass(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) (v1alpha1.ProxmoxCommonTemplate, error) {
-	ref := nodeClass.Spec.InstanceTemplateRef
-	if ref == nil {
-		return nil, fmt.Errorf("nodeClaim missing InstanceTemplateRef")
-	}
-
-	var obj client.Object
-
-	switch ref.Kind {
-	case "ProxmoxUnmanagedTemplate":
-		obj = &v1alpha1.ProxmoxUnmanagedTemplate{}
-	case "ProxmoxTemplate":
-		obj = &v1alpha1.ProxmoxTemplate{}
-	default:
-		return nil, fmt.Errorf("unsupported InstanceTemplateRef kind: %s", ref.Kind)
-	}
-
-	if err := i.kubeClient.Get(ctx, types.NamespacedName{Name: ref.Name}, obj); err != nil {
-		return nil, err
-	}
-
-	template, ok := obj.(v1alpha1.ProxmoxCommonTemplate)
-	if !ok {
-		return nil, fmt.Errorf("unsupported InstanceTemplateRef kind: %s", ref.Kind)
-	}
-
-	return template, nil
 }

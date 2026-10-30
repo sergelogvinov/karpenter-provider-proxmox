@@ -23,8 +23,9 @@ import (
 )
 
 const (
-	ConditionInstanceTemplateReady        = "InstanceTemplateReady"
-	ConditionInstanceMetadataOptionsReady = "InstanceMetadataOptionsReady"
+	ConditionNodeClassTemplateReady        = "TemplateReady"
+	ConditionNodeClassMetadataOptionsReady = "MetadataReady"
+	ConditionNodeClassTemplateCompatible   = "TemplateCompatible"
 )
 
 // ProxmoxNodeClassStatus defines the observed state of ProxmoxNodeClass
@@ -59,8 +60,8 @@ func (in *ProxmoxNodeClass) SetTemplatePlacements(placements []TemplatePlacement
 // StatusConditions returns the condition set for the status.Object interface
 func (in *ProxmoxNodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	conds := []string{
-		ConditionInstanceTemplateReady,
-		ConditionInstanceMetadataOptionsReady,
+		ConditionNodeClassTemplateReady,
+		ConditionNodeClassMetadataOptionsReady,
 	}
 
 	return status.NewReadyConditions(conds...).For(in, opts...)

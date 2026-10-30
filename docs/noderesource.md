@@ -295,4 +295,5 @@ With a hugepage pool:
 
 * Each NUMA node's usable memory is its pool, and `reservedmemory` is ignored: the host's own memory lies outside the pool.
 * NUMA types are sized on the pool, e.g. `n1.32VCPU-100GB` and `n2.16VCPU-50GB` for a pool of 100 GiB.
-* NUMA VMs are created with `hugepages` set to the pool's page size.
+* NUMA VMs are created with `hugepages` set to the pool's page size. Without root the controller cannot set it,
+  and the VM template must carry it, see [Hugepage templates without root](hugepages.md).

@@ -50,6 +50,14 @@ _Avoid_: mutable field
 The stages a ProxmoxTemplate's VM templates go through: created on each zone, replaced when a rebuild field changes, updated in place when only in-place fields change, removed from zones the spec no longer targets, and deleted with the ProxmoxTemplate. When one change touches both kinds of field, the replacement already carries the in-place fields.
 _Avoid_: template reconcile, template sync
 
+**Hugepage template**:
+A VM template whose `hugepages` is the page size of a hugepage pool, so that, without root, its clones get hugepages from the pool and launch NUMA types in hugepage zones.
+_Avoid_: NUMA template (an instance types file entry), hugepages-enabled template
+
+**Dropped offering**:
+An offering of an instance type that a node class does not list in a zone because, without root, its template cannot launch the instance type there. Dropping one never drifts a NodeClaim already running on it.
+_Avoid_: unavailable offering (an unavailable offering is still listed), filtered offering
+
 **Template placement**:
 One VM template on one zone of one region, stored in status fields as `region/zone/vmid` (`ProxmoxTemplate.status.zones`, `ProxmoxUnmanagedTemplate.status.zones`, `ProxmoxNodeClass.status.selectedZones`). Region and zone are required and vmid is positive; entries that don't parse are skipped.
 _Avoid_: zone (for the whole triple), template location
@@ -127,6 +135,10 @@ _Avoid_: numa instance type, slot template
 An instance type generated from a NUMA template for one slot shape, named `<family>.<vCPU>VCPU-<memory>GB` and sized exactly as the slot.
 _Avoid_: slot type, NUMA instance
 
+**Non-NUMA type**:
+An instance type that is not a NUMA type: a static type or a CPU share type.
+_Avoid_: regular type (a regular VM is never a CPU share VM)
+
 **Kept NUMA type**:
 A NUMA type that stays listed, with unavailable offerings, in a zone or capacity type it is no longer generated for, because a NodeClaim there still uses it; when its slot shape is gone from every zone it is rebuilt from its name and its family's NUMA template. It is dropped with its last NodeClaim.
 _Avoid_: stale type, orphan type
@@ -166,6 +178,10 @@ _Avoid_: oversubscription factor
 **Hugepage pool**:
 The memory a zone holds as preallocated hugepages of one size, per NUMA node; when a zone has one, the node-capacity guest's NUMA memory reports the pool, not ordinary memory.
 _Avoid_: hugepages memory, reserved memory
+
+**Hugepage zone**:
+A zone with a hugepage pool.
+_Avoid_: NUMA zone
 
 **Fit**:
 What placing a virtual machine in a zone would leave the zone with, worked out without reserving: how many NUMA nodes the virtual machine would span, and what share of the zone's scarcer resource, CPU or memory, would stay free. Spanning fewer NUMA nodes is always the better fit.

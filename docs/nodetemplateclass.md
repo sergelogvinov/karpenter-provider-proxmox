@@ -159,6 +159,9 @@ It then uses the matching templates to create VMs on nodes that support them.
 
 You can define as many different templates as needed, as long as they share the same name.
 
+Without root, NUMA types in a zone with a hugepage pool need a template with `hugepages` set, on its own NodeClass,
+see [Hugepage templates without root](hugepages.md).
+
 ### Example: manual
 
 The Proxmox Virtual Machine template:

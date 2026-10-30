@@ -69,6 +69,13 @@ type Provider interface {
 	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
 	// or under shared placement, which offers no NUMA slot.
 	Slots(region, zone string) []zonecapacity.SlotOffer
+	// HugePageSize is the page size, in bytes, of the zone's hugepage pool; 0 when the zone has none
+	// or was never synced. A zone missing from later syncs, so unavailable for placement, keeps the
+	// page size it was last synced with, so that what depends on the pool does not flip while the
+	// zone is out.
+	HugePageSize(region, zone string) uint64
+	// Root reports whether the controller logs in as root@pam in region (ADR 0003).
+	Root(region string) bool
 
 	GetStorage(region string, storage string, filter ...func(*NodeStorageCapacityInfo) bool) *NodeStorageCapacityInfo
 	GetNetwork(region string, node string, filter ...func(*NodeNetworkIfaceInfo) bool) *NodeNetworkIfaceInfo
@@ -84,6 +91,9 @@ type DefaultProvider struct {
 
 	muCapacityInfo sync.RWMutex
 	capacityInfo   map[string]NodeCapacityInfo
+	// hugePageSizes is the page size of each zone's hugepage pool as of the last sync that saw the
+	// zone, guarded by muCapacityInfo; a zone is never removed from it.
+	hugePageSizes map[string]uint64
 	// releasedDuringSync collects, per zone, the VMs released while a sync builds new zones,
 	// so the swap does not bring back VMs the build saw before their release.
 	releasedDuringSync map[string][]int
@@ -292,6 +302,16 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 
 	for key, info := range networkIfaceInfo {
 		log.V(1).Info("Node network interfaces available", "node", key, "ifaces", len(info.Ifaces))
+	}
+
+	if p.hugePageSizes == nil {
+		p.hugePageSizes = map[string]uint64{}
+	}
+
+	for key, info := range capacityInfo {
+		if !info.omitted && info.Capacity != nil {
+			p.hugePageSizes[key] = info.Capacity.HugePageSize()
+		}
 	}
 
 	p.capacityInfo = capacityInfo
@@ -522,6 +542,19 @@ func (p *DefaultProvider) Slots(region, zone string) []zonecapacity.SlotOffer {
 	}
 
 	return info.Capacity.Slots()
+}
+
+// HugePageSize implements Provider.HugePageSize.
+func (p *DefaultProvider) HugePageSize(region, zone string) uint64 {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	return p.hugePageSizes[zoneKey(region, zone)]
+}
+
+// Root reports whether the controller logs in as root@pam in region.
+func (p *DefaultProvider) Root(region string) bool {
+	return p.privileges.Root(region)
 }
 
 // warnNoNodeCapacityGuest warns when a zone under pinned placement has no node-capacity guest and the

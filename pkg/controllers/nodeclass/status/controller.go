@@ -47,6 +47,7 @@ type Controller struct {
 	kubeClient               client.Client
 	instanceTemplateProvider *InstanceTemplate
 	metadataOptions          *MetadataOptions
+	templateCompatible       *TemplateCompatible
 }
 
 // NewController constructs a controller instance
@@ -55,6 +56,7 @@ func NewController(kubeClient client.Client, cloudCapacityProvider cloudcapacity
 		kubeClient:               kubeClient,
 		instanceTemplateProvider: &InstanceTemplate{kubeClient: kubeClient, cloudCapacityProvider: cloudCapacityProvider},
 		metadataOptions:          &MetadataOptions{kubeClient: kubeClient},
+		templateCompatible:       &TemplateCompatible{kubeClient: kubeClient, cloudCapacityProvider: cloudCapacityProvider},
 	}
 }
 
@@ -75,6 +77,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 	for _, reconciler := range []nodeClassStatusReconciler{
 		c.instanceTemplateProvider,
 		c.metadataOptions,
+		c.templateCompatible,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClass)
 		errs = multierr.Append(errs, err)
