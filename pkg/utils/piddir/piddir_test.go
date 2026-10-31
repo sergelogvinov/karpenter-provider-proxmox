@@ -21,7 +21,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -30,11 +29,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	local "github.com/sergelogvinov/go-proxmox-local"
+	"github.com/sergelogvinov/go-proxmox-local/fakelocal"
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 )
-
-// deadPID is never a real process.
-const deadPID = 1<<31 - 1
 
 // recorder is a Handler that records what it is told, failing starts with startErr.
 type recorder struct {
@@ -81,7 +80,7 @@ func TestFileEventStartsAndStopsVM(t *testing.T) {
 	path := writePIDFile(t, dir, "101.pid", "4242\n")
 
 	rec := &recorder{}
-	d := New(dir, rec, logr.Discard())
+	d := New(fakelocal.New(t).Client().Qemu(), rec, logr.Discard())
 
 	require.NoError(t, d.Reconcile(t.Context(), nil, fileEvent(path, fsnotify.Create)))
 	require.NoError(t, d.Reconcile(t.Context(), nil, fileEvent(path, fsnotify.Write)))
@@ -95,7 +94,7 @@ func TestFileEventIgnoresOtherFiles(t *testing.T) {
 	dir := t.TempDir()
 
 	rec := &recorder{}
-	d := New(dir, rec, logr.Discard())
+	d := New(fakelocal.New(t).Client().Qemu(), rec, logr.Discard())
 
 	for _, name := range []string{"101.qmp", "abc.pid", "0.pid", "-5.pid"} {
 		path := writePIDFile(t, dir, name, "4242")
@@ -116,7 +115,7 @@ func TestFileEventRetriesUnreadablePID(t *testing.T) {
 	dir := t.TempDir()
 
 	rec := &recorder{}
-	d := New(dir, rec, logr.Discard())
+	d := New(fakelocal.New(t).Client().Qemu(), rec, logr.Discard())
 
 	empty := writePIDFile(t, dir, "101.pid", "")
 	assert.Error(t, d.Reconcile(t.Context(), nil, fileEvent(empty, fsnotify.Create)))
@@ -135,35 +134,65 @@ func TestFileEventReturnsStartError(t *testing.T) {
 
 	errNotReady := errors.New("no CPU threads yet")
 	rec := &recorder{startErr: errNotReady}
-	d := New(dir, rec, logr.Discard())
+	d := New(fakelocal.New(t).Client().Qemu(), rec, logr.Discard())
 
 	assert.ErrorIs(t, d.Reconcile(t.Context(), nil, fileEvent(path, fsnotify.Create)), errNotReady)
 }
 
-// TestSyncListsLiveVMs checks that a sync tells the handler only the VMs whose
-// process exists, skipping every file that is not a readable PID file.
-func TestSyncListsLiveVMs(t *testing.T) {
-	dir := t.TempDir()
-	live := os.Getpid()
+// TestSyncListsRunningVMs checks that a sync tells the handler only the VMs whose
+// QEMU process runs, never a stopped VM, a template or one whose PID was reused.
+func TestSyncListsRunningVMs(t *testing.T) {
+	f := fakelocal.New(t,
+		fakelocal.WithGuest(101, "name: running\n"),
+		fakelocal.WithGuest(102, "name: stopped\n"),
+		fakelocal.WithGuest(103, "name: template\ntemplate: 1\n"),
+		fakelocal.WithGuest(104, "name: reused-pid\n"),
+		fakelocal.WithRunning(101, 4101),
+		fakelocal.WithRunning(103, 4103),
+		fakelocal.WithRunning(999, 4104),
+	)
 
-	writePIDFile(t, dir, "101.pid", strconv.Itoa(live))
-	writePIDFile(t, dir, "102.pid", strconv.Itoa(deadPID))
-	writePIDFile(t, dir, "103.pid", "garbage")
-	writePIDFile(t, dir, "0.pid", strconv.Itoa(live))
-	writePIDFile(t, dir, "104.qmp", strconv.Itoa(live))
-	require.NoError(t, os.Mkdir(filepath.Join(dir, "105.pid"), 0o700))
+	// 104's PID file names the process that now runs VM 999.
+	runDir := f.Client().RunDir()
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "104.pid"), []byte("4104\n"), 0o600))
 
 	rec := &recorder{}
-	d := New(dir, rec, logr.Discard())
+	d := New(f.Client().Qemu(), rec, logr.Discard())
 
 	require.NoError(t, d.Reconcile(t.Context(), nil, syncEvent()))
 
-	assert.Equal(t, []map[int]int{{101: live}}, rec.running)
+	assert.Equal(t, []map[int]int{{101: 4101}}, rec.running)
+}
+
+// TestSyncFailsOnUnreadableConfig checks that a VM whose config cannot be read
+// fails the sync, so it is retried, rather than read as stopped.
+func TestSyncFailsOnUnreadableConfig(t *testing.T) {
+	f := fakelocal.New(t,
+		fakelocal.WithGuest(101, "name: running\n"),
+		fakelocal.WithRunning(101, 4101),
+	)
+
+	// A config path that reads as a directory fails the read.
+	target := t.TempDir()
+	require.NoError(t, os.Symlink(target, filepath.Join(f.Client().ConfigDir(), "qemu-server", "102.conf")))
+
+	rec := &recorder{}
+	d := New(f.Client().Qemu(), rec, logr.Discard())
+
+	err := d.Reconcile(t.Context(), nil, syncEvent())
+
+	var listErr *qemu.ListError
+	require.ErrorAs(t, err, &listErr)
+	assert.Contains(t, listErr.Skipped, 102)
+	assert.Empty(t, rec.running, "a failed sync never says which VMs run")
 }
 
 func TestSyncFailsWithoutDirectory(t *testing.T) {
+	client, err := local.New(local.WithRoot(t.TempDir()))
+	require.NoError(t, err)
+
 	rec := &recorder{}
-	d := New(filepath.Join(t.TempDir(), "missing"), rec, logr.Discard())
+	d := New(client.Qemu(), rec, logr.Discard())
 
 	assert.Error(t, d.Reconcile(t.Context(), nil, syncEvent()))
 	assert.Empty(t, rec.running, "a failed scan never says that no VM runs")
