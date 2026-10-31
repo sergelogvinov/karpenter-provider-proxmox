@@ -23,8 +23,6 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
 
-	"github.com/sergelogvinov/go-proxmox-rest/cluster"
-	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
@@ -85,41 +83,6 @@ func TestZoneCapacityReserveFillsRequest(t *testing.T) {
 	op = &resources.VMResources{ID: 2, CPUs: 1, Memory: gib}
 	require.NoError(t, zone.Reserve(op))
 	require.Equal(t, "0-0", op.NUMANodes[1].CPUs, "a single vCPU keeps the range form")
-}
-
-func TestVMFromConfig(t *testing.T) {
-	t.Parallel()
-
-	tags := qemu.Tags{"karpenter"}
-
-	vm, err := VMFromConfig(&cluster.Resource{VMID: 7, MaxCPU: 4, MaxMem: int64(8 * gib)}, &qemu.Config{
-		Name:        "worker-7",
-		Affinity:    "0-3",
-		Description: "Karpenter managed instance, affinity=0-3",
-		Tags:        &tags,
-		NUMA: map[int]qemu.NUMA{
-			0: {CPUIDs: []string{"0-3"}, HostNodes: []string{"1"}, Memory: new(8192)},
-		},
-	})
-	require.NoError(t, err)
-	require.Equal(t, zonecapacity.VM{
-		ID: 7, Name: "worker-7", CPUs: 4, Memory: 8 * gib,
-		Affinity:    "0-3",
-		Description: "Karpenter managed instance, affinity=0-3",
-		Tags:        []string{"karpenter"},
-		NUMAMemory:  map[int]uint64{1: 8 * gib},
-	}, vm)
-}
-
-func TestVMFromConfigLeavesAffinityToTheZone(t *testing.T) {
-	t.Parallel()
-
-	vm, err := VMFromConfig(&cluster.Resource{VMID: 7, MaxCPU: 2, MaxMem: int64(gib)}, &qemu.Config{Affinity: "0-x"})
-	require.NoError(t, err, "a field copy does not parse the affinity")
-	require.Equal(t, "0-x", vm.Affinity)
-
-	zone := newTestZone(t, sharedPolicy)
-	require.ErrorIs(t, zone.Track(vm), zonecapacity.ErrInvalid)
 }
 
 func noVMs(int) bool { return false }

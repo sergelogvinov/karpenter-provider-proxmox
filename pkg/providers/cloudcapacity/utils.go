@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/vmconfig"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -87,9 +88,13 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 			return fmt.Errorf("failed to get VM %d config for node %s in region %s: %w", vmr.VMID, i.Name, i.Region, err)
 		}
 
-		vm, err := resourcemanager.VMFromConfig(&vmr, cfg)
-		if err != nil {
-			return fmt.Errorf("failed to generate resource request for VM %d: %w", vmr.VMID, err)
+		vm, err := vmconfig.VM(vmr.VMID, cfg)
+
+		switch {
+		case errors.Is(err, vmconfig.ErrNUMAIgnored):
+			log.Info("Warning: VM has a numa entry that does not parse, its NUMA memory is ignored", "vmID", vmr.VMID, "reason", err.Error())
+		case err != nil:
+			return fmt.Errorf("failed to read VM %d config: %w", vmr.VMID, err)
 		}
 
 		err = i.Capacity.Track(vm)
