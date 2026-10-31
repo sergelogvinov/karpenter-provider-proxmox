@@ -53,7 +53,9 @@ func vmFromConfig(vmID int, cfg *qemu.Config) zonecapacity.VM {
 	}
 }
 
-func (r *SchedulerHandler) handleVMStart(ctx context.Context, vmID int, pid int) error {
+// VMStarted places a starting VM's threads and rebalances the unpinned CPUs. An error
+// means the VM is not ready to place yet, e.g. it has no vCPU threads, and is retried.
+func (r *SchedulerHandler) VMStarted(ctx context.Context, vmID int, pid int) error {
 	if !utilsys.ProcessExists(pid) {
 		r.logger.Info("Warning: VM does not exist or is not accessible", "vmID", vmID, "pid", pid)
 
@@ -163,8 +165,8 @@ func (r *SchedulerHandler) steerDeviceIRQs(vmID int, vmConfig *qemu.Config, cpus
 	}
 }
 
-// handleVMStop handles when a VM stops (PID file removed)
-func (r *SchedulerHandler) handleVMStop(ctx context.Context, vmID int) {
+// VMStopped releases a stopped VM's CPUs and rebalances the unpinned CPUs.
+func (r *SchedulerHandler) VMStopped(ctx context.Context, vmID int) {
 	r.logger.Info("Handling VM stop", "vmID", vmID)
 
 	r.applyMu.Lock()

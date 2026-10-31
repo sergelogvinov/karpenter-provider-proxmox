@@ -27,6 +27,7 @@ import (
 	"github.com/spf13/pflag"
 
 	local "github.com/sergelogvinov/go-proxmox-local"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/piddir"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
@@ -174,7 +175,7 @@ func scheduler(handler *SchedulerHandler, logger logr.Logger) error {
 	config.WatchPath = *watchPath
 	config.SyncDelay = *resyncInterval
 
-	rec, err := reconciler.NewReconciler(ctx, cancel, config, handler)
+	rec, err := reconciler.NewReconciler(ctx, cancel, config, piddir.New(*watchPath, handler, logger))
 	if err != nil {
 		logger.Error(err, "Failed to create reconciler")
 

@@ -23,26 +23,6 @@ import (
 	"strings"
 )
 
-func GetPidFromFile(filePath string) (int, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return 0, err
-	}
-
-	pidStr := strings.TrimSpace(string(data))
-
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return 0, err
-	}
-
-	if pid <= 0 {
-		return 0, fmt.Errorf("invalid PID %d in file %s", pid, filePath)
-	}
-
-	return pid, nil
-}
-
 func ProcessExists(pid int) bool {
 	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); os.IsNotExist(err) {
 		return false

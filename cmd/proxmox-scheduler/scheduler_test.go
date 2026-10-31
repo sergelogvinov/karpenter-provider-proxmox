@@ -97,7 +97,7 @@ func liveTopology(t *testing.T) *topology.Topology {
 // spawnFakeQemuThread starts a real, short-lived process whose main
 // thread's comm contains "CPU" — matching the filter
 // utilsys.GetProcessThreads(pid, "CPU") uses to find a QEMU guest's vCPU
-// threads — so handleVMStart's thread-affinity logic can be driven
+// threads — so VMStarted's thread-affinity logic can be driven
 // end-to-end against a real PID instead of a fabricated one. The shell
 // renames itself (comm survives that, unlike an exec) and then runs
 // sleep as its child; both are killed via their process group on
@@ -168,7 +168,7 @@ func TestSyncTracksWithoutApplying(t *testing.T) {
 	)
 	h := newHandler(t, f.Client(), tp, WithSharedPolicy(SharedPolicyNone), WithRebalanceDebounce(0))
 
-	h.syncRunning(t.Context(), map[int]int{100: deadPID, 101: deadPID, 102: deadPID})
+	h.VMsRunning(t.Context(), map[int]int{100: deadPID, 101: deadPID, 102: deadPID})
 
 	for id, want := range map[int]cpuset.CPUSet{100: cpuset.New(0, 4), 101: cpuset.New(), 102: cpuset.New()} {
 		vm, ok := h.tracker.get(id)
@@ -195,7 +195,7 @@ func TestHandleVMStopReleasesVM(t *testing.T) {
 	track(t, h, 101, 2, &qemu.Config{Cores: new(2), Affinity: "1,5"})
 	require.True(t, busyCPUs(h).Equals(cpuset.New(0, 1, 5)), "got %v", busyCPUs(h))
 
-	h.handleVMStop(t.Context(), 100)
+	h.VMStopped(t.Context(), 100)
 
 	_, ok := h.tracker.get(100)
 	assert.False(t, ok)
@@ -273,7 +273,7 @@ func TestScheduleRebalanceNoopWhenPolicyNone(t *testing.T) {
 }
 
 // TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity drives
-// handleVMStart end-to-end against a real process: with
+// VMStarted end-to-end against a real process: with
 // --shared-policy=none, an unaffined VM must be left
 // exactly as Proxmox started it — no provisional shared-pool mask
 // applied — matching the documented "ship dark" escape hatch.
@@ -282,7 +282,7 @@ func TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity(t *testing.T) {
 
 	f := fakelocal.New(t, fakelocal.WithGuest(100, "name: shared-vm\ncores: 1\n"))
 	reserved := cpuset.New(tp.CPUDetails.CPUs().List()[0])
-	// Reserve a CPU: if handleVMStart masked to the unpinned CPUs despite
+	// Reserve a CPU: if VMStarted masked to the unpinned CPUs despite
 	// SharedPolicyNone (the bug this test guards against), the mask
 	// would exclude the reserved CPU and so differ from the process's
 	// inherited (unrestricted) affinity — a masking bug that always
@@ -299,7 +299,7 @@ func TestHandleVMStartSharedPolicyNoneNeverTouchesAffinity(t *testing.T) {
 	before, err := utilsys.GetThreadAffinity(pid, threads[0])
 	require.NoError(t, err)
 
-	require.NoError(t, h.handleVMStart(t.Context(), 100, pid))
+	require.NoError(t, h.VMStarted(t.Context(), 100, pid))
 
 	after, err := utilsys.GetThreadAffinity(pid, threads[0])
 	require.NoError(t, err)
@@ -327,7 +327,7 @@ func TestHandleVMStartMasksSharedVMUnderPartitionPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, threads)
 
-	require.NoError(t, h.handleVMStart(t.Context(), 100, pid))
+	require.NoError(t, h.VMStarted(t.Context(), 100, pid))
 
 	after, err := utilsys.GetThreadAffinity(pid, threads[0])
 	require.NoError(t, err)
@@ -353,7 +353,7 @@ func TestHandleVMStartConfinesCPUShareVMUnderPolicyNone(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, threads)
 
-	require.NoError(t, h.handleVMStart(t.Context(), 301, pid))
+	require.NoError(t, h.VMStarted(t.Context(), 301, pid))
 
 	group := h.plan().Groups
 	require.Equal(t, 1, group.Size(), "a 1-vCPU group")
@@ -394,7 +394,7 @@ func TestSyncRebuildsCPUShareGroupsFromMasks(t *testing.T) {
 		running[id] = pid
 	}
 
-	h.syncRunning(t.Context(), running)
+	h.VMsRunning(t.Context(), running)
 
 	for _, id := range []int{301, 302} {
 		vm, ok := h.tracker.get(id)
