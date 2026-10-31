@@ -496,6 +496,7 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 		CPUs:              []int{1, 2, 4, 8, 16},
 		MemFactors:        []int{2, 3, 4, 8},
 		Storage:           30,
+		CPUShares:         []int{2},
 		NUMA:              []int{1, 2},
 		KubeletOverhead:   true,
 		SystemOverhead:    true,
@@ -511,6 +512,7 @@ func loadDefaultInstanceTypes() []*InstanceTypeStatic {
 			Capacity:     i.Capacity,
 			CapacityType: i.CapacityType,
 			Overhead:     copyOverhead(i.Overhead),
+			CPUShare:     i.CPUShare,
 			NUMA:         i.NUMA,
 		}
 

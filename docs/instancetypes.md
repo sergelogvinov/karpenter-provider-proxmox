@@ -22,7 +22,8 @@ Instance families are defined as follows:
 Instance types are named using the following convention: `<family>.<vCPU>VCPU-<memory>GB`.
 For example, `c1.4VCPU-8GB` represents an instance type from the `c1` family with `4` virtual CPUs and `8` GB of memory.
 
-The predefined list also has the `n1` and `n2` [NUMA templates](#numa-templates),
+The predefined list also has the `e2` [CPU share types](#cpu-share-types) of the same sizes,
+and the `n1` and `n2` [NUMA templates](#numa-templates),
 so hosts with the `static` node policy offer whole and half NUMA node types (see [NUMA types](#numa-types)).
 
 ## CPU share types
@@ -45,8 +46,8 @@ The digit after `e` is the number of seats, not a generation as in `c1` or `m1`.
   Karpenter therefore prefers CPU share types for any NodePool that allows them.
 * **Node policy.** CPU share types are offered with the `simple` and `static` node policies, and never with `simple-with-cpu-overcommit`
   (see [Node resource allocation](noderesource.md#cpu-share-types)).
-* **Opt-in.** CPU share types are not part of the predefined list. They exist only when the instance types file defines them (see below).
-  Once they do, every NodePool that names no instance family accepts them; a NodePool excludes them with a `NotIn` requirement (see below).
+* **Defaults.** The predefined list has the `e2` family; the `e3` and `e4` families exist only when the instance types file defines them (see below).
+  Every NodePool that names no instance family accepts them; a NodePool excludes them with a `NotIn` requirement (see below).
 
 Even vCPU counts (2, 4, 8) are recommended, so that a CPU share group covers whole physical cores.
 
@@ -75,7 +76,7 @@ spec:
           values: ["e2"]
 ```
 
-A NodePool that does not name a family accepts the CPU share types of the instance types file too, and Karpenter prefers them because they cost less.
+A NodePool that does not name a family accepts the CPU share types too, the predefined `e2` types included, and Karpenter prefers them because they cost less.
 A NodePool excludes the CPU share families with `NotIn`:
 
 ```yaml
