@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/samber/lo"
@@ -26,6 +27,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/vmconfig"
 
 	"k8s.io/utils/cpuset"
 )
@@ -38,19 +40,6 @@ func loadVMConfig(ctx context.Context, client *local.Client, vmID int) (*qemu.Co
 	}
 
 	return cfg, nil
-}
-
-// vmFromConfig is the zone's view of a VM config: a field copy, the zone parses it.
-func vmFromConfig(vmID int, cfg *qemu.Config) zonecapacity.VM {
-	return zonecapacity.VM{
-		ID:          vmID,
-		Name:        cfg.Name,
-		CPUs:        lo.FromPtr(cfg.Cores),
-		Memory:      uint64(max(memoryMB(cfg), 0)) << 20, //nolint:gosec // clamped at zero
-		Affinity:    cfg.Affinity,
-		Description: cfg.Description,
-		Tags:        lo.FromPtr(cfg.Tags),
-	}
 }
 
 // VMStarted places a starting VM's threads and rebalances the unpinned CPUs. An error
@@ -200,7 +189,16 @@ func (r *SchedulerHandler) trackVM(vmID, pid int, vmConfig *qemu.Config, fresh b
 		r.zone.Release(vmID)
 	}
 
-	return r.zone.Track(vmFromConfig(vmID, vmConfig))
+	vm, err := vmconfig.VM(vmID, vmConfig)
+
+	switch {
+	case errors.Is(err, vmconfig.ErrNUMAIgnored):
+		r.logger.Info("Warning: VM has a numa entry that does not parse, its NUMA memory is ignored", "vmID", vmID, "reason", err.Error())
+	case err != nil:
+		return err
+	}
+
+	return r.zone.Track(vm)
 }
 
 // forgetVM drops a stopped VM, returning what was tracked for it. Callers hold applyMu.

@@ -19,16 +19,11 @@ package resourcemanager
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/sergelogvinov/go-proxmox-rest/cluster"
-	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
-
-	"k8s.io/utils/cpuset"
 )
 
 // pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.
@@ -205,54 +200,6 @@ func (z *ZoneCapacity) String() string {
 
 	return fmt.Sprintf("VMs: %d, Pending: %d, CPU: Free: %d, Mem: %dM",
 		len(z.tracked), len(z.pending), free.CPUs, free.Memory/zonecapacity.MiB)
-}
-
-// VMFromConfig is a running VM as the zone reads it: a field copy of its listing entry and config.
-// The zone parses the affinity and the description; only the numaN memory is summed per host node,
-// split evenly across a numaN entry's host nodes.
-func VMFromConfig(vmr *cluster.Resource, cfg *qemu.Config) (zonecapacity.VM, error) {
-	if vmr == nil || cfg == nil {
-		return zonecapacity.VM{}, fmt.Errorf("virtual machine resource and config cannot be nil")
-	}
-
-	vm := zonecapacity.VM{
-		ID:          vmr.VMID,
-		Name:        vmr.Name,
-		CPUs:        vmr.MaxCPU,
-		Memory:      uint64(vmr.MaxMem),
-		Affinity:    cfg.Affinity,
-		Description: cfg.Description,
-		Tags:        vmr.Tags,
-	}
-
-	if cfg.Name != "" {
-		vm.Name = cfg.Name
-	}
-
-	if cfg.Tags != nil {
-		vm.Tags = *cfg.Tags
-	}
-
-	for idx, n := range cfg.NUMA {
-		if n.Memory == nil || *n.Memory <= 0 || len(n.HostNodes) == 0 {
-			continue
-		}
-
-		hostNodes, err := cpuset.Parse(strings.Join(n.HostNodes, ","))
-		if err != nil || hostNodes.IsEmpty() {
-			return zonecapacity.VM{}, fmt.Errorf("failed to parse host nodes of NUMA node numa%d: %v", idx, n.HostNodes)
-		}
-
-		if vm.NUMAMemory == nil {
-			vm.NUMAMemory = map[int]uint64{}
-		}
-
-		for _, node := range hostNodes.List() {
-			vm.NUMAMemory[node] += uint64(*n.Memory) / uint64(hostNodes.Size()) * zonecapacity.MiB
-		}
-	}
-
-	return vm, nil
 }
 
 // vmFromRequest is a VM request as the zone takes it.
