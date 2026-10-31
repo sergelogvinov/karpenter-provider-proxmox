@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.15.0...v0.16.0) (2026-10-31)
+
+
+### Features
+
+* add e2 CPU share types ([f76894b](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f76894b6f270f9c5e800a26538d506cd9afc729b))
+* drop VM templates with affinity from unmanaged templates without root ([26363e6](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/26363e65b26f328c67ea9fc53933045d788f9e9f)), closes [#298](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/298)
+* filter NodeClass offerings by the template's hugepages without root ([8ffcd8a](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/8ffcd8a76ca73cbcc456f98b785200e2b32afe21)), closes [#297](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/297)
+* launch without root, leaving affinity and hugepages unset ([2c1d024](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/2c1d024b7aa0c38547fd81a687d900af90f8fa7f)), closes [#295](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/295)
+* record template hugepages and affinity in status ([cdf2b66](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/cdf2b667c249e454070c9566bf6a088e1e3eedcb))
+* sync the running VMs from the qemu client ([a78d8b4](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/a78d8b46105b54e07e8fb37f2397549b7b7dea55))
+
+
+### Bug Fixes
+
+* goreleaser ([f82eb47](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/f82eb475fc354b24a95ad39981fada37b80f801a))
+* handle each VM start once with the qemu watch ([884d366](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/884d366fd8e8b1c9d9c12e7d9edd01a6632039be)), closes [#306](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/306)
+* ignore node-capacity templates and document config updates as PUT ([953da74](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/953da74ee03479289b9ea2ed96843de02f109cda)), closes [#295](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/295)
+
 ## [0.15.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.14.0...v0.15.0) (2026-10-30)
 
 
