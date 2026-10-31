@@ -154,8 +154,8 @@ github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031121343-db063922fa42 h
 github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031121343-db063922fa42/go.mod h1:4HtlCstuSO1B/RPRiLfTWGI4sysY1Ysa7AjbkIRJH5k=
 github.com/sergelogvinov/go-proxmox-pool v0.3.0 h1:apGziQ7fWMl3gR/hwy9+Hgp98ckTkuXRIAbAuWfEQRA=
 github.com/sergelogvinov/go-proxmox-pool v0.3.0/go.mod h1:LI+6k5tOgjRIin9pN41feLu9g9//D489sbL4l1IO50E=
-github.com/sergelogvinov/go-proxmox-rest v0.2.0 h1:PUA+KBXPZ0XIpV3oNF03kOTCSY+PJbDzLpdHXCdH6/E=
-github.com/sergelogvinov/go-proxmox-rest v0.2.0/go.mod h1:hVDS9Gq86JP9bpcD1H6IAda/QXJqZvuY06UhHiXJwEk=
+github.com/sergelogvinov/go-proxmox-rest v0.2.1-0.20261031143152-8da3e5d518a0 h1:OYR+6tb6WJ1KScsD1Qg9nBfQa9nhUFOCSrT0CleicBA=
+github.com/sergelogvinov/go-proxmox-rest v0.2.1-0.20261031143152-8da3e5d518a0/go.mod h1:hVDS9Gq86JP9bpcD1H6IAda/QXJqZvuY06UhHiXJwEk=
 github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
 github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
 github.com/spf13/cobra v1.10.2 h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=
