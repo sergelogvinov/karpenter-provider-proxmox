@@ -121,7 +121,7 @@ func main() {
 
 	showServerInfo(logger, serverInfo, tp)
 
-	client, err := local.New()
+	client, err := local.New(local.WithRunDir(*watchPath))
 	if err != nil {
 		logger.Error(err, "Failed to create Proxmox local client")
 		os.Exit(1)
@@ -156,13 +156,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := scheduler(handler, logger); err != nil {
+	if err := scheduler(client, handler, logger); err != nil {
 		logger.Error(err, "Reconciler encountered an error")
 		os.Exit(1)
 	}
 }
 
-func scheduler(handler *SchedulerHandler, logger logr.Logger) error {
+func scheduler(client *local.Client, handler *SchedulerHandler, logger logr.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -175,7 +175,7 @@ func scheduler(handler *SchedulerHandler, logger logr.Logger) error {
 	config.WatchPath = *watchPath
 	config.SyncDelay = *resyncInterval
 
-	rec, err := reconciler.NewReconciler(ctx, cancel, config, piddir.New(*watchPath, handler, logger))
+	rec, err := reconciler.NewReconciler(ctx, cancel, config, piddir.New(client.Qemu(), handler, logger))
 	if err != nil {
 		logger.Error(err, "Failed to create reconciler")
 

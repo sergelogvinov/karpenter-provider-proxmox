@@ -27,8 +27,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
-	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 )
 
 // pidFileExtension is the extension of a VM's PID file, named <vmid>.pid.
@@ -41,27 +41,30 @@ type Handler interface {
 	VMStarted(ctx context.Context, vmID, pid int) error
 	// VMStopped is called when VM vmID's PID file is removed.
 	VMStopped(ctx context.Context, vmID int)
-	// VMsRunning is called on every sync with each VM (ID to PID) whose process exists.
+	// VMsRunning is called on every sync with each running VM (ID to PID), and
+	// only when every VM's state is known.
 	VMsRunning(ctx context.Context, running map[int]int)
 }
 
 // Dir is the PID directory: a reconciler.Handler that reads the directory's file
-// events and sync scans as virtual machine events for a Handler.
+// events, and on a sync the running VMs, as virtual machine events for a Handler.
 type Dir struct {
-	dir     string
+	client  *qemu.Client
 	handler Handler
 	logger  logr.Logger
 }
 
 var _ reconciler.Handler = (*Dir)(nil)
 
-// New returns the PID directory dir, telling handler what it finds.
-func New(dir string, handler Handler, logger logr.Logger) *Dir {
-	return &Dir{dir: dir, handler: handler, logger: logger}
+// New returns the PID directory of client, whose run dir must be the directory
+// the reconciler watches, telling handler what it finds.
+func New(client *qemu.Client, handler Handler, logger logr.Logger) *Dir {
+	return &Dir{client: client, handler: handler, logger: logger}
 }
 
 // Reconcile turns a file event of a PID file into a start or stop, and a sync event
-// into the running VMs. Any other file and any other event is ignored.
+// into the running VMs. Any other file and any other event is ignored. A failed
+// sync tells the handler nothing and is retried.
 func (d *Dir) Reconcile(ctx context.Context, _ reconciler.EventSender, event reconciler.Event) error {
 	d.logger.V(4).Info("Processing event", "type", event.Type, "key", event.Key)
 
@@ -75,7 +78,7 @@ func (d *Dir) Reconcile(ctx context.Context, _ reconciler.EventSender, event rec
 		return d.fileEvent(ctx, fsEvent)
 
 	case reconciler.SyncEvent:
-		running, err := d.running()
+		running, err := d.running(ctx)
 		if err != nil {
 			d.logger.Error(err, "Failed to handle sync event")
 
@@ -114,39 +117,18 @@ func (d *Dir) fileEvent(ctx context.Context, event fsnotify.Event) error {
 	return nil
 }
 
-// running scans the directory for the VMs whose process exists, as VM ID to PID.
-func (d *Dir) running() (map[int]int, error) {
-	entries, err := os.ReadDir(d.dir)
+// running returns the running VMs, as VM ID to PID. It fails, rather than leave
+// a VM out, when some VM's config could not be read: that VM may well run.
+func (d *Dir) running(ctx context.Context) (map[int]int, error) {
+	guests, err := d.client.List(ctx, qemu.ListFilter{Status: qemu.VMStatusRunning, SkipTemplates: true})
 	if err != nil {
-		return nil, fmt.Errorf("failed to read PID directory %s: %w", d.dir, err)
+		return nil, fmt.Errorf("failed to list running VMs: %w", err)
 	}
 
-	running := make(map[int]int)
+	running := make(map[int]int, len(guests))
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		vmID, ok := vmIDOf(entry.Name())
-		if !ok {
-			continue
-		}
-
-		path := filepath.Join(d.dir, entry.Name())
-
-		pid, err := readPID(path)
-		if err != nil {
-			d.logger.Error(err, "Failed to read PID file", "file", path)
-
-			continue
-		}
-
-		if !utilsys.ProcessExists(pid) {
-			continue
-		}
-
-		running[vmID] = pid
+	for _, guest := range guests {
+		running[guest.VMID] = guest.PID
 	}
 
 	return running, nil

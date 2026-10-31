@@ -150,8 +150,8 @@ github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/samber/lo v1.53.0 h1:t975lj2py4kJPQ6haz1QMgtId2gtmfktACxIXArw3HM=
 github.com/samber/lo v1.53.0/go.mod h1:4+MXEGsJzbKGaUEQFKBq2xtfuznW9oz/WrgyzMzRoM0=
-github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261027095356-66bbb88ec28d h1:rLP3fLqtbXE9w5LarcXqNqwbqLSYJO6WEx2RI5XIcRE=
-github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261027095356-66bbb88ec28d/go.mod h1:4HtlCstuSO1B/RPRiLfTWGI4sysY1Ysa7AjbkIRJH5k=
+github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031121343-db063922fa42 h1:674UDHJHecJr+DqpDlhiylsdaXfZtFzqXQHEOQ+GnUo=
+github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031121343-db063922fa42/go.mod h1:4HtlCstuSO1B/RPRiLfTWGI4sysY1Ysa7AjbkIRJH5k=
 github.com/sergelogvinov/go-proxmox-pool v0.3.0 h1:apGziQ7fWMl3gR/hwy9+Hgp98ckTkuXRIAbAuWfEQRA=
 github.com/sergelogvinov/go-proxmox-pool v0.3.0/go.mod h1:LI+6k5tOgjRIin9pN41feLu9g9//D489sbL4l1IO50E=
 github.com/sergelogvinov/go-proxmox-rest v0.2.0 h1:PUA+KBXPZ0XIpV3oNF03kOTCSY+PJbDzLpdHXCdH6/E=
