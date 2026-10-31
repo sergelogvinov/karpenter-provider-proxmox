@@ -168,9 +168,8 @@ When Karpenter launches an `e` type:
    Karpenter managed instance, class=default, capacity-type=on-demand, cpushare=2
    ```
 
-On resync, `GetResourceFromVMConfig` (`pkg/proxmox/resources/vm/resources.go`) parses `cpushare=<N>` from the
-description into a new `VMResources.CPUShare` field, so VMs created by hand with the token are accounted the same
-way. A VM with both `affinity` and `cpushare` is treated as pinned and the token is ignored, with a warning.
+On resync, zone capacity (`pkg/zonecapacity`) parses `cpushare=<N>` from the description, so VMs created by hand
+with the token are accounted the same way. A VM with both `affinity` and `cpushare` is treated as pinned and the token is ignored, with a warning.
 
 A VM resized in place, or whose `cpushare` changes, simply moves to another size class on the next resync.
 

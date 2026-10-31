@@ -21,15 +21,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 )
 
-func TestNodeSettingsFromVM(t *testing.T) {
+// TestNodeSettingsFromGuest covers the merge of the node-capacity guest into the node
+// settings; nodecapacity.Decode covers reading the guest.
+func TestNodeSettingsFromGuest(t *testing.T) {
 	testCases := []struct { //nolint:dupl
 		name         string
-		vmr          *cluster.Resource
 		cfg          *qemu.Config
 		nodeSettings *settings.NodeSettings
 
@@ -37,42 +37,43 @@ func TestNodeSettingsFromVM(t *testing.T) {
 		error    error
 	}{
 		{
-			name: "VM with Affinity and NUMA nodes",
-			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 96, MaxMem: 124 * 4 * 1024 * 1024},
+			name: "the guest's NUMA nodes replace those the node status gave",
 			cfg: &qemu.Config{
-				Affinity: "0-11,48-59,12-23,60-71,24-35,72-83,36-47,84-95",
+				Affinity: "0-3,8-11",
 				NUMA: map[int]qemu.NUMA{
-					0: {CPUIDs: []string{"0-23"}, HostNodes: []string{"0"}, Memory: new(126976)},
-					1: {CPUIDs: []string{"24-47"}, HostNodes: []string{"1"}, Memory: new(126976)},
-					2: {CPUIDs: []string{"48-71"}, HostNodes: []string{"2"}, Memory: new(126976)},
-					3: {CPUIDs: []string{"72-95"}, HostNodes: []string{"3"}, Memory: new(126976)},
+					0: {CPUIDs: []string{"0-3"}, HostNodes: []string{"0"}, Memory: new(8192)},
 				},
 			},
-			nodeSettings: &settings.NodeSettings{},
-			expected: &settings.NodeSettings{
+			nodeSettings: &settings.NodeSettings{
+				ReservedMemory: 1024 * 1024 * 1024,
 				NUMANodes: settings.NUMANodes{
-					0: {
-						CPUs:    "0-11,48-59",
-						MemSize: 126976 * 1024 * 1024,
-					},
-					1: {
-						CPUs:    "12-23,60-71",
-						MemSize: 126976 * 1024 * 1024,
-					},
-					2: {
-						CPUs:    "24-35,72-83",
-						MemSize: 126976 * 1024 * 1024,
-					},
-					3: {
-						CPUs:    "36-47,84-95",
-						MemSize: 126976 * 1024 * 1024,
-					},
+					0: {CPUs: "0-7"},
+					1: {CPUs: "8-15"},
+				},
+			},
+			expected: &settings.NodeSettings{
+				ReservedMemory: 1024 * 1024 * 1024,
+				NUMANodes: settings.NUMANodes{
+					0: {CPUs: "0-3", MemSize: 8192 * 1024 * 1024},
+					1: {CPUs: "8-15"},
 				},
 			},
 		},
 		{
-			name: "VM with a hugepage pool and a NUMA node without pages",
-			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 8, MaxMem: 16 * 1024 * 1024 * 1024},
+			name: "a guest without NUMA nodes is one node of its affinity",
+			cfg: &qemu.Config{
+				Affinity: "0-7",
+				Memory:   &qemu.Memory{Current: new(16384)},
+			},
+			nodeSettings: &settings.NodeSettings{},
+			expected: &settings.NodeSettings{
+				NUMANodes: settings.NUMANodes{
+					0: {CPUs: "0-7", MemSize: 16384 * 1024 * 1024},
+				},
+			},
+		},
+		{
+			name: "a hugepage pool takes no host reserve",
 			cfg: &qemu.Config{
 				Affinity:  "0-1,4-5,2-3,6-7",
 				Hugepages: new("1024"),
@@ -96,8 +97,7 @@ func TestNodeSettingsFromVM(t *testing.T) {
 			},
 		},
 		{
-			name: "VM without a hugepage pool clears a stale page size",
-			vmr:  &cluster.Resource{VMID: 100, MaxCPU: 8, MaxMem: 16 * 1024 * 1024 * 1024},
+			name: "a guest without a hugepage pool clears a stale page size",
 			cfg: &qemu.Config{
 				Affinity: "0-7",
 				NUMA: map[int]qemu.NUMA{
@@ -119,7 +119,7 @@ func TestNodeSettingsFromVM(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := nodeSettingsFromVM(tc.vmr, tc.cfg, tc.nodeSettings)
+			err := nodeSettingsFromGuest(tc.cfg, tc.nodeSettings)
 			if tc.error != nil {
 				assert.EqualError(t, err, tc.error.Error())
 

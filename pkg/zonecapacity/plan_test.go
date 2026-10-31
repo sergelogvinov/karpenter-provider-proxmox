@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 
 	"k8s.io/utils/cpuset"
@@ -169,7 +170,7 @@ func TestPlanSkipsWhatItCannotPlace(t *testing.T) {
 
 	z := newZone(t, schedulerHost, 0, 32)
 	track(t, z,
-		zonecapacity.VM{ID: 9000, Name: zonecapacity.NodeCapacityName, Tags: []string{zonecapacity.NodeCapacityTag}, CPUs: 64, Memory: gib, Affinity: "0-63"},
+		zonecapacity.VM{ID: 9000, Name: nodecapacity.Name, Tags: []string{nodecapacity.Tag}, CPUs: 64, Memory: gib, Affinity: "0-63"},
 		zonecapacity.VM{ID: 100, CPUs: 2, Memory: gib, Affinity: "70-71"},
 	)
 	require.ErrorIs(t, z.Track(zonecapacity.VM{ID: 200, CPUs: 2, Memory: gib, Affinity: "x"}), zonecapacity.ErrInvalid)

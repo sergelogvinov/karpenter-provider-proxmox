@@ -53,12 +53,14 @@ It helps to optimize performance and power consumption based on allocated vCPU r
 The Proxmox Scheduler can be configured using feature flags passed as environment variables or configured in the `/etc/default/proxmox-scheduler` file.
 
 - `PROXMOX_FEATURE_FLAGS` - A comma-separated list of feature flags to enable or disable specific features. Available flags:
-  - `karpenter` - Enables topology discovery for Karpenter integration.
+  - `karpenter` - Creates the node-capacity guest, which describes the host's CPUs, NUMA nodes and hugepage pool to Karpenter.
 
 
 ### Flag: karpenter
 
-When the karpenter feature flag is enabled, the Proxmox Scheduler creates a virtual machine that represents the full available capacity of the host.
+When the karpenter feature flag is enabled, the Proxmox Scheduler creates the node-capacity guest: a virtual machine, never started, named `node-capacity` and tagged `karpenter`, that represents the full available capacity of the host.
+The scheduler writes it and the controller reads it through the same module, `pkg/zonecapacity/nodecapacity`.
+The guest leaves 1 GiB of each NUMA node to the host; the controller reserves a further 1 GiB, except in a zone with a hugepage pool, whose pool lies outside the host's own memory.
 
 The `affinity` and `numa[n]` parameters are used to expose the node topology (CPU and memory layout) to Karpenter.
 This allows the Karpenter scheduler to understand the physical characteristics of the node.

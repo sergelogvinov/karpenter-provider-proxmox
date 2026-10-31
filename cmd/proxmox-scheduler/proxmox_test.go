@@ -27,14 +27,15 @@ import (
 
 	"github.com/sergelogvinov/go-proxmox-local/fakelocal"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 )
 
-// TestCreateProxmoxTopologyDiscoveryVM drives createProxmoxTopologyDiscoveryVM
+// TestEnsureNodeCapacityGuest drives ensureNodeCapacityGuest
 // against a fakelocal node, with no coverage before this test existed
 // (docs/design.md §12 Phase 3, item 6): a first run creates the
 // node-capacity guest, and a second run against the same (now existing)
 // guest updates it in place rather than creating a second one.
-func TestCreateProxmoxTopologyDiscoveryVM(t *testing.T) {
+func TestEnsureNodeCapacityGuest(t *testing.T) {
 	serverInfo := &info.MachineInfo{
 		NumCores:       8,
 		MemoryCapacity: 16 * 1024 * 1024 * 1024, // 16 GiB
@@ -43,7 +44,7 @@ func TestCreateProxmoxTopologyDiscoveryVM(t *testing.T) {
 	f := fakelocal.New(t, fakelocal.WithQuorum(true), fakelocal.WithNextID(101))
 	client := f.Client()
 
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, serverInfo, nil))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, serverInfo, nil))
 
 	f.AssertRan("qm", "create", "101",
 		"--cores", "8",
@@ -73,7 +74,7 @@ func TestCreateProxmoxTopologyDiscoveryVM(t *testing.T) {
 	// idempotency bug (§2.4) broke: a uint64 memory value could never
 	// compare equal to the int a YAML decode produced, so this exact
 	// scenario ran `qm set --memory ...` on every resync.
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, serverInfo, nil))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, serverInfo, nil))
 
 	guests, err := client.Qemu().List(t.Context(), qemu.ListFilter{Name: "node-capacity"})
 	require.NoError(t, err)
@@ -86,177 +87,20 @@ func TestCreateProxmoxTopologyDiscoveryVM(t *testing.T) {
 	}
 }
 
-func TestBuildVMConfigHugepages(t *testing.T) {
-	const gib = 1024 * 1024 * 1024
-
-	pages1G := func(n uint64) []info.HugePagesInfo {
-		return []info.HugePagesInfo{{PageSize: hugepageSize1G, NumPages: n}}
-	}
-	pages2M := func(n uint64) []info.HugePagesInfo {
-		return []info.HugePagesInfo{{PageSize: hugepageSize2M, NumPages: n}}
-	}
-
-	tests := []struct {
-		name       string
-		serverInfo *info.MachineInfo
-		hugepages  *string
-		memoryMB   int
-		numaMB     map[int]int
-	}{
-		{
-			name: "no pool keeps ordinary memory less the host reserve",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib},
-					{Id: 1, Memory: 32 * gib},
-				},
-			},
-			memoryMB: 2 * 31 * 1024,
-			numaMB:   map[int]int{0: 31 * 1024, 1: 31 * 1024},
-		},
-		{
-			name: "1G pool reports each node's pages in NUMA memory only",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      pages1G(24),
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib, HugePages: pages1G(16)},
-					{Id: 1, Memory: 32 * gib, HugePages: pages1G(8)},
-				},
-			},
-			hugepages: new("1024"),
-			memoryMB:  2 * 31 * 1024,
-			numaMB:    map[int]int{0: 16 * 1024, 1: 8 * 1024},
-		},
-		{
-			name: "2M pool reports each node's pages",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      pages2M(1536),
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib, HugePages: pages2M(1024)},
-					{Id: 1, Memory: 32 * gib, HugePages: pages2M(512)},
-				},
-			},
-			hugepages: new("2"),
-			memoryMB:  2 * 31 * 1024,
-			numaMB:    map[int]int{0: 2 * 1024, 1: 1024},
-		},
-		{
-			name: "both sizes use the larger pool",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      append(pages1G(2), pages2M(2048)...),
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib, HugePages: append(pages1G(2), pages2M(1024)...)},
-					{Id: 1, Memory: 32 * gib, HugePages: pages2M(1024)},
-				},
-			},
-			hugepages: new("2"),
-			memoryMB:  2 * 31 * 1024,
-			numaMB:    map[int]int{0: 2 * 1024, 1: 2 * 1024},
-		},
-		{
-			name: "node without pages reports 0 and keeps its CPUs",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      pages1G(16),
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib, HugePages: pages1G(16)},
-					{Id: 1, Memory: 32 * gib},
-				},
-			},
-			hugepages: new("1024"),
-			memoryMB:  2 * 31 * 1024,
-			numaMB:    map[int]int{0: 16 * 1024, 1: 0},
-		},
-		{
-			name: "per-node pages are found without machine-wide counts",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib, HugePages: pages1G(4)},
-					{Id: 1, Memory: 32 * gib, HugePages: pages1G(4)},
-				},
-			},
-			hugepages: new("1024"),
-			memoryMB:  2 * 31 * 1024,
-			numaMB:    map[int]int{0: 4 * 1024, 1: 4 * 1024},
-		},
-		{
-			name: "machine-wide pages the NUMA nodes do not report are no pool",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      pages1G(8),
-				Topology: []info.Node{
-					{Id: 0, Memory: 32 * gib},
-					{Id: 1, Memory: 32 * gib},
-				},
-			},
-			memoryMB: 2 * 31 * 1024,
-			numaMB:   map[int]int{0: 31 * 1024, 1: 31 * 1024},
-		},
-		{
-			name: "no NUMA information keeps ordinary memory with the machine-wide pool",
-			serverInfo: &info.MachineInfo{
-				NumCores:       8,
-				MemoryCapacity: 64 * gib,
-				HugePages:      pages1G(8),
-			},
-			hugepages: new("1024"),
-			memoryMB:  64 * 1024,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := buildVMConfig(logr.Discard(), tt.serverInfo, dualNodeTopology())
-
-			assert.Equal(t, tt.hugepages, cfg.Hugepages)
-			require.NotNil(t, cfg.Memory)
-			assert.Equal(t, tt.memoryMB, *cfg.Memory.Current)
-
-			numaMB := make(map[int]int, len(cfg.NUMA))
-			for idx, n := range cfg.NUMA {
-				require.NotNil(t, n.Memory)
-				numaMB[idx] = *n.Memory
-			}
-
-			if tt.numaMB == nil {
-				assert.Empty(t, cfg.NUMA)
-
-				return
-			}
-
-			assert.Equal(t, tt.numaMB, numaMB)
-			assert.Equal(t, []string{"0-3"}, cfg.NUMA[0].CPUIDs)
-			assert.Equal(t, []string{"4-7"}, cfg.NUMA[1].CPUIDs)
-		})
-	}
-}
-
-// TestCreateProxmoxTopologyDiscoveryVMHugepages covers the hugepage pool
+// TestEnsureNodeCapacityGuestHugepages covers the hugepage pool
 // on the wire: a host with a pool writes hugepages and the per-node pool
 // (memory=0 included), and once the pool is gone the option is deleted
 // rather than left behind.
-func TestCreateProxmoxTopologyDiscoveryVMHugepages(t *testing.T) {
+func TestEnsureNodeCapacityGuestHugepages(t *testing.T) {
 	const gib = 1024 * 1024 * 1024
 
 	tp := dualNodeTopology()
 	withPool := &info.MachineInfo{
 		NumCores:       8,
 		MemoryCapacity: 64 * gib,
-		HugePages:      []info.HugePagesInfo{{PageSize: hugepageSize1G, NumPages: 16}},
+		HugePages:      []info.HugePagesInfo{{PageSize: nodecapacity.HugepageSize1G, NumPages: 16}},
 		Topology: []info.Node{
-			{Id: 0, Memory: 32 * gib, HugePages: []info.HugePagesInfo{{PageSize: hugepageSize1G, NumPages: 16}}},
+			{Id: 0, Memory: 32 * gib, HugePages: []info.HugePagesInfo{{PageSize: nodecapacity.HugepageSize1G, NumPages: 16}}},
 			{Id: 1, Memory: 32 * gib},
 		},
 	}
@@ -264,7 +108,7 @@ func TestCreateProxmoxTopologyDiscoveryVMHugepages(t *testing.T) {
 	f := fakelocal.New(t, fakelocal.WithQuorum(true), fakelocal.WithNextID(101))
 	client := f.Client()
 
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, withPool, tp))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, withPool, tp))
 
 	got := f.Guest(101)
 	require.NotNil(t, got.Hugepages)
@@ -284,7 +128,7 @@ func TestCreateProxmoxTopologyDiscoveryVMHugepages(t *testing.T) {
 
 	ran := len(f.Ran())
 
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, withoutPool, tp))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, withoutPool, tp))
 
 	// fakelocal does not apply --delete, so assert on the command sent.
 	deleted := false
@@ -303,14 +147,14 @@ func TestCreateProxmoxTopologyDiscoveryVMHugepages(t *testing.T) {
 	assert.Equal(t, 31*1024, *got.NUMA[0].Memory)
 }
 
-// TestCreateProxmoxTopologyDiscoveryVMMemory covers an update of the
+// TestEnsureNodeCapacityGuestMemory covers an update of the
 // existing guest: memory and each NUMA node's hugepage pool change
-// independently, and a NUMA node the host no longer reports is deleted.
-func TestCreateProxmoxTopologyDiscoveryVMMemory(t *testing.T) {
+// independently (nodecapacity.StaleOptions covers the options deleted).
+func TestEnsureNodeCapacityGuestMemory(t *testing.T) {
 	const gib = 1024 * 1024 * 1024
 
 	pages1G := func(n uint64) []info.HugePagesInfo {
-		return []info.HugePagesInfo{{PageSize: hugepageSize1G, NumPages: n}}
+		return []info.HugePagesInfo{{PageSize: nodecapacity.HugepageSize1G, NumPages: n}}
 	}
 
 	tp := dualNodeTopology()
@@ -327,7 +171,7 @@ func TestCreateProxmoxTopologyDiscoveryVMMemory(t *testing.T) {
 	f := fakelocal.New(t, fakelocal.WithQuorum(true), fakelocal.WithNextID(101))
 	client := f.Client()
 
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, before, tp))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, before, tp))
 
 	// Only memory changes: the hugepage pools stay the same.
 	memoryOnly := &info.MachineInfo{
@@ -342,7 +186,7 @@ func TestCreateProxmoxTopologyDiscoveryVMMemory(t *testing.T) {
 
 	ran := len(f.Ran())
 
-	require.NoError(t, createProxmoxTopologyDiscoveryVM(logr.Discard(), client, memoryOnly, tp))
+	require.NoError(t, ensureNodeCapacityGuest(logr.Discard(), client, memoryOnly, tp))
 
 	var set []string
 
@@ -362,12 +206,4 @@ func TestCreateProxmoxTopologyDiscoveryVMMemory(t *testing.T) {
 	assert.Equal(t, 2*23*1024, *got.Memory.Current)
 	assert.Equal(t, 8*1024, *got.NUMA[0].Memory)
 	assert.Equal(t, 8*1024, *got.NUMA[1].Memory)
-
-	assert.Equal(t, []string{"numa1"}, staleOptions(got, &qemu.Config{
-		Hugepages: got.Hugepages,
-		NUMA:      map[int]qemu.NUMA{0: got.NUMA[0]},
-	}))
-	assert.Equal(t, []string{"hugepages", "numa1"}, staleOptions(got, &qemu.Config{
-		NUMA: map[int]qemu.NUMA{0: got.NUMA[0]},
-	}))
 }

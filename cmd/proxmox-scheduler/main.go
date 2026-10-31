@@ -128,8 +128,8 @@ func main() {
 
 	if featureFlags.IsEnabled(FeatureKarpenter) {
 		if tp != nil && serverInfo != nil {
-			if err := createProxmoxTopologyDiscoveryVM(logger, client, serverInfo, tp); err != nil {
-				logger.Error(err, "Failed to create Proxmox VM")
+			if err := ensureNodeCapacityGuest(logger, client, serverInfo, tp); err != nil {
+				logger.Error(err, "Failed to create or update the node-capacity guest")
 			}
 		}
 	}
