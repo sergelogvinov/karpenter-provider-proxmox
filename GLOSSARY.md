@@ -119,6 +119,14 @@ _Avoid_: current affinity, assigned set
 The qemu-server directory where each running virtual machine has a `<vmid>.pid` file; the scheduler's record of which virtual machines run, and as which process.
 _Avoid_: watch path (for the concept), run dir
 
+**VM start**:
+A new qemu process for a virtual machine, confirmed as that virtual machine's and seen once; a later sighting of the same process is not a VM start, a new process is.
+_Avoid_: PID file event, create/write (for the start)
+
+**VM stop**:
+A virtual machine's PID file leaving the PID directory: its process is gone.
+_Avoid_: PID file removal (for the stop)
+
 **NUMA slot**:
 An aligned whole, half or quarter of one NUMA node's usable CPUs and memory; smaller slots nest inside larger ones.
 _Avoid_: partition, chunk
