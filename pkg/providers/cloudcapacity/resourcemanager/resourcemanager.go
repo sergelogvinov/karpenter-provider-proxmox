@@ -19,16 +19,15 @@ package resourcemanager
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
+	"maps"
 
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	vmresources "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources/vm"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
@@ -156,7 +155,7 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 		Node:          zone,
 		SkipTemplates: true,
 		Match: func(r *cluster.Resource) (bool, error) {
-			return zonecapacity.IsNodeCapacityGuest(r.Name, r.Tags), nil
+			return nodecapacity.IsGuest(r.Name, r.Tags), nil
 		},
 	})
 	if err != nil {
@@ -172,7 +171,7 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 		return nodeSettings, fmt.Errorf("failed to get VM config for node settings: %w", err)
 	}
 
-	err = nodeSettingsFromVM(&vmrs[0], cfg, &nodeSettings)
+	err = nodeSettingsFromGuest(cfg, &nodeSettings)
 	if err != nil {
 		return nodeSettings, fmt.Errorf("failed to get node settings from VM: %w", err)
 	}
@@ -180,72 +179,35 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 	return nodeSettings, nil
 }
 
-func nodeSettingsFromVM(vmr *cluster.Resource, cfg *qemu.Config, nodeSettings *settings.NodeSettings) error {
-	if vmr == nil || cfg == nil || nodeSettings == nil {
-		return fmt.Errorf("invalid input: vm and nodeSettings cannot be nil")
+// nodeSettingsFromGuest merges what the node-capacity guest says of its zone into
+// nodeSettings. The guest is the source of truth, so a pool it no longer has clears
+// the page size, and a pool takes no host reserve: the host's own memory lies
+// outside it.
+func nodeSettingsFromGuest(cfg *qemu.Config, nodeSettings *settings.NodeSettings) error {
+	if cfg == nil || nodeSettings == nil {
+		return fmt.Errorf("invalid input: config and nodeSettings cannot be nil")
 	}
 
-	opt, err := vmresources.GetResourceFromVMConfig(vmr, cfg)
+	guest, err := nodecapacity.Decode(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to get resources from VM config for node settings: %w", err)
+		return fmt.Errorf("failed to read the node-capacity guest: %w", err)
 	}
 
 	if nodeSettings.NUMANodes == nil {
-		nodeSettings.NUMANodes = make(settings.NUMANodes, len(opt.NUMANodes))
+		nodeSettings.NUMANodes = make(settings.NUMANodes, len(guest.NUMANodes))
 	}
 
-	// The node-capacity guest names its hugepage pool's page size in MiB
-	// ("2" or "1024"); its NUMA memory is then the pool, not ordinary memory.
-	// The guest is the source of truth, so a pool it no longer has clears
-	// the page size, and a pool takes no host reserve: the host's own
-	// memory lies outside it.
-	nodeSettings.HugePageSize = 0
-
-	if cfg.Hugepages != nil {
-		if pageSizeMB, err := strconv.ParseUint(*cfg.Hugepages, 10, 64); err == nil {
-			nodeSettings.HugePageSize = pageSizeMB * 1024 * 1024
-			nodeSettings.ReservedMemory = 0
-		}
+	nodeSettings.HugePageSize = guest.HugePageSize
+	if guest.HugePageSize > 0 {
+		nodeSettings.ReservedMemory = 0
 	}
 
-	cpuList := []int{}
+	maps.Copy(nodeSettings.NUMANodes, guest.NUMANodes)
 
-	for part := range strings.SplitSeq(opt.Affinity, ",") {
-		cpus, err := cpuset.Parse(part)
-		if err != nil {
-			return fmt.Errorf("failed to parse CPU affinity part %q: %w", part, err)
-		}
-
-		cpuList = append(cpuList, cpus.List()...)
-	}
-
-	for nodeID, numaNode := range opt.NUMANodes {
-		numaCPUs, err := cpuset.Parse(numaNode.CPUs)
-		if err != nil {
-			return fmt.Errorf("failed to parse NUMA node %d CPUs %q: %w", nodeID, numaNode.CPUs, err)
-		}
-
-		cpus := cpuset.New()
-
-		for _, c := range numaCPUs.List() {
-			if c >= len(cpuList) {
-				return fmt.Errorf("NUMA node %d CPU index %d exceeds affinity CPU list length %d", nodeID, c, len(cpuList))
-			}
-
-			cpus = cpus.Union(cpuset.New(cpuList[c]))
-		}
-
-		numaInfo := settings.NUMAInfo{
-			CPUs:    cpus.String(),
-			MemSize: numaNode.Memory * 1024 * 1024, // Convert from MiB to bytes
-		}
-		nodeSettings.NUMANodes[nodeID] = numaInfo
-	}
-
-	if len(nodeSettings.NUMANodes) == 0 && !opt.CPUSet.IsEmpty() {
+	if len(nodeSettings.NUMANodes) == 0 && !guest.CPUs.IsEmpty() {
 		nodeSettings.NUMANodes[0] = settings.NUMAInfo{
-			CPUs:    opt.CPUSet.String(),
-			MemSize: opt.Memory,
+			CPUs:    guest.CPUs.String(),
+			MemSize: guest.Memory,
 		}
 	}
 

@@ -18,25 +18,13 @@ package zonecapacity
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
+
 	"k8s.io/utils/cpuset"
 )
-
-// NodeCapacityName and NodeCapacityTag together identify the node-capacity guest, which describes
-// the host and is never a workload. Workload VMs often carry the `karpenter` tag too, so the tag
-// alone is not enough.
-const (
-	NodeCapacityName = "node-capacity"
-	NodeCapacityTag  = "karpenter"
-)
-
-// IsNodeCapacityGuest reports whether a guest of this name and tags is the node-capacity guest.
-func IsNodeCapacityGuest(name string, tags []string) bool {
-	return name == NodeCapacityName && slices.Contains(tags, NodeCapacityTag)
-}
 
 // affinityToken is the description token that carries a VM's host CPUs when the affinity option is unset.
 const affinityToken = "affinity="
@@ -105,7 +93,7 @@ type classified struct {
 func (vm VM) classify() (classified, error) {
 	shared := classified{class: classShared, cpus: cpuset.New()}
 
-	if IsNodeCapacityGuest(vm.Name, vm.Tags) {
+	if nodecapacity.IsGuest(vm.Name, vm.Tags) {
 		return classified{class: classIgnored, cpus: cpuset.New()}, nil
 	}
 

@@ -69,7 +69,7 @@ the placement of already-running VMs when the set of VMs on the host changes.
 | `pinned` | `affinity` set (config or description) and `cores == len(affinity)` | 1:1 vCPU→CPU pinning, exclusive ownership of those CPUs. Today's behaviour. |
 | `constrained` | `affinity` set but `cores != len(affinity)` | Mask all vCPU threads with the affinity set; CPUs are marked exclusive but not owned 1:1. Today these VMs are silently skipped. |
 | `shared` | no affinity | **New.** The scheduler computes a cpuset and applies it to all vCPU threads. |
-| `ignored` | VM in the karpenter capacity/topology discovery role (`tags: karpenter`), or a VM the daemon cannot read | Excluded from planning, and its CPUs are not treated as used. |
+| `ignored` | The node-capacity guest (named `node-capacity` and tagged `karpenter`), or a VM the daemon cannot read | Excluded from planning, and its CPUs are not treated as used. |
 
 The union of the CPU sets of `pinned` + `constrained` VMs is the **exclusive pool**. Everything else, minus
 the host-reserved CPUs, is the **shared pool**:

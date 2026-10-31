@@ -28,6 +28,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/network"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -73,7 +74,7 @@ func (i *NodeCapacityInfo) updateNodeCapacity(ctx context.Context, cl *proxmoxre
 		vmr := vms[idx]
 		i.vms[vmr.VMID] = true
 
-		if vmr.Template == 0 && zonecapacity.IsNodeCapacityGuest(vmr.Name, vmr.Tags) {
+		if vmr.Template == 0 && nodecapacity.IsGuest(vmr.Name, vmr.Tags) {
 			i.nodeCapacityGuest = true
 		}
 

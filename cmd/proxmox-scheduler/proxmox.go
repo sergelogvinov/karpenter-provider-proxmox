@@ -19,9 +19,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,12 +26,16 @@ import (
 
 	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
-func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, serverInfo *info.MachineInfo, tp *topology.Topology) error {
+// ensureNodeCapacityGuest creates the node-capacity guest for the host once the
+// cluster has quorum, or updates the existing one, deleting the options it no
+// longer sets.
+func ensureNodeCapacityGuest(logger logr.Logger, client *local.Client, serverInfo *info.MachineInfo, tp *topology.Topology) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -60,12 +61,12 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 
 	// List never errors just because nothing matches (empty slice, no
 	// error)
-	guests, err := client.Qemu().List(ctx, qemu.ListFilter{Name: "node-capacity"})
+	guests, err := client.Qemu().List(ctx, qemu.ListFilter{Name: nodecapacity.Name})
 	if err != nil {
 		return fmt.Errorf("failed to check existing VMs: %w", err)
 	}
 
-	cfg := buildVMConfig(logger, serverInfo, tp)
+	cfg := nodecapacity.Encode(logger, serverInfo, tp)
 
 	if len(guests) > 0 {
 		vmID := guests[0].VMID
@@ -75,9 +76,9 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 			return fmt.Errorf("failed to get existing VM %d config: %w", vmID, err)
 		}
 
-		cfg.Delete = staleOptions(current, cfg)
+		cfg.Delete = nodecapacity.StaleOptions(current, cfg)
 
-		logger.V(1).Info("Updating Proxmox VM for Karpenter discovery service", "vmID", vmID,
+		logger.V(1).Info("Updating the node-capacity guest", "vmID", vmID,
 			"memory", memoryMB(current), "desiredMemory", memoryMB(cfg), "delete", cfg.Delete)
 
 		if err := client.Qemu().Update(ctx, vmID, cfg); err != nil {
@@ -96,171 +97,11 @@ func createProxmoxTopologyDiscoveryVM(logger logr.Logger, client *local.Client, 
 		return fmt.Errorf("failed to get available VM ID")
 	}
 
-	logger.Info("Creating Proxmox VM for Karpenter discovery service", "vmID", vmID)
+	logger.Info("Creating the node-capacity guest", "vmID", vmID)
 
 	if err := client.Qemu().Create(ctx, vmID, cfg); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// staleOptions returns the options the node-capacity guest has but desired
-// no longer sets: Update never sends an option the desired config leaves
-// unset, so a hugepage pool or a NUMA node the host no longer reports must
-// be deleted explicitly. memory, numaX and hugepages are independent here:
-// memory is the memory available to allocate, numaX each node's hugepage
-// pool, and the guest is never started, so they need not agree.
-func staleOptions(current, desired *qemu.Config) []string {
-	var stale []string
-
-	if current.Hugepages != nil && desired.Hugepages == nil {
-		stale = append(stale, "hugepages")
-	}
-
-	for idx := range current.NUMA {
-		if _, ok := desired.NUMA[idx]; !ok {
-			stale = append(stale, fmt.Sprintf("numa%d", idx))
-		}
-	}
-
-	slices.Sort(stale)
-
-	return stale
-}
-
-// Hugepage sizes, in KiB, that Proxmox's hugepages option accepts.
-const (
-	hugepageSize2M = 2 * 1024
-	hugepageSize1G = 1024 * 1024
-)
-
-// hugepagePools returns the hugepage counts the node-capacity guest is
-// built from: those of the NUMA nodes it reports when cadvisor knows the
-// topology, the machine-wide ones otherwise, so the page size chosen and
-// the memory reported come from the same pages.
-func hugepagePools(serverInfo *info.MachineInfo, tp *topology.Topology) []info.HugePagesInfo {
-	if len(serverInfo.Topology) == 0 || tp == nil {
-		return serverInfo.HugePages
-	}
-
-	var pools []info.HugePagesInfo
-
-	for _, nodeInfo := range serverInfo.Topology {
-		if tp.CPUDetails.CPUsInNUMANodes(nodeInfo.Id).Size() > 0 {
-			pools = append(pools, nodeInfo.HugePages...)
-		}
-	}
-
-	return pools
-}
-
-// hugepageSize returns the page size (KiB) of the host's hugepage pool, or
-// 0 when it has none. Hosts are expected to preallocate one size only; if
-// they have both, the size holding more memory wins.
-func hugepageSize(logger logr.Logger, pools []info.HugePagesInfo) uint64 {
-	pool2M := poolMB(pools, hugepageSize2M)
-	pool1G := poolMB(pools, hugepageSize1G)
-
-	if pool2M > 0 && pool1G > 0 {
-		logger.Info("Warning: host has both 2M and 1G hugepages, reporting only the larger pool",
-			"pool2MMiB", pool2M, "pool1GMiB", pool1G)
-	}
-
-	switch {
-	case pool1G > 0 && pool1G >= pool2M:
-		return hugepageSize1G
-	case pool2M > 0:
-		return hugepageSize2M
-	default:
-		return 0
-	}
-}
-
-// poolMB returns how much memory, in MiB, pools hold in pages of pageSize
-// KiB.
-func poolMB(pools []info.HugePagesInfo, pageSize uint64) int {
-	total := 0
-
-	for _, pool := range pools {
-		if pool.PageSize == pageSize {
-			total += int(pool.NumPages * pool.PageSize / 1024)
-		}
-	}
-
-	return total
-}
-
-// buildVMConfig builds the node-capacity guest's desired configuration
-// as a typed *qemu.Config. Its memory is always the host's ordinary memory
-// less the host reserve; on a host with a hugepage pool each NUMA node's
-// memory is the node's pool instead.
-func buildVMConfig(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
-	totalCores := serverInfo.NumCores
-	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))
-	pageSize := hugepageSize(logger, hugepagePools(serverInfo, tp))
-
-	cfg := &qemu.Config{
-		Name:        "node-capacity",
-		Description: "Karpenter discovery service",
-		Cores:       &totalCores,
-		Sockets:     new(1),
-		CPU:         &qemu.CPU{Type: "host"},
-		NUMAEnabled: new(true),
-		OSType:      new("l26"),
-		Tags:        &qemu.Tags{"karpenter"},
-	}
-
-	if pageSize > 0 {
-		cfg.Hugepages = new(strconv.FormatUint(pageSize/1024, 10))
-	}
-
-	if len(serverInfo.Topology) > 0 {
-		affinity := make([]string, 0, len(serverInfo.Topology))
-		numa := make(map[int]qemu.NUMA, len(serverInfo.Topology))
-
-		cpush := 0
-		totalMemoryMB = 0
-		idx := 0
-
-		for _, nodeInfo := range serverInfo.Topology {
-			cpus := tp.CPUDetails.CPUsInNUMANodes(nodeInfo.Id)
-			if cpus.Size() == 0 {
-				continue
-			}
-
-			affinity = append(affinity, cpus.String())
-
-			memoryInNode := int(nodeInfo.Memory / (1024 * 1024 * 1024))
-			if memoryInNode > 1 {
-				memoryInNode--
-			}
-
-			memoryInNode *= 1024
-			totalMemoryMB += memoryInNode
-
-			numaMemory := memoryInNode
-			if pageSize > 0 {
-				// A node without pages of this size reports 0, but keeps
-				// its CPUs.
-				numaMemory = poolMB(nodeInfo.HugePages, pageSize)
-			}
-
-			numa[idx] = qemu.NUMA{
-				CPUIDs:    []string{fmt.Sprintf("%d-%d", cpush, cpush+cpus.Size()-1)},
-				HostNodes: []string{strconv.Itoa(nodeInfo.Id)},
-				Memory:    &numaMemory,
-			}
-
-			cpush += cpus.Size()
-			idx++
-		}
-
-		cfg.Affinity = strings.Join(affinity, ",")
-		cfg.NUMA = numa
-	}
-
-	cfg.Memory = &qemu.Memory{Current: &totalMemoryMB}
-
-	return cfg
 }
