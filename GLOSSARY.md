@@ -115,6 +115,10 @@ _Avoid_: rebalance (for the result), schedule
 The cpuset the scheduler last set on a virtual machine's threads, recorded only after `taskset` succeeded; a new process starts with none.
 _Avoid_: current affinity, assigned set
 
+**PID directory**:
+The qemu-server directory where each running virtual machine has a `<vmid>.pid` file; the scheduler's record of which virtual machines run, and as which process.
+_Avoid_: watch path (for the concept), run dir
+
 **NUMA slot**:
 An aligned whole, half or quarter of one NUMA node's usable CPUs and memory; smaller slots nest inside larger ones.
 _Avoid_: partition, chunk

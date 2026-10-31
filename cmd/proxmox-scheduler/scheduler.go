@@ -20,25 +20,22 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 
 	local "github.com/sergelogvinov/go-proxmox-local"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/piddir"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
 )
+
+var _ piddir.Handler = (*SchedulerHandler)(nil)
 
 type SchedulerHandler struct {
 	client  *local.Client
@@ -76,9 +73,6 @@ type SchedulerHandler struct {
 }
 
 const (
-	// pidFileExtension is the file extension for PID files
-	pidFileExtension = ".pid"
-
 	// SharedPolicyNone disables the partition: every VM under shared
 	// placement is left exactly as Proxmox started it, matching the
 	// daemon's behavior before docs/scheduler-shared.md.
@@ -169,75 +163,9 @@ func NewHandler(client *local.Client, topology *topology.Topology, logger logr.L
 	return h, nil
 }
 
-func (r *SchedulerHandler) Reconcile(ctx context.Context, sender reconciler.EventSender, event reconciler.Event) error {
-	r.logger.V(4).Info("Processing event", "type", event.Type, "key", event.Key)
-
-	if event.Type == reconciler.FileEvent {
-		fsEvent, ok := event.Data.(fsnotify.Event)
-		if ok {
-			vmIDStr, ok := strings.CutSuffix(fsEvent.Name, pidFileExtension)
-			if !ok { // Not a PID file, ignore
-				return nil //nolint:nilerr
-			}
-
-			vmID, err := strconv.Atoi(filepath.Base(vmIDStr))
-			if err != nil || vmID <= 0 { // Filename doesn't contain a valid VM ID, ignore
-				return nil //nolint:nilerr
-			}
-
-			if fsEvent.Op == fsnotify.Remove {
-				r.handleVMStop(ctx, vmID)
-
-				return nil
-			}
-
-			pid, err := utilsys.GetPidFromFile(fsEvent.Name)
-			if err != nil {
-				return fmt.Errorf("failed to read PID from file %s: %w", fsEvent.Name, err)
-			}
-
-			err = r.handleVMStart(ctx, vmID, pid)
-			if err != nil {
-				r.logger.Error(err, "Failed to handle VM start", "vmID", vmID, "pid", pid)
-
-				return err
-			}
-
-			return nil
-		}
-	}
-
-	if event.Type == reconciler.SyncEvent {
-		err := r.handleSyncEvent(ctx)
-		if err != nil {
-			r.logger.Error(err, "Failed to handle sync event")
-
-			return err
-		}
-
-		return nil
-	}
-
-	return nil
-}
-
-// handleSyncEvent processes sync events to track VM information
-func (r *SchedulerHandler) handleSyncEvent(ctx context.Context) error {
-	r.logger.V(1).Info("Starting VM tracking")
-
-	runningVMs, err := r.getRunningVMs()
-	if err != nil {
-		return fmt.Errorf("failed to get running VMs: %w", err)
-	}
-
-	r.syncRunning(ctx, runningVMs)
-
-	return nil
-}
-
-// syncRunning tracks exactly the VMs in running (VM ID to PID). It never runs taskset
+// VMsRunning tracks exactly the VMs in running (VM ID to PID). It never runs taskset
 // itself: a pinned VM's affinity is taken as applied, as Proxmox started it with it.
-func (r *SchedulerHandler) syncRunning(ctx context.Context, running map[int]int) {
+func (r *SchedulerHandler) VMsRunning(ctx context.Context, running map[int]int) {
 	r.applyMu.Lock()
 
 	for _, vmID := range r.tracker.notIn(running) {
@@ -317,61 +245,11 @@ func threadsMask(pid int) (cpuset.CPUSet, bool) {
 	return mask, true
 }
 
-// getRunningVMs scans the PID directory and returns a map of VM ID to PID for running VMs
-func (r *SchedulerHandler) getRunningVMs() (map[int]int, error) {
-	runningVMs := make(map[int]int)
-
-	entries, err := os.ReadDir(*watchPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read PID directory %s: %w", *watchPath, err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), pidFileExtension) {
-			continue
-		}
-
-		vmID, pid, err := getVMIDs(filepath.Join(*watchPath, entry.Name()))
-		if err != nil {
-			r.logger.Error(err, "Failed to get VM IDs from file event", "file", entry.Name())
-
-			continue
-		}
-
-		if !utilsys.ProcessExists(pid) {
-			continue
-		}
-
-		runningVMs[vmID] = pid
-	}
-
-	return runningVMs, nil
-}
-
 // logVMStatus logs the current status of all tracked VMs
 func (r *SchedulerHandler) logVMStatus() {
 	for vmID, vm := range r.tracker.all() {
 		r.logger.V(2).Info("VM info", "vmID", vmID, "pid", vm.pid, "applied", vm.applied.String())
 	}
-}
-
-func getVMIDs(pidFile string) (vmID, pid int, err error) {
-	vmIDStr, ok := strings.CutSuffix(pidFile, pidFileExtension)
-	if !ok {
-		return 0, 0, fmt.Errorf("not a proxmox PID file: %s", pidFile)
-	}
-
-	vmID, err = strconv.Atoi(filepath.Base(vmIDStr))
-	if err != nil {
-		return 0, 0, fmt.Errorf("not a proxmox VM PID file: %s", pidFile)
-	}
-
-	pid, err = utilsys.GetPidFromFile(pidFile)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to read PID from file %s: %w", pidFile, err)
-	}
-
-	return vmID, pid, nil
 }
 
 // scheduleRebalance coalesces a burst of start/stop/sync events into a
