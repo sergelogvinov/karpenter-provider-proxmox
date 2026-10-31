@@ -11,15 +11,14 @@ require (
 	github.com/apparentlymart/go-cidr v1.1.1
 	github.com/awslabs/operatorpkg v0.0.0-20261002163259-5e8ed3699dea
 	github.com/diskfs/go-diskfs v1.9.4
-	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-logr/logr v1.4.4
 	github.com/google/cadvisor v0.57.0
 	github.com/mitchellh/hashstructure/v2 v2.0.2
 	github.com/pkg/errors v0.9.1
 	github.com/samber/lo v1.53.0
-	github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031121343-db063922fa42
+	github.com/sergelogvinov/go-proxmox-local v0.1.1-0.20261031141519-c31a20806ddb
 	github.com/sergelogvinov/go-proxmox-pool v0.3.0
-	github.com/sergelogvinov/go-proxmox-rest v0.2.0
+	github.com/sergelogvinov/go-proxmox-rest v0.2.1-0.20261031143152-8da3e5d518a0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
@@ -47,6 +46,7 @@ require (
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect

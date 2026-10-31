@@ -27,7 +27,7 @@ import (
 	"github.com/go-logr/logr"
 
 	local "github.com/sergelogvinov/go-proxmox-local"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/piddir"
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
@@ -35,7 +35,7 @@ import (
 	"k8s.io/utils/cpuset"
 )
 
-var _ piddir.Handler = (*SchedulerHandler)(nil)
+var _ qemu.EventHandler = (*SchedulerHandler)(nil)
 
 type SchedulerHandler struct {
 	client  *local.Client

@@ -27,8 +27,7 @@ import (
 	"github.com/spf13/pflag"
 
 	local "github.com/sergelogvinov/go-proxmox-local"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/piddir"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/reconciler"
+	"github.com/sergelogvinov/go-proxmox-local/qemu"
 	utilsysinfo "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/systeminfo"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
@@ -157,64 +156,34 @@ func main() {
 	}
 
 	if err := scheduler(client, handler, logger); err != nil {
-		logger.Error(err, "Reconciler encountered an error")
+		logger.Error(err, "Scheduler encountered an error")
 		os.Exit(1)
 	}
 }
 
 func scheduler(client *local.Client, handler *SchedulerHandler, logger logr.Logger) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Set up signal handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	logger.Info("Watching virtual machines", "path", *watchPath)
 
-	config := reconciler.DefaultConfig(logger)
-	config.MaxRetries = *maxRetries
-	config.WatchPath = *watchPath
-	config.SyncDelay = *resyncInterval
-
-	rec, err := reconciler.NewReconciler(ctx, cancel, config, piddir.New(client.Qemu(), handler, logger))
-	if err != nil {
-		logger.Error(err, "Failed to create reconciler")
+	if err := watchVMs(ctx, client, handler); err != nil {
+		logger.Error(err, "Failed to watch virtual machines")
 
 		return err
 	}
 
-	if err := rec.Start(); err != nil {
-		logger.Error(err, "Failed to start reconciler")
-
-		return err
-	}
-
-	logger.Info("Reconciler started successfully")
-
-	select {
-	case sig := <-sigCh:
-		logger.Info("Received signal, shutting down gracefully", "signal", sig)
-	case <-ctx.Done():
-		logger.Info("Context canceled, shutting down")
-	}
-
-	cancel()
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-
-		rec.Stop()
-	}()
-
-	select {
-	case <-done:
-		logger.Info("Reconciler stopped gracefully")
-	case <-shutdownCtx.Done():
-		logger.Info("Shutdown timeout exceeded, forcing exit")
-	}
+	logger.Info("Received signal, shut down gracefully")
 
 	return nil
+}
+
+// watchVMs tells handler of every VM start, VM stop and sync of the VMs on this
+// node until ctx is canceled, retrying and syncing as --max-retries and
+// --resync-interval say. It returns nil once ctx is canceled.
+func watchVMs(ctx context.Context, client *local.Client, handler qemu.EventHandler) error {
+	return client.Qemu().Watch(ctx, handler, qemu.WatchOptions{
+		SyncInterval: *resyncInterval,
+		MaxRetries:   *maxRetries,
+	})
 }
