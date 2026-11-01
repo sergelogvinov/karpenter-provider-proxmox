@@ -111,7 +111,7 @@ func WaitForProxmoxTemplateInPlaceUpdated(ctx context.Context, cli client.Client
 // pkg/controllers/nodetemplateclass/lifecycle) has finished tearing down
 // every Proxmox-side template/image it provisioned.
 func WaitForProxmoxTemplateGone(ctx context.Context, cli client.Client, name string, timeout time.Duration) error {
-	return waitForGone(ctx, cli, &v1alpha1.ProxmoxTemplate{}, "proxmoxtemplate", name, timeout)
+	return waitForGone(ctx, cli, &v1alpha1.ProxmoxTemplate{}, "proxmoxtemplate", client.ObjectKey{Name: name}, timeout)
 }
 
 // WaitForProxmoxUnmanagedTemplateReady polls the named ProxmoxUnmanagedTemplate
@@ -145,7 +145,7 @@ func WaitForProxmoxUnmanagedTemplateNotReady(ctx context.Context, cli client.Cli
 // carries no termination finalizer - it never owns the Proxmox VM
 // templates it matches - so deletion is expected to be near-immediate.
 func WaitForProxmoxUnmanagedTemplateGone(ctx context.Context, cli client.Client, name string, timeout time.Duration) error {
-	return waitForGone(ctx, cli, &v1alpha1.ProxmoxUnmanagedTemplate{}, "proxmoxunmanagedtemplate", name, timeout)
+	return waitForGone(ctx, cli, &v1alpha1.ProxmoxUnmanagedTemplate{}, "proxmoxunmanagedtemplate", client.ObjectKey{Name: name}, timeout)
 }
 
 // WaitForProxmoxNodeClassReady polls the named (pre-existing)
@@ -199,7 +199,7 @@ func WaitForNodePoolGone(ctx context.Context, cli client.Client, name string, ti
 		return fmt.Errorf("failed to delete nodepool %s: %w", name, err)
 	}
 
-	return waitForGone(ctx, cli, &karpv1.NodePool{}, "nodepool", name, timeout)
+	return waitForGone(ctx, cli, &karpv1.NodePool{}, "nodepool", client.ObjectKey{Name: name}, timeout)
 }
 
 // WaitForNodeClaimsInPlaceUpdated polls the NodeClaims the named NodePool
@@ -278,6 +278,21 @@ func WaitForStatefulSetReplicasReady(ctx context.Context, cli client.Client, nam
 	return sts, nil
 }
 
+// WaitForStatefulSetGone deletes the named StatefulSet - with foreground
+// propagation, so the API server keeps it until every pod it owns has
+// terminated - and polls until it's gone. Waiting matters on teardown: a
+// pod still pending while its test NodePool is being deleted is matched
+// against the cluster's other NodePools, and Karpenter logs it as
+// unschedulable.
+func WaitForStatefulSetGone(ctx context.Context, cli client.Client, namespace, name string, timeout time.Duration) error {
+	err := cli.Delete(ctx, &appsv1.StatefulSet{Namespace: namespace, Name: name}, client.PropagationPolicy(metav1.DeletePropagationForeground))
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete statefulset %s/%s: %w", namespace, name, err)
+	}
+
+	return waitForGone(ctx, cli, &appsv1.StatefulSet{}, "statefulset", client.ObjectKey{Namespace: namespace, Name: name}, timeout)
+}
+
 // waitForReady polls obj (a zero-value pointer the caller wants filled in)
 // by name until its aggregate "Ready" condition reports True.
 func waitForReady[T readyObject](ctx context.Context, cli client.Client, obj T, kind, name string, timeout time.Duration) error {
@@ -321,10 +336,10 @@ func waitForReadyState[T readyObject](ctx context.Context, cli client.Client, ob
 	return nil
 }
 
-// waitForGone polls until the named object of obj's type no longer exists.
-func waitForGone[T client.Object](ctx context.Context, cli client.Client, obj T, kind, name string, timeout time.Duration) error {
+// waitForGone polls until the object of obj's type at key no longer exists.
+func waitForGone[T client.Object](ctx context.Context, cli client.Client, obj T, kind string, key client.ObjectKey, timeout time.Duration) error {
 	err := wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
-		err := cli.Get(ctx, client.ObjectKey{Name: name}, obj)
+		err := cli.Get(ctx, key, obj)
 
 		switch {
 		case apierrors.IsNotFound(err):
@@ -338,7 +353,7 @@ func waitForGone[T client.Object](ctx context.Context, cli client.Client, obj T,
 		return false, nil
 	})
 	if err != nil {
-		return fmt.Errorf("%s %s was not deleted: %w", kind, name, err)
+		return fmt.Errorf("%s %s was not deleted: %w", kind, key, err)
 	}
 
 	return nil

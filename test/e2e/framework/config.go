@@ -90,6 +90,18 @@ type Config struct {
 	// NodeClassBootStorage is the Proxmox storage-id the nodeclass
 	// scenario's ProxmoxNodeClass uses for spec.bootDevice.storage.
 	NodeClassBootStorage string
+
+	// InstanceTypes are the instance types the suite's NodePools allow
+	// (node.kubernetes.io/instance-type In ...). They must be ones
+	// E2E_UNMANAGED_TEMPLATE can launch: without root, a template with
+	// hugepages offers only NUMA types in a hugepage zone, and one without
+	// offers only non-NUMA types there. Empty allows every type.
+	InstanceTypes []string
+
+	// InstanceFamilies are the instance families the suite's NodePools
+	// allow (karpenter.proxmox.sinextra.dev/instance-family In ...), on
+	// top of InstanceTypes. Empty allows every family.
+	InstanceFamilies []string
 }
 
 // LoadConfig builds a Config from environment variables.
@@ -110,13 +122,33 @@ func LoadConfig() Config {
 		NodeClassBootStorage:   getEnvDefault("E2E_NODECLASS_STORAGE", "system"),
 	}
 
-	for id := range strings.SplitSeq(getEnvDefault("E2E_TEMPLATE_STORAGE_IDS", "local"), ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			cfg.TemplateStorageIDs = append(cfg.TemplateStorageIDs, id)
+	cfg.TemplateStorageIDs = getEnvListDefault("E2E_TEMPLATE_STORAGE_IDS", "local")
+	cfg.InstanceFamilies = getEnvListDefault("E2E_INSTANCE_FAMILIES", "")
+
+	// The default types are non-NUMA ones; selecting families alone
+	// must not be narrowed by them.
+	defaultInstanceTypes := "e2.2VCPU-4GB,e2.2VCPU-8GB,c1.2VCPU-4GB,t1.2VCPU-6GB,c1.4VCPU-8GB"
+	if len(cfg.InstanceFamilies) > 0 {
+		defaultInstanceTypes = ""
+	}
+
+	cfg.InstanceTypes = getEnvListDefault("E2E_INSTANCE_TYPES", defaultInstanceTypes)
+
+	return cfg
+}
+
+// getEnvListDefault splits key's value, or def when unset, on commas,
+// dropping empty items.
+func getEnvListDefault(key, def string) []string {
+	items := []string{}
+
+	for item := range strings.SplitSeq(getEnvDefault(key, def), ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
 		}
 	}
 
-	return cfg
+	return items
 }
 
 func getEnvDefault(key, def string) string {

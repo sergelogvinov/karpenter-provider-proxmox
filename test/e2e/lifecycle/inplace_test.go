@@ -125,11 +125,13 @@ func TestNodeClaimInPlaceUpdate(t *testing.T) {
 	require.NoError(err, "proxmoxnodeclass %s never became ready", name)
 
 	nodePool := framework.NewNodePool(framework.NodePoolOptions{
-		Name:          name,
-		NodeClassName: name,
+		Name:             name,
+		NodeClassName:    name,
+		InstanceTypes:    f.Config.InstanceTypes,
+		InstanceFamilies: f.Config.InstanceFamilies,
 	})
 
-	f.Logf("creating nodepool %s (nodeClass=%s)", name, name)
+	f.Logf("creating nodepool %s (nodeClass=%s, instanceTypes=%v, instanceFamilies=%v)", name, name, f.Config.InstanceTypes, f.Config.InstanceFamilies)
 
 	ctx, cancel = f.Context()
 	err = f.Client.Objects.Create(ctx, nodePool)
@@ -174,15 +176,15 @@ func TestNodeClaimInPlaceUpdate(t *testing.T) {
 	require.NoError(err, "failed to create statefulset %s/%s", f.Config.Namespace, name)
 
 	t.Cleanup(func() {
-		f.Logf("deleting statefulset %s/%s", f.Config.Namespace, name)
-
+		done := f.Step("deleting statefulset %s/%s (waiting for its pods to terminate)", f.Config.Namespace, name)
 		ctx, cancel := f.Context()
-		err := f.Client.Objects.Delete(ctx, sts)
+		err := framework.WaitForStatefulSetGone(ctx, f.Client.Objects, f.Config.Namespace, name, f.Config.Timeout)
 
 		cancel()
+		done()
 
-		if err != nil && !apierrors.IsNotFound(err) {
-			t.Errorf("failed to delete statefulset %s/%s: %v", f.Config.Namespace, name, err)
+		if err != nil {
+			t.Errorf("statefulset %s/%s did not clean up: %v", f.Config.Namespace, name, err)
 		}
 	})
 
