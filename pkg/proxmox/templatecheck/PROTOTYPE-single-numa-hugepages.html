@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE: One-NUMA-node hugepage zones</title>
+<style>
+  :root {
+    --bg: #fafaf9; --panel: #ffffff; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4;
+    --accent: #2563eb; --accent-soft: #dbeafe; --ok: #15803d; --ok-soft: #dcfce7; --bad: #b91c1c; --bad-soft: #fee2e2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1917; --panel: #292524; --ink: #f5f5f4; --muted: #a8a29e; --line: #44403c;
+      --accent: #60a5fa; --accent-soft: #1e3a5f; --ok: #4ade80; --ok-soft: #14532d; --bad: #f87171; --bad-soft: #7f1d1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+  .banner { background: var(--bad-soft); color: var(--ink); border-radius: 8px; padding: 6px 12px; font-size: 13px; display: inline-block; margin-bottom: 12px; }
+  .intro { color: var(--muted); max-width: 820px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .full { grid-column: 1 / -1; }
+  label { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  label:last-child { border-bottom: 0; }
+  select { font: inherit; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); max-width: 60%; }
+  button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--ink); cursor: pointer; }
+  button:disabled { opacity: .35; cursor: default; }
+  button.primary { background: var(--accent); color: #fff; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 13px; }
+  .yes { background: var(--ok-soft); color: var(--ok); }
+  .no { background: var(--bad-soft); color: var(--bad); }
+  .small { font-size: 13px; color: var(--muted); }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .changed { border-left: 4px solid var(--accent); padding: 8px 12px; background: var(--accent-soft); border-radius: 6px; margin-bottom: 12px; }
+  .warn { color: var(--bad); font-weight: 600; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .tabs button { border-color: var(--line); background: transparent; }
+  .tabs button.active { border-color: var(--accent); background: var(--accent-soft); }
+  .steps { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+  .steps button { text-align: left; }
+  .steps button.done { border-color: var(--line); background: transparent; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="banner">PROTOTYPE, throwaway. Not production code. Nothing here talks to Proxmox.</div>
+  <h1>Can one hugepage NodeClass run every instance type on a one-NUMA-node host, without root?</h1>
+  <p class="intro">
+    A simulated Proxmox zone with a hugepage pool. Pick the controller's rule, the host and the VM template, then launch instance types.
+    Each launch goes through the same three gates as the real controller: <b>is the type offered</b> (the template check),
+    <b>does zone capacity think it fits</b>, and <b>does Proxmox actually start it</b> (its hugepage checks, and whether the host node really has the pages).
+    Watch the pool panel: the question is whether what zone capacity <i>thinks</i> is free ever drifts from what the host <i>actually</i> has free.
+  </p>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Setup</h2>
+      <div id="settings"></div>
+    </section>
+
+    <section class="panel">
+      <h2>What the NodeClass offers in this zone</h2>
+      <div id="offers"></div>
+    </section>
+
+    <section class="panel full">
+      <h2>Launch an instance type</h2>
+      <div class="row" id="launch"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="stopLast">Delete the newest VM</button>
+        <button id="reset">Delete all VMs</button>
+      </div>
+    </section>
+
+    <section class="panel full">
+      <h2>What just happened</h2>
+      <div id="changed"></div>
+      <h2 style="margin-top:16px">Hugepage pool: zone capacity's view vs the host's reality</h2>
+      <div id="pool"></div>
+    </section>
+
+    <section class="panel full">
+      <h2>VMs</h2>
+      <div id="vms"></div>
+    </section>
+
+    <section class="panel full">
+      <h2>Guided walkthroughs</h2>
+      <div class="tabs" id="tabs"></div>
+      <div id="scenario"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Pure model: no DOM. Liftable into templatecheck / cloneConfigOverrides.
+// ---------------------------------------------------------------------------
+const Model = (() => {
+  const TYPES = {
+    'n1.4VCPU-8GB': { kind: 'NUMA', what: 'NUMA slot', cpus: 4, mem: 8 },
+    'c1.2VCPU-4GB': { kind: 'non-NUMA', what: 'static, pinned', cpus: 2, mem: 4 },
+    't1.2VCPU-6GB': { kind: 'non-NUMA', what: 'static', cpus: 2, mem: 6 },
+    's1.2VCPU-4GB': { kind: 'non-NUMA', what: 'CPU share', cpus: 2, mem: 4 },
+  };
+
+  const DEFAULT_SETTINGS = {
+    rule: 'proposed',          // 'today' | 'proposed' | 'anyCount'
+    launch: 'writeNuma0',      // 'writeNuma0' (Q4a) | 'inherit' (Q4b)
+    root: false,
+    numaNodes: 1,
+    pageSize: 1024,            // MiB; 0 = no pool
+    poolPerNode: 16,           // GiB per host NUMA node
+    hugepages: '1024',         // template: '' | '2' | '1024' | 'any' | 'unknown'
+    tplNuma: false,            // template numa: 1?
+    tplSockets: 1,
+  };
+
+  function initialState(settings) {
+    return { settings: { ...DEFAULT_SETTINGS, ...settings }, vms: [], nextId: 100, last: null };
+  }
+
+  // Gate 1: the template check (templatecheck.hugepagesRule), per kind.
+  function offers(s) {
+    const st = s.settings;
+    const ok = (why) => ({ ok: true, why });
+    const no = (reason, why) => ({ ok: false, reason, why });
+
+    if (st.root) return { NUMA: ok('root: the controller sets hugepages itself, no check'), 'non-NUMA': ok('root: no check') };
+    if (!st.pageSize) return { NUMA: ok('no hugepage pool in this zone, no check'), 'non-NUMA': ok('no hugepage pool in this zone, no check') };
+
+    const hp = st.hugepages;
+    if (hp === 'unknown') {
+      const r = no('TemplateStatusUnknown', 'the template\'s hugepages are not known');
+      return { NUMA: r, 'non-NUMA': r };
+    }
+    if (hp === '') {
+      return {
+        NUMA: no('TemplateHugepagesUnset', 'the template has no hugepages, a slot\'s memory must be the pool'),
+        'non-NUMA': ok('the template has no hugepages: the VM runs on ordinary memory'),
+      };
+    }
+
+    const matches = hp === String(st.pageSize);
+    const numa = matches ? ok('the template\'s page size is the pool\'s')
+      : no('TemplateHugepagesMismatch', `the template has hugepages=${hp}, the pool has ${st.pageSize} MiB pages`);
+
+    const relaxed = (st.rule === 'proposed' && st.numaNodes === 1) || st.rule === 'anyCount';
+    let nonNuma;
+    if (!matches) nonNuma = no('TemplateHugepagesMismatch', `the template has hugepages=${hp}, the pool has ${st.pageSize} MiB pages`);
+    else if (relaxed) nonNuma = ok(st.numaNodes === 1 ? 'one NUMA node: the pool serves every VM' : 'offered by the rejected "any node count" rule');
+    else nonNuma = no('TemplateHugepagesSet', 'a non-NUMA VM would draw from the pool');
+
+    return { NUMA: numa, 'non-NUMA': nonNuma };
+  }
+
+  // Gate 2: zone capacity's view. Every running VM is charged to the zone budget (the pool);
+  // a NUMA slot is also charged to its node; each node's free memory is capped by the zone's.
+  function accounted(s) {
+    const st = s.settings;
+    const total = st.numaNodes * st.poolPerNode;
+    const running = s.vms.filter(v => v.status === 'running');
+    const used = running.reduce((a, v) => a + v.mem, 0);
+    const zoneFree = total - used;
+    const nodeFree = [];
+    for (let n = 0; n < st.numaNodes; n++) {
+      const slots = running.filter(v => v.slotNode === n).reduce((a, v) => a + v.mem, 0);
+      nodeFree.push(Math.max(0, Math.min(st.poolPerNode - slots, zoneFree)));
+    }
+    return { total, used, zoneFree, nodeFree };
+  }
+
+  // The host's reality: where each running VM's memory actually came from.
+  function actual(s) {
+    const st = s.settings;
+    const drawn = Array(st.numaNodes).fill(0);
+    let ordinary = 0;
+    for (const v of s.vms.filter(v => v.status === 'running')) {
+      for (const d of v.draws) {
+        if (d.pool) drawn[d.host] += d.mem; else ordinary += d.mem;
+      }
+    }
+    return { drawn, free: drawn.map(d => st.poolPerNode - d), ordinary };
+  }
+
+  // What the launch writes on the clone (cloneConfigOverrides), and what it inherits from the template.
+  function buildConfig(s, t, slotNode) {
+    const st = s.settings;
+    const cfg = {
+      memory: t.mem, cores: t.cpus, sockets: st.tplSockets, numa: st.tplNuma, numaN: [],
+      hugepages: st.hugepages === 'unknown' ? '' : st.hugepages, written: [], inherited: [],
+    };
+
+    if (t.kind === 'NUMA') {
+      cfg.numa = true;
+      cfg.numaN = [{ host: slotNode, mem: t.mem }];
+      cfg.written.push('numa: 1', `numa0: hostnodes=${slotNode},memory=${t.mem}G,policy=bind`);
+      if (st.root) { cfg.hugepages = String(st.pageSize || ''); cfg.written.push(`hugepages: ${st.pageSize}`); }
+    } else if (!st.root && st.rule !== 'today' && st.launch === 'writeNuma0' && cfg.hugepages && st.numaNodes === 1) {
+      cfg.numa = true;
+      cfg.numaN = [{ host: 0, mem: t.mem }];
+      cfg.written.push('numa: 1', `numa0: hostnodes=0,memory=${t.mem}G,policy=bind`);
+    }
+
+    if (!cfg.written.some(w => w.startsWith('hugepages'))) cfg.inherited.push(`hugepages: ${cfg.hugepages || '(unset)'}`);
+    if (!cfg.written.some(w => w.startsWith('numa:'))) cfg.inherited.push(`numa: ${cfg.numa ? 1 : 0}`, `sockets: ${cfg.sockets}`);
+    return cfg;
+  }
+
+  // Gate 3: Proxmox start (qemu-server Memory.pm checks), then whether the host node has the pages.
+  function proxmoxStart(s, cfg) {
+    const st = s.settings;
+    if (!cfg.hugepages) return { ok: true, draws: [{ pool: false, mem: cfg.memory }] };
+
+    if (!cfg.numa) return { ok: false, error: 'numa needs to be enabled to use hugepages' };
+
+    const parts = cfg.numaN.length ? cfg.numaN.map(n => ({ host: n.host, mem: n.mem }))
+      : Array.from({ length: cfg.sockets }, (_, i) => ({ host: i, mem: cfg.memory / cfg.sockets }));
+
+    for (const p of parts) {
+      if (p.host >= st.numaNodes) return { ok: false, error: `host NUMA node${p.host} doesn't exist` };
+    }
+
+    const page = cfg.hugepages === 'any' ? 1024 : Number(cfg.hugepages);
+    for (const p of parts) {
+      if ((p.mem * 1024) % page !== 0) return { ok: false, error: `Memory size ${p.mem * 1024} is not a multiple of the requested hugepages size ${page}` };
+    }
+    if (!st.pageSize || page !== st.pageSize) return { ok: false, error: `the host has no ${page} MiB hugepages reserved` };
+
+    const free = actual(s).free;
+    for (const p of parts) {
+      if (free[p.host] < p.mem) return { ok: false, error: `not enough free hugepages on host node ${p.host} (${free[p.host]} GiB free, ${p.mem} GiB needed)` };
+    }
+    return { ok: true, draws: parts.map(p => ({ pool: true, host: p.host, mem: p.mem })) };
+  }
+
+  function launch(s, typeName) {
+    const t = TYPES[typeName];
+    const offer = offers(s)[t.kind];
+    if (!offer.ok) return { ...s, last: { kind: 'refused', gate: 'not offered', type: typeName, text: `${offer.reason}: ${offer.why}` } };
+
+    const acc = accounted(s);
+    let slotNode = null;
+    if (t.kind === 'NUMA') {
+      slotNode = acc.nodeFree.findIndex(f => f >= t.mem);
+      if (slotNode < 0) return { ...s, last: { kind: 'refused', gate: 'no capacity', type: typeName, text: `zone capacity sees no NUMA node with ${t.mem} GiB free` } };
+    } else if (acc.zoneFree < t.mem) {
+      return { ...s, last: { kind: 'refused', gate: 'no capacity', type: typeName, text: `zone capacity sees ${acc.zoneFree} GiB free, ${t.mem} GiB needed` } };
+    }
+
+    const cfg = buildConfig(s, t, slotNode);
+    const start = proxmoxStart(s, cfg);
+    const vm = {
+      id: s.nextId, type: typeName, kind: t.kind, mem: t.mem, slotNode, cfg,
+      status: start.ok ? 'running' : 'failed', error: start.error || null, draws: start.draws || [],
+    };
+    // A VM that fails to start holds no zone capacity (the real launch deletes it).
+    return {
+      ...s, vms: [...s.vms, vm], nextId: s.nextId + 1,
+      last: start.ok
+        ? { kind: 'ok', type: typeName, text: `VM ${vm.id} started` }
+        : { kind: 'failed', gate: 'Proxmox start', type: typeName, text: `VM ${vm.id}: ${start.error}` },
+    };
+  }
+
+  function reducer(s, a) {
+    switch (a.type) {
+      case 'set': {
+        // A different host shape invalidates where running VMs drew from: start the host empty.
+        const hostShape = ['numaNodes', 'pageSize', 'poolPerNode'].includes(a.key);
+        return {
+          ...s, settings: { ...s.settings, [a.key]: a.value }, vms: hostShape ? [] : s.vms,
+          last: { kind: 'set', text: `${a.key} changed${hostShape && s.vms.length ? '; the host changed, so all VMs were deleted' : ''}` },
+        };
+      }
+      case 'launch': return launch(s, a.instanceType);
+      case 'stopLast': {
+        if (!s.vms.length) return s;
+        const v = s.vms[s.vms.length - 1];
+        return { ...s, vms: s.vms.slice(0, -1), last: { kind: 'set', text: `VM ${v.id} deleted` } };
+      }
+      case 'clearVMs': return { ...s, vms: [], last: { kind: 'set', text: 'all VMs deleted' } };
+      case 'reset': return initialState(a.settings);
+      default: return s;
+    }
+  }
+
+  return { TYPES, DEFAULT_SETTINGS, initialState, offers, accounted, actual, reducer };
+})();
+
+// ---------------------------------------------------------------------------
+// Page shell.
+// ---------------------------------------------------------------------------
+let state = Model.initialState();
+
+const SETTINGS_UI = [
+  ['rule', 'Controller rule', [['today', 'Today: split NodeClasses'], ['proposed', 'Proposed: one NUMA node relaxes'], ['anyCount', 'Rejected: relax on any node count']]],
+  ['launch', 'Non-NUMA launch on a hugepage template', [['writeNuma0', 'Writes numa: 1 + numa0 hostnodes=0 (Q4a)'], ['inherit', 'Inherits the template\'s NUMA config (Q4b)']]],
+  ['root', 'Controller credentials', [[false, 'API token (not root)'], [true, 'root@pam password']]],
+  ['numaNodes', 'Host NUMA nodes', [[1, '1'], [2, '2']]],
+  ['pageSize', 'Hugepage pool', [[1024, '1024 MiB pages'], [2, '2 MiB pages'], [0, 'No pool']]],
+  ['poolPerNode', 'Pool per NUMA node', [[16, '16 GiB'], [32, '32 GiB']]],
+  ['hugepages', 'Template hugepages', [['1024', '1024'], ['2', '2'], ['any', 'any'], ['', '(unset)'], ['unknown', 'not known']]],
+  ['tplNuma', 'Template numa', [[false, '0'], [true, '1']]],
+  ['tplSockets', 'Template sockets', [[1, '1'], [2, '2']]],
+];
+
+function dispatch(action) { state = Model.reducer(state, action); render(); }
+
+function render() {
+  const st = state.settings;
+
+  document.getElementById('settings').innerHTML = SETTINGS_UI.map(([key, label, opts]) => `
+    <label>${label}
+      <select data-key="${key}">
+        ${opts.map(([v, l]) => `<option value="${String(v)}" ${String(st[key]) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}
+      </select>
+    </label>`).join('');
+  document.querySelectorAll('#settings select').forEach(sel => sel.onchange = () => {
+    const opt = SETTINGS_UI.find(([k]) => k === sel.dataset.key)[2].find(([v]) => String(v) === sel.value)[0];
+    dispatch({ type: 'set', key: sel.dataset.key, value: opt });
+  });
+
+  const off = Model.offers(state);
+  document.getElementById('offers').innerHTML = `<table><tr><th>Kind</th><th>Offered?</th><th>Why</th></tr>
+    ${['NUMA', 'non-NUMA'].map(k => `<tr><td>${k === 'NUMA' ? 'NUMA types (n1)' : 'Non-NUMA (c1, t1, s1)'}</td>
+      <td><span class="pill ${off[k].ok ? 'yes' : 'no'}">${off[k].ok ? 'offered' : 'dropped'}</span></td>
+      <td class="small">${off[k].reason ? `<code>${off[k].reason}</code> ` : ''}${off[k].why}</td></tr>`).join('')}</table>`;
+
+  document.getElementById('launch').innerHTML = Object.entries(Model.TYPES).map(([name, t]) =>
+    `<button class="primary" data-type="${name}">${name}<br><span class="small" style="color:inherit;opacity:.8">${t.what}, ${t.mem} GiB</span></button>`).join('');
+  document.querySelectorAll('#launch button').forEach(b => b.onclick = () => dispatch({ type: 'launch', instanceType: b.dataset.type }));
+
+  const last = state.last;
+  const gateText = { refused: 'Stopped before launch', failed: 'Launched, but Proxmox refused to start it', ok: 'Started', set: 'Changed' };
+  document.getElementById('changed').innerHTML = last
+    ? `<div class="changed"><b>${gateText[last.kind]}${last.gate ? ` (${last.gate})` : ''}${last.type ? `: ${last.type}` : ''}</b><br>${last.text}</div>`
+    : '<div class="small">Nothing yet. Launch something, or start a walkthrough below.</div>';
+
+  const acc = Model.accounted(state);
+  const real = Model.actual(state);
+  const poolRows = [];
+  for (let n = 0; n < st.numaNodes; n++) {
+    const drift = acc.nodeFree[n] > real.free[n];
+    poolRows.push(`<tr><td>Host node ${n}</td><td>${st.poolPerNode} GiB</td>
+      <td>${acc.nodeFree[n]} GiB</td><td>${real.free[n]} GiB</td>
+      <td>${drift ? `<span class="warn">zone capacity thinks ${acc.nodeFree[n] - real.free[n]} GiB more is free than there is</span>` : '<span class="pill yes">in step</span>'}</td></tr>`);
+  }
+  document.getElementById('pool').innerHTML = st.pageSize ? `
+    <table><tr><th>Where</th><th>Pool</th><th>Zone capacity thinks free</th><th>Actually free hugepages</th><th></th></tr>${poolRows.join('')}</table>
+    <p class="small">Zone budget: ${acc.used} of ${acc.total} GiB charged.
+      ${real.ordinary ? `<span class="warn">${real.ordinary} GiB is running on ordinary host memory, outside the pool, yet charged to the pool: the pool sits unused and the host's own memory is spent untracked.</span>` : 'No VM runs on ordinary host memory.'}</p>`
+    : `<p class="small">No hugepage pool: every VM runs on ordinary memory. ${acc.used} of ${acc.total} GiB charged.</p>`;
+
+  document.getElementById('vms').innerHTML = state.vms.length ? `<table>
+    <tr><th>VM</th><th>Type</th><th>Status</th><th>Controller wrote</th><th>Inherited from template</th><th>Memory from</th></tr>
+    ${state.vms.map(v => `<tr><td>${v.id}</td><td>${v.type}</td>
+      <td>${v.status === 'running' ? '<span class="pill yes">running</span>' : `<span class="pill no">failed</span><div class="small">${v.error}</div>`}</td>
+      <td class="mono">${v.cfg.written.join('<br>') || '-'}</td>
+      <td class="mono">${v.cfg.inherited.join('<br>')}</td>
+      <td class="small">${v.status !== 'running' ? '-' : v.draws.map(d => d.pool ? `pool, node ${d.host}: ${d.mem} GiB` : `ordinary memory: ${d.mem} GiB`).join('<br>')}</td></tr>`).join('')}</table>`
+    : '<div class="small">No VMs.</div>';
+
+  renderScenario();
+}
+
+document.getElementById('stopLast').onclick = () => dispatch({ type: 'stopLast' });
+document.getElementById('reset').onclick = () => dispatch({ type: 'clearVMs' });
+
+// ---------------------------------------------------------------------------
+// Walkthroughs.
+// ---------------------------------------------------------------------------
+const L = (t) => ({ label: `Launch ${t}`, action: { type: 'launch', instanceType: t } });
+const SCENARIOS = [
+  {
+    title: '1. One node, one NodeClass',
+    settings: {},
+    text: 'The proposed rule on a one-NUMA-node host: non-root, a 1024 MiB pool of 16 GiB, one template with hugepages=1024. Every kind is offered. Watch every VM draw its memory from the pool on node 0, and zone capacity stay in step with the host. The last launch is refused by zone capacity, not by a failed start.',
+    steps: [L('c1.2VCPU-4GB'), L('s1.2VCPU-4GB'), L('n1.4VCPU-8GB'), L('t1.2VCPU-6GB')],
+  },
+  {
+    title: '2. Same host, today\'s rule',
+    settings: { rule: 'today' },
+    text: 'Today\'s rule on the same host. The hugepage template drops non-NUMA types (TemplateHugepagesSet), so a second NodeClass with a no-hugepage template would be needed for them.',
+    steps: [L('c1.2VCPU-4GB'), L('n1.4VCPU-8GB')],
+  },
+  {
+    title: '3. Why not two NUMA nodes',
+    settings: { rule: 'anyCount', numaNodes: 2, tplNuma: true },
+    text: 'The rejected "any node count" rule on a two-node host (template numa: 1, sockets: 1). Non-NUMA VMs all draw from node 0, but zone capacity only charges them to the zone total. It still thinks node 0 has room for a NUMA slot, and Proxmox fails to start it. This drift is why ADR 0003 rejected one template for every type, and why the relaxation needs one node.',
+    steps: [L('c1.2VCPU-4GB'), L('c1.2VCPU-4GB'), L('t1.2VCPU-6GB'), L('n1.4VCPU-8GB')],
+  },
+  {
+    title: '4. Template NUMA config (Q4)',
+    settings: { launch: 'inherit', tplNuma: true, tplSockets: 2 },
+    text: 'One node, but the template has numa: 1 and sockets: 2. Relying on the template (Q4b), Proxmox splits memory per socket and wants host node 1, which doesn\'t exist. Switch the launch to Q4a and retry: numa0 with hostnodes=0 starts.',
+    steps: [L('c1.2VCPU-4GB'), { label: 'Switch launch to Q4a (write numa0)', action: { type: 'set', key: 'launch', value: 'writeNuma0' } }, L('c1.2VCPU-4GB')],
+  },
+  {
+    title: '5. Mismatched page size (Q12)',
+    settings: { hugepages: '2' },
+    text: 'One node, a 1024 MiB pool, but the template has hugepages=2. The pool can\'t serve 2 MiB pages, so both kinds are dropped (TemplateHugepagesMismatch). Nothing is launched.',
+    steps: [L('c1.2VCPU-4GB'), L('n1.4VCPU-8GB')],
+  },
+  {
+    title: '6. No-hugepage template stays (Q5)',
+    settings: { hugepages: '' },
+    text: 'One node, the template without hugepages. Unchanged from today: non-NUMA types are offered and run on ordinary memory, but zone capacity charges them to the pool. NUMA types are dropped. Watch the pool panel: the pool stays unused while the zone budget fills.',
+    steps: [L('c1.2VCPU-4GB'), L('t1.2VCPU-6GB'), L('n1.4VCPU-8GB')],
+  },
+  {
+    title: '7. Root unchanged (Q6)',
+    settings: { root: true },
+    text: 'As root there is no check, and the controller sets hugepages only for NUMA slots. A non-NUMA VM cloned from the hugepage template inherits hugepages=1024 without numa: 1, and Proxmox refuses to start it. This is the separate root issue, not part of this change.',
+    steps: [L('n1.4VCPU-8GB'), L('c1.2VCPU-4GB')],
+  },
+];
+
+let scenarioIdx = 0, stepIdx = 0, scenarioStarted = false;
+
+function startScenario(i) {
+  scenarioIdx = i; stepIdx = 0; scenarioStarted = true;
+  dispatch({ type: 'reset', settings: SCENARIOS[i].settings });
+}
+
+function renderScenario() {
+  const sc = SCENARIOS[scenarioIdx];
+  document.getElementById('tabs').innerHTML = SCENARIOS.map((s, i) =>
+    `<button class="${i === scenarioIdx ? 'active' : ''}" data-i="${i}">${s.title}</button>`).join('');
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { scenarioIdx = +b.dataset.i; stepIdx = 0; scenarioStarted = false; renderScenario(); });
+
+  document.getElementById('scenario').innerHTML = `<p>${sc.text}</p>
+    <div class="steps">
+      <button class="${scenarioStarted ? 'done' : 'primary'}" id="startSc">Start: reset to this scenario's setup</button>
+      ${sc.steps.map((st, i) => `<button data-step="${i}" class="${i < stepIdx ? 'done' : ''}" ${!scenarioStarted || i !== stepIdx ? 'disabled' : ''}>${i + 1}. ${st.label}</button>`).join('')}
+    </div>`;
+  document.getElementById('startSc').onclick = () => startScenario(scenarioIdx);
+  document.querySelectorAll('#scenario [data-step]').forEach(b => b.onclick = () => {
+    const i = +b.dataset.step; stepIdx = i + 1; dispatch(sc.steps[i].action);
+  });
+}
+
+render();
+</script>
+</body>
+</html>
