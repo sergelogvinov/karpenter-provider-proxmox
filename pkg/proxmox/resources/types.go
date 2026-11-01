@@ -17,7 +17,7 @@ limitations under the License.
 package resources
 
 import (
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"k8s.io/utils/cpuset"
 )

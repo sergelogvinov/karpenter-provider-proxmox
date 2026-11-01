@@ -27,7 +27,7 @@ import (
 
 	"github.com/sergelogvinov/go-proxmox-local/fakelocal"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/nodecapacity"
 )
 
 // TestEnsureNodeCapacityGuest drives ensureNodeCapacityGuest

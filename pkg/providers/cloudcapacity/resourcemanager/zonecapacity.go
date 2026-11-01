@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
 
 // pendingGracePeriod is how long a pending reservation outlives a VM that never appears in the cluster.

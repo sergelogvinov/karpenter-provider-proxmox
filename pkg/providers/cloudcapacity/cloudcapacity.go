@@ -30,7 +30,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )

@@ -24,7 +24,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/templatecheck"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 
 	"k8s.io/apimachinery/pkg/runtime"
 

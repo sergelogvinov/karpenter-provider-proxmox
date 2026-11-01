@@ -29,7 +29,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
 
 var (

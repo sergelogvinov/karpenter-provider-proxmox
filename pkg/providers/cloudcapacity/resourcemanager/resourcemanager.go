@@ -25,11 +25,11 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/zonesettings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/nodecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/zonesettings"
 
 	"k8s.io/utils/cpuset"
 

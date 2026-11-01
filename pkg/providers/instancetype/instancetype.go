@@ -33,8 +33,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/templatecheck"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"

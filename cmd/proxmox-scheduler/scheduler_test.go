@@ -32,8 +32,8 @@ import (
 	local "github.com/sergelogvinov/go-proxmox-local"
 	"github.com/sergelogvinov/go-proxmox-local/fakelocal"
 	"github.com/sergelogvinov/go-proxmox-local/qemu"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/topology"
 	utilsys "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/sys"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
 
 	"k8s.io/utils/cpuset"
 )

@@ -28,7 +28,7 @@ import (
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
 
 // TestNodePolicySelection exercises policy dispatch using discovered Proxmox topology.

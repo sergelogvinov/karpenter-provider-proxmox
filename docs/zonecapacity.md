@@ -1,6 +1,6 @@
 # Zone Capacity Module Design
 
-Design notes for `pkg/zonecapacity`, one module that both the controller and the
+Design notes for `pkg/proxmox/zonecapacity`, one module that both the controller and the
 [Proxmox Scheduler](scheduler.md) use to work out what a zone can hold and where its VMs' CPUs go.
 It implements the shared rules of [scheduler-shared.md](scheduler-shared.md),
 [scheduler-cpushare.md](scheduler-cpushare.md) and [scheduler-numa.md](scheduler-numa.md).
@@ -280,7 +280,7 @@ call are deleted.
 ## 6. Package layout
 
 ```
-pkg/zonecapacity/
+pkg/proxmox/zonecapacity/
     zone.go, vm.go, plan.go, slots.go, ...   the interface above
     topology/                                public: both binaries build a Topology
     settings/                                public: NodeSettings, moved from resourcemanager/settings

@@ -27,10 +27,10 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/vmconfig"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/vmconfig"
 )
 
 // roundTripSettings is one socket, 8 cores with 2 threads, NUMA node 0 on cores 0-3 and node 1 on cores 4-7.

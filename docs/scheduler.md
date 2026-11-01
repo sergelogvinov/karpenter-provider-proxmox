@@ -59,7 +59,7 @@ The Proxmox Scheduler can be configured using feature flags passed as environmen
 ### Flag: karpenter
 
 When the karpenter feature flag is enabled, the Proxmox Scheduler creates the node-capacity guest: a virtual machine, never started, named `node-capacity` and tagged `karpenter`, that represents the full available capacity of the host.
-The scheduler writes it and the controller reads it through the same module, `pkg/zonecapacity/nodecapacity`.
+The scheduler writes it and the controller reads it through the same module, `pkg/proxmox/zonecapacity/nodecapacity`.
 The guest leaves 1 GiB of each NUMA node to the host; the controller reserves a further 1 GiB, except in a zone with a hugepage pool, whose pool lies outside the host's own memory.
 
 The `affinity` and `numa[n]` parameters are used to expose the node topology (CPU and memory layout) to Karpenter.

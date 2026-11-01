@@ -168,7 +168,7 @@ When Karpenter launches an `e` type:
    Karpenter managed instance, class=default, capacity-type=on-demand, cpushare=2
    ```
 
-On resync, zone capacity (`pkg/zonecapacity`) parses `cpushare=<N>` from the description, so VMs created by hand
+On resync, zone capacity (`pkg/proxmox/zonecapacity`) parses `cpushare=<N>` from the description, so VMs created by hand
 with the token are accounted the same way. A VM with both `affinity` and `cpushare` is treated as pinned and the token is ignored, with a warning.
 
 A VM resized in place, or whose `cpushare` changes, simply moves to another size class on the next resync.
@@ -205,7 +205,7 @@ failing (§8.3, step 5).
 A pure function next to `PlanShared`:
 
 ```go
-// pkg/zonecapacity/internal/cpumanager/planner_cpushare.go
+// internal/cpumanager/planner_cpushare.go
 type CPUShareRequest struct {
     VMID    int
     CPUs    int           // cores from the VM config

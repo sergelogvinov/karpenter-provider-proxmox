@@ -21,7 +21,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/templatecheck"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"

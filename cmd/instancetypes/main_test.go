@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
 
 func runGenerateCLI(args ...string) ([]*instancetype.InstanceTypeStatic, error) {

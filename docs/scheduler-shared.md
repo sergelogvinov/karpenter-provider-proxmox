@@ -51,7 +51,7 @@ the placement of already-running VMs when the set of VMs on the host changes.
 - When the sum of vCPUs no longer fits, degrade gracefully and deterministically: shrink and overlap in a
   controlled way instead of falling back to "everyone on every CPU".
 - Keep placement topology-aware (NUMA node, uncore cache / CCX, physical core) by reusing the existing
-  `pkg/zonecapacity/internal/cpumanager` machinery instead of writing a second allocator.
+  `internal/cpumanager` machinery instead of writing a second allocator.
 - Re-evaluate on VM start, VM stop and resync, while keeping churn on running VMs minimal.
 
 ### Non-goals
@@ -86,7 +86,7 @@ already has this concept in `settings.NodeSettings.ReservedCPUs`; the daemon nee
 A pure function, easy to unit-test, that turns the observed state into a placement plan:
 
 ```go
-// pkg/zonecapacity/internal/cpumanager/planner.go
+// internal/cpumanager/planner.go
 type SharedRequest struct {
     VMID    int
     CPUs    int            // cores from the VM config

@@ -27,9 +27,9 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/network"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/vmconfig"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/nodecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/vmconfig"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )

@@ -127,10 +127,10 @@ linters:
           - goconst
     paths:
       # Copied from kubernetes repo
-      - pkg/zonecapacity/topology
-      - pkg/zonecapacity/internal/cpumanager/policy_test.go
-      - pkg/zonecapacity/internal/cpumanager/cpu_assignment_test.go
-      - pkg/zonecapacity/internal/cpumanager/cpu_assignment.go
+      - pkg/proxmox/zonecapacity/topology
+      - internal/cpumanager/policy_test.go
+      - internal/cpumanager/cpu_assignment_test.go
+      - internal/cpumanager/cpu_assignment.go
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/settings"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/topology"
 )
 
 const gib = uint64(1 << 30)

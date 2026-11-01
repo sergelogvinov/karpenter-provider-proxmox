@@ -48,7 +48,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/nodeipam"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
