@@ -14,4 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodesettings
+// Package zonesettings resolves a zone's settings from the node status, the
+// node-capacity guest and the node settings file.
+package zonesettings
