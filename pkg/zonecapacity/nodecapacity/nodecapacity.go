@@ -21,6 +21,13 @@ limitations under the License.
 // The host memory reserve is split between the two sides: the guest leaves 1GiB of
 // each NUMA node to the host, and the controller reserves a further ReservedMemory,
 // except in a hugepage zone, whose pool lies outside the host's own memory.
+//
+// The guest also carries the host's CPU shape. sockets is the host's sockets and
+// cores its logical CPUs per socket, so that numaN can name every logical CPU.
+// Proxmox has no option for threads, and none fits the uncore caches: numaN stops at
+// numa7, fewer than the L3 caches of a 2-socket EPYC, and args needs root@pam; both
+// travel as description tokens, `threads=N, uncorecaches=N`. The tokens also mark a
+// guest whose sockets is the host's: an older guest has sockets=1 on any host.
 package nodecapacity
 
 import (
@@ -48,9 +55,16 @@ const (
 	Tag  = "karpenter"
 )
 
-// description is the node-capacity guest's description. It keeps the guest's old
-// name, as changing it would rewrite every existing guest on upgrade.
+// description is the node-capacity guest's description, followed by the CPU shape
+// tokens when the guest carries the host's CPU shape.
 const description = "Karpenter discovery service"
+
+// The description tokens of the host's CPU shape: its threads per core and uncore
+// caches of all sockets.
+const (
+	threadsToken      = "threads="
+	uncoreCachesToken = "uncorecaches="
+)
 
 // IsGuest reports whether a guest of this name and tags is the node-capacity guest.
 func IsGuest(name string, tags []string) bool {
@@ -65,7 +79,8 @@ const (
 
 // Encode builds the node-capacity guest's config for the host. Its memory is always
 // the host's ordinary memory less the host reserve, 1GiB per NUMA node; on a host with
-// a hugepage pool each NUMA node's memory is the node's pool instead.
+// a hugepage pool each NUMA node's memory is the node's pool instead. Without a NUMA
+// topology from cadvisor the guest carries no CPU shape.
 func Encode(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topology) *qemu.Config {
 	totalCores := serverInfo.NumCores
 	totalMemoryMB := int(serverInfo.MemoryCapacity / (1024 * 1024))
@@ -129,6 +144,13 @@ func Encode(logger logr.Logger, serverInfo *info.MachineInfo, tp *topology.Topol
 
 		cfg.Affinity = strings.Join(affinity, ",")
 		cfg.NUMA = numa
+
+		if tp.NumSockets > 0 && totalCores%tp.NumSockets == 0 {
+			cfg.Sockets = new(tp.NumSockets)
+			cfg.Cores = new(totalCores / tp.NumSockets)
+			cfg.Description = fmt.Sprintf("%s, %s%d, %s%d", description,
+				threadsToken, tp.CPUsPerCore(), uncoreCachesToken, tp.NumUncoreCache)
+		}
 	}
 
 	cfg.Memory = &qemu.Memory{Current: &totalMemoryMB}
@@ -171,6 +193,12 @@ type Guest struct {
 	Memory uint64
 	// HugePageSize is the page size, in bytes, of the zone's hugepage pool; 0 means none.
 	HugePageSize uint64
+	// Sockets, Threads and UncoreCaches are the host's CPU sockets, threads per
+	// core and uncore caches of all sockets; 0 means unknown, as for a guest
+	// without the CPU shape tokens, whose sockets is not the host's.
+	Sockets      int
+	Threads      int
+	UncoreCaches int
 }
 
 // Decode reads the node-capacity guest's config back into what it says of its zone.
@@ -271,7 +299,33 @@ func Decode(cfg *qemu.Config) (Guest, error) {
 		}
 	}
 
+	guest.Threads = descriptionCount(cfg.Description, threadsToken)
+	guest.UncoreCaches = descriptionCount(cfg.Description, uncoreCachesToken)
+
+	if (guest.Threads > 0 || guest.UncoreCaches > 0) && cfg.Sockets != nil && *cfg.Sockets > 0 {
+		guest.Sockets = *cfg.Sockets
+	}
+
 	return guest, nil
+}
+
+// descriptionCount returns the count of the description's token, or 0 when it has
+// no such token or its value is not a positive number.
+func descriptionCount(desc, token string) int {
+	for part := range strings.SplitSeq(desc, ",") {
+		value, ok := strings.CutPrefix(strings.TrimSpace(part), token)
+		if !ok {
+			continue
+		}
+
+		if n, err := strconv.Atoi(value); err == nil && n > 0 {
+			return n
+		}
+
+		return 0
+	}
+
+	return 0
 }
 
 // hugepagePools returns the hugepage counts the node-capacity guest is built from:

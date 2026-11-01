@@ -232,7 +232,7 @@ The file structure looks like this:
 - NUMA topology settings (optional):
     * `sockets`: (Optional) The number of CPU sockets on the node.
     * `threads`: (Optional) The number of threads per core on the node.
-    * `uncorecaches`: (Optional) The number of uncore cache levels on the node.
+    * `uncorecaches`: (Optional) The number of uncore (L3) caches on the node, across all sockets.
     * `nodes`: (Optional) An object defining NUMA nodes on the system.
         - The keys are NUMA node IDs.
         - Each value is an object with:
@@ -245,7 +245,7 @@ This configuration allows you to optimize resource allocation on your Proxmox no
 
 `threads` field defines how many threads per core are available SMT/Hyper-Threading-wise.
 
-`uncorecaches` field defines how many uncore cache levels are present on the node.
+`uncorecaches` field defines how many uncore (L3) caches the node has in all, counting every socket.
 Use the `lscpu -e` command on the Proxmox node to gather this information (output column: L3 - get maximum number +1).
 
 `cpus` field supports both individual CPU indices and ranges (e.g., "0,2,4-6" for cores 0, 2, 4, 5, and 6).

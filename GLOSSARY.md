@@ -196,7 +196,7 @@ A zone with a hugepage pool.
 _Avoid_: NUMA zone
 
 **Node-capacity guest**:
-A virtual machine the scheduler keeps on each zone, never started, named `node-capacity` and tagged `karpenter`, whose config describes the zone's CPUs, NUMA nodes and hugepage pool to the controller; it is never tracked as a workload.
+A virtual machine the scheduler keeps on each zone, never started, named `node-capacity` and tagged `karpenter`, whose config describes the zone's CPUs, NUMA nodes, hugepage pool and CPU shape (sockets, SMT threads per core, uncore caches) to the controller; it is never tracked as a workload.
 _Avoid_: discovery VM, topology VM
 
 **Fit**:
