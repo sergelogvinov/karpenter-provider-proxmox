@@ -339,6 +339,22 @@ type Pool struct {
 	HostNode int
 }
 
+// OnOneNUMANode reports whether the zone has a hugepage pool and the pool is on one NUMA node, so a VM bound
+// to that node draws from the pool, the whole zone budget.
+func (p Pool) OnOneNUMANode() bool {
+	return p.PageSize > 0 && p.NUMANodes == 1
+}
+
+// SpansNUMANodes reports whether the zone has a hugepage pool that spans two or more NUMA nodes.
+func (p Pool) SpansNUMANodes() bool {
+	return p.PageSize > 0 && p.NUMANodes > 1
+}
+
+// PageSizeMiB is the pool's page size in MiB, as a VM's hugepages gives it; 0 when the zone has no pool.
+func (p Pool) PageSizeMiB() uint64 {
+	return p.PageSize / MiB
+}
+
 // Pool is the zone's hugepage pool.
 func (z *Zone) Pool() Pool {
 	pool := Pool{PageSize: z.hugePageSize, NUMANodes: len(z.topo.NUMANodes)}

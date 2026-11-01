@@ -366,6 +366,14 @@ func detectBootDisk(cfg *qemu.Config) string {
 // whose hugepages draw from the zone's pool on one NUMA node (params.zonePool,
 // templatecheck.NonNUMAInPool, the rule that offers it) gets one guest NUMA
 // node bound to the zone's host NUMA node, see singleNUMANode.
+//
+// As root, a non-NUMA type in a zone whose hugepage pool is on one NUMA node
+// gets the pool's hugepages and that one bound guest NUMA node, whatever the
+// template has, so it draws from the pool, the zone's capacity. In a zone whose
+// pool spans two or more NUMA nodes it is not offered
+// (cloudcapacity.Provider.FitInZone); a clone that still lands there, or in a
+// hugepage zone whose NUMA node count is not known, has its inherited hugepages
+// deleted, as Proxmox refuses hugepages without numa.
 func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qemu.Config {
 	opt := params.resources
 	update := &qemu.Config{}
@@ -404,8 +412,18 @@ func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qem
 		}
 	}
 
-	if !params.root && opt.Slot == nil && cfg.Hugepages != nil && templatecheck.NonNUMAInPool(params.zonePool, *cfg.Hugepages) {
-		singleNUMANode(update, opt, cfg, params.zonePool.HostNode)
+	if pool := params.zonePool; opt.Slot == nil {
+		switch {
+		case !params.root:
+			if cfg.Hugepages != nil && templatecheck.NonNUMAInPool(pool, *cfg.Hugepages) {
+				singleNUMANode(update, opt, cfg, pool.HostNode)
+			}
+		case pool.OnOneNUMANode():
+			update.Hugepages = new(strconv.FormatUint(pool.PageSizeMiB(), 10))
+			singleNUMANode(update, opt, cfg, pool.HostNode)
+		case pool.PageSize > 0 && cfg.Hugepages != nil:
+			update.Delete = append(update.Delete, "hugepages")
+		}
 	}
 
 	if params.root && opt.HugePageSize > 0 {

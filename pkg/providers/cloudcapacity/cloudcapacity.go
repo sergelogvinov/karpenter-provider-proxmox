@@ -42,7 +42,7 @@ type Provider interface {
 	Reserve(ctx context.Context, region, zone string, req resources.VMResources) (resources.VMResources, error)
 	// ChooseZone is zone choice: it reserves req in the candidate zone of region whose fit
 	// best suits strategy, and returns that zone and the reserved resources, as Reserve does.
-	// The caller releases the reservation like any other.
+	// A zone FitInZone does not offer req in is never chosen. The caller releases the reservation like any other.
 	// It fails with ErrNoZoneFits when no candidate zone has room, and with the zone's
 	// error, without ErrNoZoneFits, when the request is invalid there.
 	ChooseZone(ctx context.Context, region string, zones []string, strategy *v1alpha1.PlacementStrategy, req resources.VMResources) (string, resources.VMResources, error)
@@ -64,7 +64,8 @@ type Provider interface {
 	Zones(region string) []string
 
 	// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
-	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, any other error otherwise.
+	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, or, as root, when it is a
+	// non-NUMA VM and the zone's hugepage pool spans two or more NUMA nodes (ADR 0003), any other error otherwise.
 	FitInZone(region, zone string, req resources.VMResources) error
 	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
 	// or under shared placement, which offers no NUMA slot.
@@ -514,8 +515,7 @@ func (p *DefaultProvider) Zones(region string) []string {
 	return p.zoneList[region]
 }
 
-// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
-// zonecapacity.ErrNotOffered when the zone's node policy never offers it, any other error otherwise.
+// FitInZone implements Provider.FitInZone.
 func (p *DefaultProvider) FitInZone(region, zone string, req resources.VMResources) error {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
@@ -523,6 +523,10 @@ func (p *DefaultProvider) FitInZone(region, zone string, req resources.VMResourc
 	info, ok := p.capacityInfo[zoneKey(region, zone)]
 	if !ok || info.Capacity == nil || info.omitted {
 		return fmt.Errorf("zone %s/%s is unavailable", region, zone)
+	}
+
+	if err := p.notOfferedAsRoot(region, zone, req); err != nil {
+		return err
 	}
 
 	_, err := info.Capacity.Fit(req)
@@ -555,6 +559,22 @@ func (p *DefaultProvider) ZonePool(region, zone string) zonecapacity.Pool {
 // Root reports whether the controller logs in as root@pam in region.
 func (p *DefaultProvider) Root(region string) bool {
 	return p.privileges.Root(region)
+}
+
+// notOfferedAsRoot returns an error wrapping zonecapacity.ErrNotOffered when, as root, req is a non-NUMA VM and the
+// zone's hugepage pool spans two or more NUMA nodes; nil otherwise. The caller holds muCapacityInfo.
+//
+// Such a VM cannot draw from the pool there bound to one NUMA node, as in a zone of one NUMA node, and on host
+// memory it would spend what the zone does not track, its capacity being the pool. Root keeps the split
+// templatecheck makes without root, so such a zone serves NUMA types only (ADR 0003). A launch that still
+// lands there clears the template's hugepages, see instance.cloneConfigOverrides.
+func (p *DefaultProvider) notOfferedAsRoot(region, zone string, req resources.VMResources) error {
+	if pool := p.zonePools[zoneKey(region, zone)]; req.Slot == nil && p.privileges.Root(region) && pool.SpansNUMANodes() {
+		return fmt.Errorf("%w: non-NUMA VM as root in zone %s/%s, whose hugepage pool spans %d NUMA nodes",
+			zonecapacity.ErrNotOffered, region, zone, pool.NUMANodes)
+	}
+
+	return nil
 }
 
 // warnNoNodeCapacityGuest warns when a zone under pinned placement has no node-capacity guest and the

@@ -264,7 +264,11 @@ func TestCloneConfigOverridesOtherLaunchesUnchanged(t *testing.T) {
 		},
 		{name: "template of another page size", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: otherPageSize},
 		{name: "template without hugepages", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: &qemu.Config{}},
-		{name: "root", params: cloneVMParams{resources: shared(), zonePool: oneNodePool, root: true}, cfg: hugepageTemplate()},
+		{
+			name:   "root, one NUMA node without a pool",
+			params: cloneVMParams{resources: shared(), zonePool: zonecapacity.Pool{NUMANodes: 1}, root: true}, cfg: hugepageTemplate(),
+		},
+		{name: "root, without a pool", params: cloneVMParams{resources: shared(), root: true}, cfg: hugepageTemplate()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -294,6 +298,108 @@ func TestCloneConfigOverridesOtherLaunchesUnchanged(t *testing.T) {
 		assert.Equal(t, "cpus=0-1,hostnodes=0,memory=4096,policy=bind", update.NUMA[0].String())
 		assert.Empty(t, update.Delete)
 	})
+}
+
+// TestCloneConfigOverridesRootNonNUMATypeInOneNodePool checks that as root a non-NUMA type launched in a zone
+// whose hugepage pool is on one NUMA node gets the pool's hugepages and one guest NUMA node holding all its
+// vCPUs and memory, bound to the zone's host NUMA node, in place of the template's NUMA config, whatever the
+// template's hugepages and numa: the VM draws from the pool, which is the zone's capacity.
+func TestCloneConfigOverridesRootNonNUMATypeInOneNodePool(t *testing.T) {
+	t.Parallel()
+
+	otherPageSize := hugepageTemplate()
+	otherPageSize.Hugepages = new("2")
+
+	anyPageSize := hugepageTemplate()
+	anyPageSize.Hugepages = new("any")
+
+	numaOff := &qemu.Config{Hugepages: new("1024"), NUMAEnabled: new(false)}
+
+	for _, tc := range []struct {
+		name   string
+		cfg    *qemu.Config
+		delete []string
+	}{
+		{name: "hugepage template with two guest NUMA nodes", cfg: hugepageTemplate(), delete: []string{"numa1"}},
+		{name: "template of another page size", cfg: otherPageSize, delete: []string{"numa1"}},
+		{name: "template of any page size", cfg: anyPageSize, delete: []string{"numa1"}},
+		{name: "hugepage template with numa off", cfg: numaOff},
+		{name: "template without hugepages", cfg: &qemu.Config{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			opt := &resources.VMResources{CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New()}
+			pool := zonecapacity.Pool{PageSize: 2 << 20, NUMANodes: 1, HostNode: 1}
+
+			update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: pool, root: true}, 123, tc.cfg)
+
+			assert.Equal(t, new("2"), update.Hugepages, "the pool's page size, in MiB")
+			assert.True(t, *update.NUMAEnabled)
+			assert.Equal(t, new(1), update.Sockets)
+			assert.Equal(t, new(4), update.Cores)
+			assert.Len(t, update.NUMA, 1)
+			assert.Equal(t, "cpus=0-3,hostnodes=1,memory=8192,policy=bind", update.NUMA[0].String())
+			assert.Equal(t, tc.delete, update.Delete, "the template's other guest NUMA nodes are removed")
+		})
+	}
+}
+
+// TestCloneConfigOverridesRootNonNUMATypeInPoolNotOnOneNUMANode checks that as root a non-NUMA type launched in a zone
+// whose hugepage pool spans two NUMA nodes, where it is not offered, or whose NUMA node count is not known,
+// deletes the hugepages it inherits, so the VM starts without numa, and is otherwise left as the template has it.
+func TestCloneConfigOverridesRootNonNUMATypeInPoolNotOnOneNUMANode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		pool zonecapacity.Pool
+	}{
+		{name: "two NUMA nodes", pool: twoNodePool},
+		{name: "NUMA nodes not known", pool: zonecapacity.Pool{PageSize: 1 << 30}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			opt := &resources.VMResources{CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New()}
+
+			update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: tc.pool, root: true}, 123,
+				&qemu.Config{Hugepages: new("1024"), NUMAEnabled: new(false)})
+
+			assert.Equal(t, []string{"hugepages"}, update.Delete)
+			assert.Nil(t, update.Hugepages)
+			assert.Nil(t, update.NUMAEnabled)
+			assert.Empty(t, update.NUMA)
+
+			update = cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: tc.pool, root: true}, 123, &qemu.Config{})
+
+			assert.Empty(t, update.Delete, "a template without hugepages")
+			assert.Nil(t, update.Hugepages)
+		})
+	}
+}
+
+// TestCloneConfigOverridesRootNUMATypeInPoolUnchanged checks that as root a NUMA type launched in a hugepage
+// zone keeps its slot's NUMA config and gets its grant's hugepages, in a pool of one or of two NUMA nodes.
+func TestCloneConfigOverridesRootNUMATypeInPoolUnchanged(t *testing.T) {
+	t.Parallel()
+
+	for _, pool := range []zonecapacity.Pool{oneNodePool, twoNodePool} {
+		opt := &resources.VMResources{
+			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3), HugePageSize: 1 << 30,
+			Slot:      &zonecapacity.SlotShape{CPUs: 2, Memory: 4 << 30},
+			NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0-1", Memory: 4096, Policy: "bind"}},
+		}
+
+		update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: pool, root: true}, 123, hugepageTemplate())
+
+		assert.Equal(t, new("1024"), update.Hugepages)
+		assert.Equal(t, "2-3", update.Affinity)
+		assert.Nil(t, update.Sockets)
+		assert.Len(t, update.NUMA, 1)
+		assert.Equal(t, "cpus=0-1,hostnodes=1,memory=4096,policy=bind", update.NUMA[0].String())
+		assert.Empty(t, update.Delete)
+	}
 }
 
 func TestCloneConfigOverridesSMBiosAlreadyBase64(t *testing.T) {
