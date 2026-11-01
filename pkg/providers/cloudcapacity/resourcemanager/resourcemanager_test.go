@@ -115,6 +115,42 @@ func TestNodeSettingsFromGuest(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "the guest's CPU shape replaces the guess",
+			cfg: &qemu.Config{
+				Description: "Karpenter discovery service, threads=2, uncorecaches=16",
+				Sockets:     new(2),
+				Cores:       new(64),
+				Affinity:    "0-127",
+			},
+			nodeSettings: &settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 8},
+			expected: &settings.NodeSettings{
+				NumSockets:      2,
+				NumThreads:      2,
+				NumUncoreCaches: 16,
+				NUMANodes: settings.NUMANodes{
+					0: {CPUs: "0-127"},
+				},
+			},
+		},
+		{
+			name: "a guest without a CPU shape keeps the guess",
+			cfg: &qemu.Config{
+				Description: "Karpenter discovery service",
+				Sockets:     new(1),
+				Cores:       new(128),
+				Affinity:    "0-127",
+			},
+			nodeSettings: &settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 8},
+			expected: &settings.NodeSettings{
+				NumSockets:      2,
+				NumThreads:      2,
+				NumUncoreCaches: 8,
+				NUMANodes: settings.NUMANodes{
+					0: {CPUs: "0-127"},
+				},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -127,6 +163,40 @@ func TestNodeSettingsFromGuest(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, tc.nodeSettings)
+		})
+	}
+}
+
+func TestNodeSettingsFromFile(t *testing.T) {
+	testCases := []struct {
+		name         string
+		file         *settings.NodeSettings
+		nodeSettings settings.NodeSettings
+		expected     settings.NodeSettings
+	}{
+		{
+			name:         "no file keeps what the guest and the guess gave",
+			nodeSettings: settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 16},
+			expected:     settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 16},
+		},
+		{
+			name:         "the file's CPU shape wins",
+			file:         &settings.NodeSettings{NumSockets: 1, NumThreads: 1, NumUncoreCaches: 4},
+			nodeSettings: settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 16},
+			expected:     settings.NodeSettings{NumSockets: 1, NumThreads: 1, NumUncoreCaches: 4},
+		},
+		{
+			name:         "a field the file leaves unset is kept",
+			file:         &settings.NodeSettings{NumUncoreCaches: 4, ReservedCPUs: []int{0}},
+			nodeSettings: settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 16},
+			expected:     settings.NodeSettings{NumSockets: 2, NumThreads: 2, NumUncoreCaches: 4, ReservedCPUs: []int{0}},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			nodeSettingsFromFile(&tc.nodeSettings, tc.file)
 			assert.Equal(t, tc.expected, tc.nodeSettings)
 		})
 	}

@@ -46,27 +46,66 @@ func pages2M(n uint64) []info.HugePagesInfo {
 	return []info.HugePagesInfo{{PageSize: nodecapacity.HugepageSize2M, NumPages: n}}
 }
 
-// dualNodeTopology is a 2-NUMA-node, SMT topology: node 0 = {0,1,4,5}, node 1 =
-// {2,3,6,7} (0/4, 1/5, 2/6, 3/7 are SMT sibling pairs).
+// dualNodeTopology is a 2-socket, 2-NUMA-node, SMT topology with one uncore cache
+// per socket: node 0 = {0,1,4,5}, node 1 = {2,3,6,7} (0/4, 1/5, 2/6, 3/7 are SMT
+// sibling pairs).
 func dualNodeTopology() *topology.Topology {
 	return &topology.Topology{ //nolint:modernize // MemTopology is a second embedded field; the suggested elision does not compile
-		NumCPUs:      8,
-		NumCores:     4,
-		NumSockets:   2,
-		NumNUMANodes: 2,
-		TotalMemory:  16 << 30,
-		NUMANodes:    map[int]uint64{0: 8 << 30, 1: 8 << 30},
+		NumCPUs:        8,
+		NumCores:       4,
+		NumSockets:     2,
+		NumNUMANodes:   2,
+		NumUncoreCache: 2,
+		TotalMemory:    16 << 30,
+		NUMANodes:      map[int]uint64{0: 8 << 30, 1: 8 << 30},
 		CPUDetails: topology.CPUDetails{
-			0: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
-			1: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
-			2: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
-			3: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
-			4: {CoreID: 0, SocketID: 0, NUMANodeID: 0},
-			5: {CoreID: 1, SocketID: 0, NUMANodeID: 0},
-			6: {CoreID: 2, SocketID: 1, NUMANodeID: 1},
-			7: {CoreID: 3, SocketID: 1, NUMANodeID: 1},
+			0: {CoreID: 0, SocketID: 0, NUMANodeID: 0, UncoreCacheID: 0},
+			1: {CoreID: 1, SocketID: 0, NUMANodeID: 0, UncoreCacheID: 0},
+			2: {CoreID: 2, SocketID: 1, NUMANodeID: 1, UncoreCacheID: 1},
+			3: {CoreID: 3, SocketID: 1, NUMANodeID: 1, UncoreCacheID: 1},
+			4: {CoreID: 0, SocketID: 0, NUMANodeID: 0, UncoreCacheID: 0},
+			5: {CoreID: 1, SocketID: 0, NUMANodeID: 0, UncoreCacheID: 0},
+			6: {CoreID: 2, SocketID: 1, NUMANodeID: 1, UncoreCacheID: 1},
+			7: {CoreID: 3, SocketID: 1, NUMANodeID: 1, UncoreCacheID: 1},
 		},
 	}
+}
+
+// machine is a cadvisor host with Linux CPU numbering: physical cores first,
+// numbered socket by socket, then their SMT siblings, each socket one NUMA node and
+// each run of coresPerCache cores one uncore cache.
+func machine(sockets, cachesPerSocket, coresPerCache, threads int) *info.MachineInfo {
+	coresPerSocket := cachesPerSocket * coresPerCache
+	numCores := sockets * coresPerSocket
+
+	m := &info.MachineInfo{
+		NumCores:         numCores * threads,
+		NumPhysicalCores: numCores,
+		NumSockets:       sockets,
+		MemoryCapacity:   uint64(sockets) * 64 * gib,
+	}
+
+	for s := range sockets {
+		node := info.Node{Id: s, Memory: 64 * gib}
+
+		for c := s * coresPerSocket; c < (s+1)*coresPerSocket; c++ {
+			core := info.Core{
+				Id:           c,
+				SocketID:     s,
+				UncoreCaches: []info.Cache{{Id: c / coresPerCache, Level: 3}},
+			}
+
+			for t := range threads {
+				core.Threads = append(core.Threads, c+t*numCores)
+			}
+
+			node.Cores = append(node.Cores, core)
+		}
+
+		m.Topology = append(m.Topology, node)
+	}
+
+	return m
 }
 
 // TestRoundTrip checks that what the scheduler encodes from a host is what the
@@ -103,8 +142,11 @@ func TestRoundTrip(t *testing.T) {
 					0: {CPUs: "0-1,4-5", MemSize: 31 * gib},
 					1: {CPUs: "2-3,6-7", MemSize: 31 * gib},
 				},
-				CPUs:   cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
-				Memory: 62 * gib,
+				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
+				Memory:       62 * gib,
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 2,
 			},
 		},
 		{
@@ -126,6 +168,9 @@ func TestRoundTrip(t *testing.T) {
 				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 				Memory:       62 * gib,
 				HugePageSize: gib,
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 2,
 			},
 		},
 		{
@@ -147,6 +192,9 @@ func TestRoundTrip(t *testing.T) {
 				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 				Memory:       62 * gib,
 				HugePageSize: gib,
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 2,
 			},
 		},
 		{
@@ -165,8 +213,11 @@ func TestRoundTrip(t *testing.T) {
 					0: {CPUs: "0-1,4-5", MemSize: 31 * gib},
 					1: {CPUs: "2-3,6-7", MemSize: 31 * gib},
 				},
-				CPUs:   cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
-				Memory: 62 * gib,
+				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
+				Memory:       62 * gib,
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 2,
 			},
 		},
 		{
@@ -188,6 +239,9 @@ func TestRoundTrip(t *testing.T) {
 				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 				Memory:       62 * gib,
 				HugePageSize: 2 * mib,
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 2,
 			},
 		},
 	}
@@ -202,6 +256,62 @@ func TestRoundTrip(t *testing.T) {
 			guest, err := nodecapacity.Decode(cfg)
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, guest)
+		})
+	}
+}
+
+// TestCPUShape checks that the controller rebuilds, from the node-capacity guest,
+// the CPU topology the scheduler saw through cadvisor.
+func TestCPUShape(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		serverInfo *info.MachineInfo
+		cores      int
+		expected   nodecapacity.Guest
+	}{
+		{
+			name:       "2-socket EPYC with SMT and 24 uncore caches",
+			serverInfo: machine(2, 12, 4, 2),
+			cores:      96,
+			expected:   nodecapacity.Guest{Sockets: 2, Threads: 2, UncoreCaches: 24},
+		},
+		{
+			name:       "2-socket Intel without SMT",
+			serverInfo: machine(2, 1, 16, 1),
+			cores:      16,
+			expected:   nodecapacity.Guest{Sockets: 2, Threads: 1, UncoreCaches: 2},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tp, err := topology.DiscoverCadvisor(logr.Discard(), tt.serverInfo)
+			require.NoError(t, err)
+
+			cfg := nodecapacity.Encode(logr.Discard(), tt.serverInfo, tp)
+			assert.Equal(t, tt.expected.Sockets, *cfg.Sockets)
+			assert.Equal(t, tt.cores, *cfg.Cores)
+
+			guest, err := nodecapacity.Decode(cfg)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected.Sockets, guest.Sockets)
+			assert.Equal(t, tt.expected.Threads, guest.Threads)
+			assert.Equal(t, tt.expected.UncoreCaches, guest.UncoreCaches)
+
+			decoded, err := topology.DiscoverFromSettings(&settings.NodeSettings{
+				NumSockets:      guest.Sockets,
+				NumThreads:      guest.Threads,
+				NumUncoreCaches: guest.UncoreCaches,
+				NUMANodes:       guest.NUMANodes,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tp.NumUncoreCache, decoded.NumUncoreCache)
+			assert.Equal(t, tp.CPUsPerCore(), decoded.CPUsPerCore())
+			assert.Equal(t, tp.CPUDetails, decoded.CPUDetails)
 		})
 	}
 }
@@ -489,6 +599,50 @@ func TestDecode(t *testing.T) {
 				},
 				CPUs:         cpuset.New(0, 1, 2, 3, 4, 5, 6, 7),
 				HugePageSize: gib,
+			},
+		},
+		{
+			name: "a guest without CPU shape tokens has no CPU shape",
+			cfg: &qemu.Config{
+				Description: "Karpenter discovery service",
+				Sockets:     new(1),
+				Cores:       new(8),
+				Affinity:    "0-7",
+			},
+			expected: nodecapacity.Guest{
+				NUMANodes: settings.NUMANodes{},
+				CPUs:      lo.Must(cpuset.Parse("0-7")),
+			},
+		},
+		{
+			name: "the description tokens carry the CPU shape",
+			cfg: &qemu.Config{
+				Description: "Karpenter discovery service, threads=2, uncorecaches=4",
+				Sockets:     new(2),
+				Cores:       new(8),
+				Affinity:    "0-15",
+			},
+			expected: nodecapacity.Guest{
+				NUMANodes:    settings.NUMANodes{},
+				CPUs:         lo.Must(cpuset.Parse("0-15")),
+				Sockets:      2,
+				Threads:      2,
+				UncoreCaches: 4,
+			},
+		},
+		{
+			name: "a token without a positive count is unknown",
+			cfg: &qemu.Config{
+				Description: "Karpenter discovery service, threads=x, uncorecaches=2",
+				Sockets:     new(2),
+				Cores:       new(8),
+				Affinity:    "0-15",
+			},
+			expected: nodecapacity.Guest{
+				NUMANodes:    settings.NUMANodes{},
+				CPUs:         lo.Must(cpuset.Parse("0-15")),
+				Sockets:      2,
+				UncoreCaches: 2,
 			},
 		},
 		{

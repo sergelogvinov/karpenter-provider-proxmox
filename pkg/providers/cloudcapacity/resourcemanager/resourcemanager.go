@@ -64,33 +64,7 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 		}
 
 		if setting != nil {
-			if setting.NumSockets != 0 {
-				nodeSettings.NumSockets = setting.NumSockets
-			}
-
-			if setting.NumThreads != 0 {
-				nodeSettings.NumThreads = setting.NumThreads
-			}
-
-			if setting.NumUncoreCaches != 0 {
-				nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
-			}
-
-			if len(setting.ReservedCPUs) != 0 {
-				nodeSettings.ReservedCPUs = setting.ReservedCPUs
-			}
-
-			if setting.ReservedMemory != 0 {
-				nodeSettings.ReservedMemory = setting.ReservedMemory
-			}
-
-			if len(setting.NUMANodes) != 0 {
-				nodeSettings.NUMANodes = setting.NUMANodes
-			}
-
-			if setting.HugePageSize != 0 {
-				nodeSettings.HugePageSize = setting.HugePageSize
-			}
+			nodeSettingsFromFile(&nodeSettings, setting)
 
 			log.V(1).Info("Loaded node settings from file", "file", name, "settings", nodeSettings)
 		}
@@ -179,10 +153,48 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 	return nodeSettings, nil
 }
 
+// nodeSettingsFromFile merges the node settings file's entry for the zone into
+// nodeSettings: each field the file sets wins over the node-capacity guest and the
+// guess from the node status.
+func nodeSettingsFromFile(nodeSettings *settings.NodeSettings, setting *settings.NodeSettings) {
+	if setting == nil {
+		return
+	}
+
+	if setting.NumSockets != 0 {
+		nodeSettings.NumSockets = setting.NumSockets
+	}
+
+	if setting.NumThreads != 0 {
+		nodeSettings.NumThreads = setting.NumThreads
+	}
+
+	if setting.NumUncoreCaches != 0 {
+		nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
+	}
+
+	if len(setting.ReservedCPUs) != 0 {
+		nodeSettings.ReservedCPUs = setting.ReservedCPUs
+	}
+
+	if setting.ReservedMemory != 0 {
+		nodeSettings.ReservedMemory = setting.ReservedMemory
+	}
+
+	if len(setting.NUMANodes) != 0 {
+		nodeSettings.NUMANodes = setting.NUMANodes
+	}
+
+	if setting.HugePageSize != 0 {
+		nodeSettings.HugePageSize = setting.HugePageSize
+	}
+}
+
 // nodeSettingsFromGuest merges what the node-capacity guest says of its zone into
 // nodeSettings. The guest is the source of truth, so a pool it no longer has clears
 // the page size, and a pool takes no host reserve: the host's own memory lies
-// outside it.
+// outside it. The guest's CPU shape replaces the guess from the node
+// status wherever the guest knows it.
 func nodeSettingsFromGuest(cfg *qemu.Config, nodeSettings *settings.NodeSettings) error {
 	if cfg == nil || nodeSettings == nil {
 		return fmt.Errorf("invalid input: config and nodeSettings cannot be nil")
@@ -203,6 +215,18 @@ func nodeSettingsFromGuest(cfg *qemu.Config, nodeSettings *settings.NodeSettings
 	}
 
 	maps.Copy(nodeSettings.NUMANodes, guest.NUMANodes)
+
+	if guest.Sockets != 0 {
+		nodeSettings.NumSockets = guest.Sockets
+	}
+
+	if guest.Threads != 0 {
+		nodeSettings.NumThreads = guest.Threads
+	}
+
+	if guest.UncoreCaches != 0 {
+		nodeSettings.NumUncoreCaches = guest.UncoreCaches
+	}
 
 	if len(nodeSettings.NUMANodes) == 0 && !guest.CPUs.IsEmpty() {
 		nodeSettings.NUMANodes[0] = settings.NUMAInfo{

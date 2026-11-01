@@ -24,8 +24,8 @@ type NodeSettings struct {
 	NumSockets int `json:"sockets,omitempty"`
 	// NumThreads is the number of threads per core.
 	NumThreads int `json:"threads,omitempty"`
-	// NumUncoreCaches is the number of uncore caches (cores per CCX).
-	// see: https://en.wikipedia.org/wiki/Epyc
+	// NumUncoreCaches is the number of uncore (L3) caches of all sockets, one per
+	// CCX on EPYC. see: https://en.wikipedia.org/wiki/Epyc
 	NumUncoreCaches int `json:"uncorecaches,omitempty"`
 	// NUMANodes is a map of NUMA node ID to its information.
 	NUMANodes NUMANodes `json:"nodes,omitempty"`

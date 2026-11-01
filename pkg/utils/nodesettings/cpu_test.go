@@ -113,7 +113,7 @@ func TestNodeSettingsAMDEPYC(t *testing.T) {
 				NumCores:        64,
 				NumSockets:      2,
 				NumThreads:      2,
-				NumUncoreCaches: 8,
+				NumUncoreCaches: 16,
 				NUMANodes: settings.NUMANodes{
 					0: {
 						CPUs:    "0-7,64-71",

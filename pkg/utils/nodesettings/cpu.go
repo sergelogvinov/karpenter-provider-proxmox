@@ -103,7 +103,7 @@ func nodeSettingsAMDEPYC(cf cpuFacts) (*settings.NodeSettings, error) {
 	}
 
 	if coresPerCCX > 0 {
-		st.NumUncoreCaches = (cf.Cores / cf.Sockets) / coresPerCCX
+		st.NumUncoreCaches = cf.Cores / coresPerCCX
 	}
 
 	nps := 1
