@@ -155,6 +155,30 @@ _Avoid_: regular type (a regular VM is never a CPU share VM)
 A NUMA type that stays listed, with unavailable offerings, in a zone or capacity type it is no longer generated for, because a NodeClaim there still uses it; when its slot shape is gone from every zone it is rebuilt from its name and its family's NUMA template. It is dropped with its last NodeClaim.
 _Avoid_: stale type, orphan type
 
+**Launch profile**:
+What an instance type itself says about how it launches: whether it is a NUMA type (with its slot fraction), a CPU share type (with its seats) or a dedicated type, and its hugepage request. It says nothing of placement, which follows from the profile together with the node policy.
+_Avoid_: type kind, placement (for the profile)
+
+**Hugepage request**:
+A `hugepages-<size>` resource in an instance type's capacity; its virtual machine must be backed by a hugepage pool whose page size is at least the requested one, so a 1G pool serves a 2M request but not the reverse. A type without one does not care where its memory comes from.
+_Avoid_: hugepages type, hugepage instance
+
+**Unbound VM**:
+A virtual machine whose memory is not bound to a NUMA node: one of a CPU share type, or of any non-NUMA type when the node policy is not `static`.
+_Avoid_: shared VM (a CPU share VM), floating VM
+
+**Bound VM**:
+A virtual machine that is not an unbound VM: one of a NUMA type, or of a dedicated type under the `static` node policy.
+_Avoid_: pinned VM (for this), regular VM (a narrower term)
+
+**Launch decision**:
+For one instance type, template and zone, whether the type is offered there and, if it is, where its memory comes from and which hugepages and guest NUMA options its virtual machine is written with. Offerings and launches read the same decision, so an offered type always launches as decided.
+_Avoid_: template check (only the non-root use of it), launch rule (the rules that make it)
+
+**Memory source**:
+Where a virtual machine's memory comes from in its zone: the hugepage pool or system memory.
+_Avoid_: memory backing, memory type
+
 **Slot offer**:
 A zone's slot shape together with how many free NUMA slots of that shape it has; a NUMA type is available in a zone when its slot offer has at least one.
 _Avoid_: slot availability, free slots (for the pair)
@@ -191,8 +215,12 @@ _Avoid_: oversubscription factor
 The memory a zone holds as preallocated hugepages of one size, per NUMA node; when a zone has one, the node-capacity guest's NUMA memory reports the pool, not ordinary memory.
 _Avoid_: hugepages memory, reserved memory
 
+**System memory**:
+A zone's memory outside its hugepage pool, less reserved memory, known for the whole zone rather than per NUMA node.
+_Avoid_: regular memory, ordinary memory
+
 **Hugepage zone**:
-A zone with a hugepage pool. Its capacity is the pool, so every VM launched there draws from the pool: as root a non-NUMA type gets the pool's hugepages with one guest NUMA node bound to the zone's NUMA node when the pool spans one NUMA node, and is not offered at all when it spans two or more.
+A zone with a hugepage pool. Its memory is two budgets, the pool and system memory, and each virtual machine there is charged to its memory source.
 _Avoid_: NUMA zone
 
 **Node-capacity guest**:
