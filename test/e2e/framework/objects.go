@@ -174,6 +174,13 @@ type NodePoolOptions struct {
 	// NodeClassName is the name of the (pre-existing) ProxmoxNodeClass
 	// this NodePool's spec.template.spec.nodeClassRef points at.
 	NodeClassName string
+
+	// InstanceTypes/InstanceFamilies are the instance types and families
+	// the NodePool allows - typically Config.InstanceTypes
+	// (E2E_INSTANCE_TYPES) and Config.InstanceFamilies
+	// (E2E_INSTANCE_FAMILIES). Either left empty allows any.
+	InstanceTypes    []string
+	InstanceFamilies []string
 }
 
 // NewNodePool builds a NodePool referencing an existing ProxmoxNodeClass by
@@ -187,6 +194,30 @@ type NodePoolOptions struct {
 // asserting against them; the suite tears the NodePool down explicitly
 // instead.
 func NewNodePool(opts NodePoolOptions) *karpv1.NodePool {
+	requirements := []karpv1.NodeSelectorRequirementWithMinValues{
+		{
+			Key:      corev1.LabelArchStable,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   []string{"amd64"},
+		},
+	}
+
+	if len(opts.InstanceTypes) > 0 {
+		requirements = append(requirements, karpv1.NodeSelectorRequirementWithMinValues{
+			Key:      corev1.LabelInstanceTypeStable,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   opts.InstanceTypes,
+		})
+	}
+
+	if len(opts.InstanceFamilies) > 0 {
+		requirements = append(requirements, karpv1.NodeSelectorRequirementWithMinValues{
+			Key:      v1alpha1.LabelInstanceFamily,
+			Operator: corev1.NodeSelectorOpIn,
+			Values:   opts.InstanceFamilies,
+		})
+	}
+
 	return &karpv1.NodePool{
 		Name: opts.Name,
 		Spec: karpv1.NodePoolSpec{
@@ -203,23 +234,7 @@ func NewNodePool(opts NodePoolOptions) *karpv1.NodePool {
 						Kind:  nodeClassKind,
 						Name:  opts.NodeClassName,
 					},
-					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
-						{
-							Key:      corev1.LabelArchStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"amd64"},
-						},
-						{
-							Key:      corev1.LabelInstanceTypeStable,
-							Operator: corev1.NodeSelectorOpIn,
-							Values:   []string{"e2.2VCPU-4GB", "c1.2VCPU-4GB", "t1.2VCPU-6GB", "c1.4VCPU-8GB"},
-						},
-						// {
-						// 	Key:      v1alpha1.LabelInstanceFamily,
-						// 	Operator: corev1.NodeSelectorOpIn,
-						// 	Values:   []string{"n2"},
-						// },
-					},
+					Requirements: requirements,
 				},
 			},
 		},

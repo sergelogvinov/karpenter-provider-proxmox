@@ -25,8 +25,6 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/test/e2e/framework"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -57,11 +55,13 @@ func TestNodePoolLifecycle(t *testing.T) {
 	nodePoolName := f.Name()
 
 	nodePool := framework.NewNodePool(framework.NodePoolOptions{
-		Name:          nodePoolName,
-		NodeClassName: f.Config.NodeClassName,
+		Name:             nodePoolName,
+		NodeClassName:    f.Config.NodeClassName,
+		InstanceTypes:    f.Config.InstanceTypes,
+		InstanceFamilies: f.Config.InstanceFamilies,
 	})
 
-	f.Logf("creating nodepool %s (nodeClass=%s)", nodePoolName, f.Config.NodeClassName)
+	f.Logf("creating nodepool %s (nodeClass=%s, instanceTypes=%v, instanceFamilies=%v)", nodePoolName, f.Config.NodeClassName, f.Config.InstanceTypes, f.Config.InstanceFamilies)
 
 	ctx, cancel = f.Context()
 	err = f.Client.Objects.Create(ctx, nodePool)
@@ -113,15 +113,15 @@ func TestNodePoolLifecycle(t *testing.T) {
 	require.NoError(err, "failed to create statefulset %s/%s", f.Config.Namespace, stsName)
 
 	t.Cleanup(func() {
-		f.Logf("deleting statefulset %s/%s", f.Config.Namespace, stsName)
-
+		done := f.Step("deleting statefulset %s/%s (waiting for its pods to terminate)", f.Config.Namespace, stsName)
 		ctx, cancel := f.Context()
-		err := f.Client.Objects.Delete(ctx, sts)
+		err := framework.WaitForStatefulSetGone(ctx, f.Client.Objects, f.Config.Namespace, stsName, f.Config.Timeout)
 
 		cancel()
+		done()
 
-		if err != nil && !apierrors.IsNotFound(err) {
-			t.Errorf("failed to delete statefulset %s/%s: %v", f.Config.Namespace, stsName, err)
+		if err != nil {
+			t.Errorf("statefulset %s/%s did not clean up: %v", f.Config.Namespace, stsName, err)
 		}
 	})
 
