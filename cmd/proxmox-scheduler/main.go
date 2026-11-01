@@ -101,6 +101,12 @@ func main() {
 	featureFlagsStr := os.Getenv("PROXMOX_FEATURE_FLAGS")
 	featureFlags := parseFeatureFlags(featureFlagsStr)
 	logger.Info("Feature flags configured", "featureFlags", featureFlags)
+	logger.Info("Scheduler configured",
+		"cpuGovernorBusy", *cpuGovernorBusy,
+		"cpuGovernorFree", *cpuGovernorFree,
+		"sharedPolicy", *sharedPolicy,
+		"reservedCPUs", *reservedCPUs,
+	)
 
 	logger.Info("Collecting server hardware information...")
 
