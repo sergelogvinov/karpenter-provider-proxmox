@@ -51,7 +51,7 @@ The stages a ProxmoxTemplate's VM templates go through: created on each zone, re
 _Avoid_: template reconcile, template sync
 
 **Hugepage template**:
-A VM template whose `hugepages` is the page size of a hugepage pool, so that, without root, its clones get hugepages from the pool and launch NUMA types in hugepage zones.
+A VM template whose `hugepages` is the page size of a hugepage pool, so that, without root, its clones get hugepages from the pool and launch NUMA types in hugepage zones, and non-NUMA types too in hugepage zones of one NUMA node.
 _Avoid_: NUMA template (an instance types file entry), hugepages-enabled template
 
 **Dropped offering**:

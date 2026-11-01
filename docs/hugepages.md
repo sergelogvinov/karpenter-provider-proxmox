@@ -4,19 +4,24 @@ NUMA VMs in a zone with a [hugepage pool](noderesource.md#hugepage-pool) run on 
 As root the controller sets `hugepages` on each launch. Without root (any API token, or a user other than `root@pam`, see [Permissions](permission.md)) it may not.
 The clone then inherits `hugepages` from the VM template, so the template decides which instance types a NodeClass can launch in such a zone ([ADR 0003](adr/0003-unprivileged-controller.md)):
 
-| Template `hugepages`                 | NUMA types in a hugepage zone | Non-NUMA types in a hugepage zone |
-|--------------------------------------|-------------------------------|-----------------------------------|
-| unset                                | dropped                       | offered                           |
-| the pool's page size (`2` or `1024`) | offered                       | dropped                           |
-| another page size, or `any`          | dropped                       | dropped                           |
-| not known (see below)                | dropped                       | dropped                           |
+| Template `hugepages`                 | NUMA types | Non-NUMA types, one NUMA node | Non-NUMA types, 2+ NUMA nodes |
+|--------------------------------------|------------|-------------------------------|-------------------------------|
+| unset                                | dropped    | offered                       | offered                       |
+| the pool's page size (`2` or `1024`) | offered    | offered                       | dropped                       |
+| another page size, or `any`          | dropped    | dropped                       | dropped                       |
+| not known (see below)                | dropped    | dropped                       | dropped                       |
 
 Non-NUMA types are every instance type outside a NUMA slot: static types and CPU share types.
-A non-NUMA VM with `hugepages` would draw from the pool, which zone capacity does not track for it.
+The NUMA node count is the zone's resolved topology, from the [node settings](noderesource.md), the node-capacity guest or the guess from the CPU model.
+
+On a host whose hugepage pool spans one NUMA node, a single hugepage NodeClass serves every instance type.
+The pool is the whole zone budget there, so a non-NUMA VM drawing from it keeps zone capacity exact.
+The controller launches such a VM with `numa: 1` and one `numa0` holding all its vCPUs and memory, bound (`hostnodes`, `policy=bind`) to the zone's NUMA node, in place of any `numaN` on the template.
+With two or more NUMA nodes, a non-NUMA VM with `hugepages` would draw from the pool, which zone capacity does not track per node for it, so non-NUMA types keep a template without `hugepages`.
 
 Zones without a hugepage pool, and regions where the controller is root, are not affected: their offerings are not filtered by the template.
 
-So in hugepage zones without root, NUMA NodePools and non-NUMA NodePools need separate NodeClasses, each with its own template.
+So in hugepage zones of two or more NUMA nodes without root, NUMA NodePools and non-NUMA NodePools need separate NodeClasses, each with its own template.
 
 A dropped offering is only left out of what the NodeClass offers for new nodes.
 NodeClaims already running on an instance type that is now dropped, for example after the template's `hugepages` changed, are not drifted and keep running as they are.
@@ -100,7 +105,7 @@ NodeClaims already running on an instance type that is now dropped, for example 
 
 Each NodeClass has a `TemplateCompatible` condition.
 It is `False` only for a problem of the template, and `True` otherwise.
-Dropping NUMA types from a NodeClass whose template has no `hugepages`, or non-NUMA types from a NodeClass with a hugepage template, is the intended split above and leaves it `True`, so a correctly split pair of NodeClasses shows `True` on both.
+Dropping NUMA types from a NodeClass whose template has no `hugepages`, or non-NUMA types from a NodeClass with a hugepage template in a zone of two or more NUMA nodes, is the intended split above and leaves it `True`, so a correctly split pair of NodeClasses shows `True` on both.
 Whenever offerings are dropped, its message names each zone, the kind of instance type dropped there, and why:
 
 ```yaml
@@ -113,7 +118,7 @@ Whenever offerings are dropped, its message names each zone, the kind of instanc
 | Status  | Reason                      | Dropped                 | Cause                                                                    |
 |---------|-----------------------------|-------------------------|--------------------------------------------------------------------------|
 | `True`  | `TemplateCompatible`        | nothing                 | every kind is offered in every zone                                      |
-| `True`  | `TemplateHugepagesSet`      | non-NUMA types          | the template has the pool's page size: a NodeClass for NUMA types        |
+| `True`  | `TemplateHugepagesSet`      | non-NUMA types          | the template has the pool's page size on 2+ NUMA nodes: a NodeClass for NUMA types |
 | `True`  | `TemplateHugepagesUnset`    | NUMA types              | the template has no `hugepages`: a NodeClass for non-NUMA types          |
 | `True`  | `OfferingsDropped`          | as in the message       | intended splits of more than one reason                                  |
 | `False` | `TemplateHugepagesMismatch` | both                    | the template's `hugepages` is another page size, or `any`                |
@@ -124,7 +129,7 @@ Whenever offerings are dropped, its message names each zone, the kind of instanc
 The condition is not part of `Ready`.
 With a `True` condition, read the message to check that the dropped kind is the one the NodeClass's NodePool does not use.
 The controller rechecks every 15 seconds, so the condition follows changes to the template.
-While a hugepage zone is out of the controller's view, for example when its Proxmox node is unreachable, the check keeps the page size of its pool as last seen, so the condition does not flip; the zone launches nothing until it is back.
+While a hugepage zone is out of the controller's view, for example when its Proxmox node is unreachable, the check keeps the page size of its pool and its NUMA node count as last seen, so the condition does not flip; the zone launches nothing until it is back.
 
 A template whose `status.template` is unset is not known, and launches nothing in hugepage zones, since a clone's `hugepages` cannot be predicted.
 This happens when its VM templates disagree on `hugepages` or `affinity` (`ProxmoxVirtualMachineTemplateConsistent` is `False`, reason `VMTemplatesDisagree`), or while one of them is not read yet (`Unknown`, reason `VMTemplatesUnknown`).

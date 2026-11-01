@@ -203,7 +203,7 @@ func TestCloudProviderOffersByTemplateHugepages(t *testing.T) {
 		hugepages string
 		offered   []string
 	}{
-		{name: "hugepage template offers the NUMA type", hugepages: "1024", offered: []string{numaType}},
+		{name: "hugepage template offers every type on one NUMA node", hugepages: "1024", offered: []string{nonNUMAType, numaType}},
 		{name: "template without hugepages offers the non-NUMA type", hugepages: "", offered: []string{nonNUMAType}},
 		{name: "template of another page size offers nothing", hugepages: "2", offered: []string{}},
 	} {

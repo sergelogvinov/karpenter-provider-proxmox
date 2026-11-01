@@ -69,11 +69,11 @@ type Provider interface {
 	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
 	// or under shared placement, which offers no NUMA slot.
 	Slots(region, zone string) []zonecapacity.SlotOffer
-	// HugePageSize is the page size, in bytes, of the zone's hugepage pool; 0 when the zone has none
-	// or was never synced. A zone missing from later syncs, so unavailable for placement, keeps the
-	// page size it was last synced with, so that what depends on the pool does not flip while the
-	// zone is out.
-	HugePageSize(region, zone string) uint64
+	// ZonePool is the zone's hugepage pool: the page size, in bytes, 0 when the zone has none, and the
+	// NUMA node count of the zone's topology, both from the same sync; both are 0 when the zone was
+	// never synced. A zone missing from later syncs, so unavailable for placement, keeps what it was
+	// last synced with, so that what depends on the pool does not flip while the zone is out.
+	ZonePool(region, zone string) zonecapacity.Pool
 	// Root reports whether the controller logs in as root@pam in region (ADR 0003).
 	Root(region string) bool
 
@@ -91,9 +91,9 @@ type DefaultProvider struct {
 
 	muCapacityInfo sync.RWMutex
 	capacityInfo   map[string]NodeCapacityInfo
-	// hugePageSizes is the page size of each zone's hugepage pool as of the last sync that saw the
-	// zone, guarded by muCapacityInfo; a zone is never removed from it.
-	hugePageSizes map[string]uint64
+	// zonePools is each zone's hugepage pool as of the last sync that saw the zone, guarded by
+	// muCapacityInfo; a zone is never removed from it.
+	zonePools map[string]zonecapacity.Pool
 	// releasedDuringSync collects, per zone, the VMs released while a sync builds new zones,
 	// so the swap does not bring back VMs the build saw before their release.
 	releasedDuringSync map[string][]int
@@ -304,13 +304,13 @@ func (p *DefaultProvider) SyncNodeCapacity(ctx context.Context) error {
 		log.V(1).Info("Node network interfaces available", "node", key, "ifaces", len(info.Ifaces))
 	}
 
-	if p.hugePageSizes == nil {
-		p.hugePageSizes = map[string]uint64{}
+	if p.zonePools == nil {
+		p.zonePools = map[string]zonecapacity.Pool{}
 	}
 
 	for key, info := range capacityInfo {
 		if !info.omitted && info.Capacity != nil {
-			p.hugePageSizes[key] = info.Capacity.HugePageSize()
+			p.zonePools[key] = info.Capacity.Pool()
 		}
 	}
 
@@ -544,12 +544,12 @@ func (p *DefaultProvider) Slots(region, zone string) []zonecapacity.SlotOffer {
 	return info.Capacity.Slots()
 }
 
-// HugePageSize implements Provider.HugePageSize.
-func (p *DefaultProvider) HugePageSize(region, zone string) uint64 {
+// ZonePool implements Provider.ZonePool.
+func (p *DefaultProvider) ZonePool(region, zone string) zonecapacity.Pool {
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
-	return p.hugePageSizes[zoneKey(region, zone)]
+	return p.zonePools[zoneKey(region, zone)]
 }
 
 // Root reports whether the controller logs in as root@pam in region.

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
@@ -137,6 +139,7 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		instanceTypeName: instanceType.Name,
 		vmName:           nodeClaim.Name,
 		root:             p.privileges.Root(region),
+		zonePool:         p.cloudCapacityProvider.ZonePool(region, zone),
 	}); err != nil {
 		return nil, err
 	}
@@ -271,6 +274,8 @@ type cloneVMParams struct {
 	vmName           string
 	// root is whether the region's credentials are root@pam, which alone may set affinity and hugepages.
 	root bool
+	// zonePool is the zone's hugepage pool, as cloudcapacity.Provider.ZonePool reports it; zero when not known.
+	zonePool zonecapacity.Pool
 }
 
 // cloneAndConfigureVM clones vmTemplateID into newID, resizes its boot disk
@@ -357,7 +362,10 @@ func detectBootDisk(cfg *qemu.Config) string {
 // (params.root false) neither is written: a pinned VM's host CPUs travel only in the `affinity=`
 // description token, which the proxmox-scheduler applies, and hugepages come
 // from the template. numaN, hostnodes and policy included, needs no root and
-// is written either way.
+// is written either way. Without root, a non-NUMA type cloned from a template
+// whose hugepages draw from the zone's pool on one NUMA node (params.zonePool,
+// templatecheck.NonNUMAInPool, the rule that offers it) gets one guest NUMA
+// node bound to the zone's host NUMA node, see singleNUMANode.
 func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qemu.Config {
 	opt := params.resources
 	update := &qemu.Config{}
@@ -394,6 +402,10 @@ func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qem
 			}
 			idx++
 		}
+	}
+
+	if !params.root && opt.Slot == nil && cfg.Hugepages != nil && templatecheck.NonNUMAInPool(params.zonePool, *cfg.Hugepages) {
+		singleNUMANode(update, opt, cfg, params.zonePool.HostNode)
 	}
 
 	if params.root && opt.HugePageSize > 0 {
@@ -436,6 +448,28 @@ func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qem
 	}
 
 	return update
+}
+
+// singleNUMANode writes into update one guest NUMA node holding all of opt's vCPUs and memory, bound to host
+// NUMA node hostNode, in place of the NUMA config the template cfg carries. Proxmox needs numa for hugepages, and its
+// default per-socket split wants a host NUMA node per socket, which a zone of one NUMA node lacks. One guest
+// node is one socket, so the VM has opt's vCPUs whatever sockets the template has. Instance memory is whole
+// GiB, so a multiple of either page size.
+func singleNUMANode(update *qemu.Config, opt *resources.VMResources, cfg *qemu.Config, hostNode int) {
+	update.Sockets = new(1)
+	update.NUMAEnabled = new(true)
+	update.NUMA = map[int]qemu.NUMA{0: {
+		CPUIDs:    []string{fmt.Sprintf("0-%d", opt.CPUs-1)},
+		HostNodes: []string{strconv.Itoa(hostNode)},
+		Memory:    new(int(opt.Memory / zonecapacity.MiB)),
+		Policy:    "bind",
+	}}
+
+	for _, idx := range slices.Sorted(maps.Keys(cfg.NUMA)) {
+		if idx != 0 {
+			update.Delete = append(update.Delete, "numa"+strconv.Itoa(idx))
+		}
+	}
 }
 
 // base64EncodeIfNotEmpty base64-encodes s, leaving an empty string unchanged

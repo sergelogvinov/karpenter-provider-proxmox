@@ -25,6 +25,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -59,12 +60,14 @@ func (f *fakeCapacity) GetStorage(r, name string, _ ...func(*cloudcapacity.NodeS
 
 func (f *fakeCapacity) Root(string) bool { return f.root }
 
-func (f *fakeCapacity) HugePageSize(r, zone string) uint64 {
+// ZonePool is a pool of 1GiB pages on two NUMA nodes in hugepageZone, and one NUMA node without a pool in
+// plainZone.
+func (f *fakeCapacity) ZonePool(r, zone string) zonecapacity.Pool {
 	if r == region && zone == hugepageZone {
-		return 1 << 30
+		return zonecapacity.Pool{PageSize: 1 << 30, NUMANodes: 2}
 	}
 
-	return 0
+	return zonecapacity.Pool{NUMANodes: 1}
 }
 
 // newKubeClient is a cluster with a NodeClass whose ProxmoxUnmanagedTemplate has VM templates on both zones

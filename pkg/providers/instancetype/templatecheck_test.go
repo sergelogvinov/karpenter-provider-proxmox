@@ -30,8 +30,8 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
-// hugepageHost is smallHost whose NUMA node memory is a pool of 63 1GiB hugepages: its whole slot has the
-// shape of smallHost's.
+// hugepageHost is smallHost whose one NUMA node's memory is a pool of 63 1GiB hugepages: its whole slot has
+// the shape of smallHost's.
 const hugepageHost = `{"sockets": 1, "threads": 2, "nodes": {"0": {"cpus": "0-15", "memsize": 67645734912}}, "hugepagesize": 1073741824}`
 
 const (
@@ -105,9 +105,9 @@ func TestListFiltersByTemplateHugepages(t *testing.T) {
 		nonNUMA, numa []string
 	}{
 		{
-			name:       "matching hugepages offer NUMA types only in the hugepage zone",
+			name:       "matching hugepages offer every type in the hugepage zone of one NUMA node",
 			vmTemplate: &v1alpha1.VMTemplateInfo{Hugepages: "1024"},
-			nonNUMA:    []string{plainZone}, numa: []string{hugepageZone, plainZone},
+			nonNUMA:    []string{hugepageZone, plainZone}, numa: []string{hugepageZone, plainZone},
 		},
 		{
 			name:       "no hugepages offer non-NUMA types only in the hugepage zone",

@@ -329,6 +329,28 @@ func (z *Zone) HugePageSize() uint64 {
 	return z.hugePageSize
 }
 
+// Pool is a zone's hugepage pool: its page size and the NUMA nodes of the zone's topology.
+type Pool struct {
+	// PageSize is the page size, in bytes, of the zone's hugepage pool; 0 when the zone has none.
+	PageSize uint64
+	// NUMANodes is the number of NUMA nodes of the zone's topology, whether or not it has a pool.
+	NUMANodes int
+	// HostNode is the host number of the zone's NUMA node when NUMANodes is 1; 0 otherwise.
+	HostNode int
+}
+
+// Pool is the zone's hugepage pool.
+func (z *Zone) Pool() Pool {
+	pool := Pool{PageSize: z.hugePageSize, NUMANodes: len(z.topo.NUMANodes)}
+	if pool.NUMANodes == 1 {
+		for id := range z.topo.NUMANodes {
+			pool.HostNode = id
+		}
+	}
+
+	return pool
+}
+
 // Available is what a new shared VM could still get under p, clamped at zero.
 // A bad CPU overcommit ratio offers nothing.
 func (z *Zone) Available(p Policy) Capacity {

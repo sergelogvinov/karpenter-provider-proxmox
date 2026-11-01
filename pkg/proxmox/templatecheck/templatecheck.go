@@ -73,12 +73,13 @@ const (
 	// ReasonHugepagesUnset drops NUMA types in a hugepage zone: the template has no hugepages. It is the
 	// intended split of a node class for non-NUMA types and leaves the condition true.
 	ReasonHugepagesUnset = "TemplateHugepagesUnset"
-	// ReasonHugepagesSet drops non-NUMA types in a hugepage zone: the template has hugepages, which a non-NUMA
-	// VM would draw from the pool. It is the intended split of a node class for NUMA types and leaves the
-	// condition true.
+	// ReasonHugepagesSet drops non-NUMA types in a hugepage zone of two or more NUMA nodes: the template has
+	// hugepages, which a non-NUMA VM would draw from the pool unseen by the per-node view. It is the
+	// intended split of a node class for NUMA types and leaves the condition true.
 	ReasonHugepagesSet = "TemplateHugepagesSet"
-	// ReasonHugepagesMismatch drops NUMA types in a hugepage zone: the template's hugepages is not the pool's
-	// page size; "any" is no page size and never matches. The condition is false.
+	// ReasonHugepagesMismatch drops NUMA types in a hugepage zone, and non-NUMA types too in one of one NUMA
+	// node: the template's hugepages is not the pool's page size; "any" is no page size and never matches.
+	// The condition is false.
 	ReasonHugepagesMismatch = "TemplateHugepagesMismatch"
 	// ReasonStatusUnknown drops every type in a hugepage zone: the template's status.template is unset,
 	// because its VM templates disagree or are not known yet, or the template cannot be read.
@@ -97,8 +98,9 @@ const (
 type ZoneInfo interface {
 	// Root reports whether the controller logs in as root@pam in region.
 	Root(region string) bool
-	// HugePageSize is as cloudcapacity.Provider.HugePageSize.
-	HugePageSize(region, zone string) uint64
+	// ZonePool is as cloudcapacity.Provider.ZonePool: the zone's hugepage pool, a page size of 0 without
+	// one, and the NUMA node count of the zone's topology.
+	ZonePool(region, zone string) zonecapacity.Pool
 }
 
 // template is what the check knows of a node class's template: whether the root-only options its VM
@@ -140,9 +142,9 @@ func fromTemplate(t v1alpha1.ProxmoxCommonTemplate) template {
 
 // zone is a zone the node class selects, with what the rules need of it.
 type zone struct {
-	id           ZoneID
-	root         bool
-	hugePageSize uint64
+	id   ZoneID
+	root bool
+	pool zonecapacity.Pool
 }
 
 // Drop is a kind of instance type a node class does not offer in one zone, and why.
@@ -196,7 +198,7 @@ func nodeClassZones(nodeClass *v1alpha1.ProxmoxNodeClass, info ZoneInfo) []zone 
 			continue
 		}
 
-		zones = append(zones, zone{id: id, root: info.Root(p.Region), hugePageSize: info.HugePageSize(p.Region, p.Zone)})
+		zones = append(zones, zone{id: id, root: info.Root(p.Region), pool: info.ZonePool(p.Region, p.Zone)})
 	}
 
 	return zones
@@ -288,15 +290,28 @@ func oneReason(reasons []string, mixed string) string {
 	return mixed
 }
 
+// NonNUMAInPool reports whether non-NUMA types launched from a template whose hugepages is hugepages draw
+// from the zone's hugepage pool: the zone has a pool on one NUMA node, so the pool is the whole zone budget,
+// and hugepages is the pool's page size (ADR 0003). hugepagesRule offers non-NUMA types from such a template,
+// and without root their launch gets one guest NUMA node bound to host node 0, so the two must agree.
+func NonNUMAInPool(pool zonecapacity.Pool, hugepages string) bool {
+	return pool.PageSize > 0 && pool.NUMANodes == 1 && hugepages == pageSizeMiB(pool)
+}
+
+// pageSizeMiB is pool's page size in MiB, as a template's hugepages gives it.
+func pageSizeMiB(pool zonecapacity.Pool) string {
+	return strconv.FormatUint(pool.PageSize/zonecapacity.MiB, 10)
+}
+
 // hugepagesRule: in a zone with a hugepage pool, NUMA types need the template's hugepages to be the pool's
-// page size, and non-NUMA types need a template without hugepages. A template whose hugepages is not known
-// launches neither.
+// page size, and non-NUMA types need a template without hugepages, or one NonNUMAInPool lets them draw from
+// the pool. A template whose hugepages is not known launches neither.
 func hugepagesRule(t template, z zone) []Drop {
-	if z.hugePageSize == 0 {
+	if z.pool.PageSize == 0 {
 		return nil
 	}
 
-	pool := strconv.FormatUint(z.hugePageSize/zonecapacity.MiB, 10)
+	pool := pageSizeMiB(z.pool)
 
 	drop := func(kind TypeKind, reason string, split bool, message string) Drop {
 		return Drop{Zone: z.id, Kind: kind, Reason: reason, Split: split, Message: message}
@@ -317,13 +332,21 @@ func hugepagesRule(t template, z zone) []Drop {
 			fmt.Sprintf("the template has no hugepages and the zone's hugepage pool has %s MiB pages", pool))}
 	}
 
-	drops := []Drop{drop(NonNUMATypes, ReasonHugepagesSet, true,
-		fmt.Sprintf("the template has hugepages=%s and a non-NUMA VM would draw from the zone's hugepage pool", hugepages))}
-
-	if hugepages != pool {
-		drops = append(drops, drop(NUMATypes, ReasonHugepagesMismatch, false,
-			fmt.Sprintf("the template has hugepages=%s and the zone's hugepage pool has %s MiB pages", hugepages, pool)))
+	if NonNUMAInPool(z.pool, hugepages) {
+		return nil
 	}
 
-	return drops
+	nonNUMA := drop(NonNUMATypes, ReasonHugepagesSet, true,
+		fmt.Sprintf("the template has hugepages=%s and a non-NUMA VM would draw from the zone's hugepage pool", hugepages))
+
+	if hugepages == pool {
+		return []Drop{nonNUMA}
+	}
+
+	mismatch := fmt.Sprintf("the template has hugepages=%s and the zone's hugepage pool has %s MiB pages", hugepages, pool)
+	if z.pool.NUMANodes == 1 {
+		nonNUMA = drop(NonNUMATypes, ReasonHugepagesMismatch, false, mismatch)
+	}
+
+	return []Drop{nonNUMA, drop(NUMATypes, ReasonHugepagesMismatch, false, mismatch)}
 }

@@ -24,6 +24,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -44,21 +45,30 @@ var (
 	plainZone    = templatecheck.ZoneID{Region: region, Zone: "pve-2"}
 )
 
-// zones is what the check knows of the zones: the page size of each zone's hugepage pool, and root.
+// zones is what the check knows of the zones: each zone's pool, and root.
 type zones struct {
-	root      bool
-	pageSizes map[templatecheck.ZoneID]uint64
+	root  bool
+	pools map[templatecheck.ZoneID]zonecapacity.Pool
 }
 
 func (z zones) Root(string) bool { return z.root }
 
-func (z zones) HugePageSize(region, zone string) uint64 {
-	return z.pageSizes[templatecheck.ZoneID{Region: region, Zone: zone}]
+func (z zones) ZonePool(region, zone string) zonecapacity.Pool {
+	return z.pools[templatecheck.ZoneID{Region: region, Zone: zone}]
 }
 
-// poolZones are hugepageZone, with a pool of pageSize, and plainZone, without root.
+// poolZones are hugepageZone, with a pool of pageSize over two NUMA nodes, and plainZone, without root.
 func poolZones(pageSize uint64) zones {
-	return zones{pageSizes: map[templatecheck.ZoneID]uint64{hugepageZone: pageSize}}
+	return numaPoolZones(pageSize, 2)
+}
+
+// numaPoolZones are hugepageZone, with a pool of pageSize over numaNodes NUMA nodes, and plainZone with
+// one NUMA node and no pool, without root.
+func numaPoolZones(pageSize uint64, numaNodes int) zones {
+	return zones{pools: map[templatecheck.ZoneID]zonecapacity.Pool{
+		hugepageZone: {PageSize: pageSize, NUMANodes: numaNodes},
+		plainZone:    {NUMANodes: 1},
+	}}
 }
 
 // hugepages is a template status whose VM templates share hugepages h ("" for none).
@@ -173,6 +183,95 @@ func TestHugepageZoneWithoutRoot(t *testing.T) {
 	}
 }
 
+// TestOneNUMANodeHugepageZoneWithoutRoot checks that in a hugepage zone of one NUMA node a hugepage template
+// offers non-NUMA types too, since the pool is the whole zone budget there, while a template of another page
+// size offers nothing and a template without hugepages keeps its split.
+func TestOneNUMANodeHugepageZoneWithoutRoot(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name            string
+		status          *v1alpha1.ProxmoxTemplateStatus
+		pageSize        uint64
+		nonNUMA, numa   bool
+		compatible      bool
+		reason, message string
+	}{
+		{
+			name: "matching 1GiB template offers every type", status: hugepages("1024"), pageSize: giB,
+			nonNUMA: true, numa: true, compatible: true, reason: v1alpha1.ConditionNodeClassTemplateCompatible,
+		},
+		{
+			name: "matching 2MiB template offers every type", status: hugepages("2"), pageSize: 2 * miB,
+			nonNUMA: true, numa: true, compatible: true, reason: v1alpha1.ConditionNodeClassTemplateCompatible,
+		},
+		{
+			name: "template without hugepages offers only non-NUMA types", status: hugepages(""), pageSize: giB,
+			nonNUMA: true, compatible: true, reason: templatecheck.ReasonHugepagesUnset, message: "NUMA types dropped",
+		},
+		{
+			name: "template of another page size offers nothing", status: hugepages("2"), pageSize: giB,
+			reason: templatecheck.ReasonHugepagesMismatch, message: "non-NUMA types dropped, the template has hugepages=2 and the zone's hugepage pool has 1024 MiB pages",
+		},
+		{
+			name: "hugepages any is no page size and offers nothing", status: hugepages("any"), pageSize: giB,
+			reason: templatecheck.ReasonHugepagesMismatch, message: "non-NUMA types dropped, the template has hugepages=any",
+		},
+		{
+			name: "template whose VM templates disagree offers nothing", status: unknown(), pageSize: giB,
+			reason: templatecheck.ReasonStatusUnknown, message: "VM templates disagree on hugepages",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			r, cond := check(t, tc.status, numaPoolZones(tc.pageSize, 1))
+
+			require.Equal(t, tc.nonNUMA, r.Offers(hugepageZone, templatecheck.NonNUMATypes), "non-NUMA types offered")
+			require.Equal(t, tc.numa, r.Offers(hugepageZone, templatecheck.NUMATypes), "NUMA types offered")
+			require.True(t, r.Offers(plainZone, templatecheck.NonNUMATypes), "a zone without a hugepage pool offers everything")
+			require.True(t, r.Offers(plainZone, templatecheck.NUMATypes), "a zone without a hugepage pool offers everything")
+
+			require.Equal(t, tc.compatible, cond.IsTrue(), "condition status")
+			require.Equal(t, tc.reason, cond.Reason)
+			require.Contains(t, cond.Message, tc.message)
+
+			if tc.nonNUMA && tc.numa {
+				require.Empty(t, r.Drops())
+				require.NotContains(t, cond.Message, "pve-1", "no drop is named for the zone")
+			}
+		})
+	}
+}
+
+// TestNonNUMAInPool checks which templates let non-NUMA types draw from a zone's hugepage pool, for the launch
+// to match the offering: only one of the pool's page size, in a zone with a pool on one NUMA node.
+func TestNonNUMAInPool(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		pool      zonecapacity.Pool
+		hugepages string
+		want      bool
+	}{
+		{name: "pool's page size on one NUMA node", pool: zonecapacity.Pool{PageSize: giB, NUMANodes: 1}, hugepages: "1024", want: true},
+		{name: "2MiB pool's page size on one NUMA node", pool: zonecapacity.Pool{PageSize: 2 * miB, NUMANodes: 1}, hugepages: "2", want: true},
+		{name: "two NUMA nodes", pool: zonecapacity.Pool{PageSize: giB, NUMANodes: 2}, hugepages: "1024"},
+		{name: "another page size", pool: zonecapacity.Pool{PageSize: giB, NUMANodes: 1}, hugepages: "2"},
+		{name: "any", pool: zonecapacity.Pool{PageSize: giB, NUMANodes: 1}, hugepages: "any"},
+		{name: "template without hugepages", pool: zonecapacity.Pool{PageSize: giB, NUMANodes: 1}},
+		{name: "zone without a pool", pool: zonecapacity.Pool{NUMANodes: 1}, hugepages: "1024"},
+		{name: "zone not known", hugepages: "1024"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Equal(t, tc.want, templatecheck.NonNUMAInPool(tc.pool, tc.hugepages))
+		})
+	}
+}
+
 // TestSplitNodeClassesAreCompatible checks that the pair of NodeClasses split as docs/hugepages.md describes,
 // one with a hugepage template for NUMA types and one without hugepages, both show a true condition.
 func TestSplitNodeClassesAreCompatible(t *testing.T) {
@@ -194,7 +293,7 @@ func TestUnaffected(t *testing.T) {
 		name string
 		info zones
 	}{
-		{name: "root zone with a hugepage pool", info: zones{root: true, pageSizes: map[templatecheck.ZoneID]uint64{hugepageZone: giB}}},
+		{name: "root zone with a hugepage pool", info: zones{root: true, pools: map[templatecheck.ZoneID]zonecapacity.Pool{hugepageZone: {PageSize: giB, NUMANodes: 1}}}},
 		{name: "non-root zones without a hugepage pool", info: zones{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

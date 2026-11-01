@@ -143,6 +143,11 @@ func (z *ZoneCapacity) HugePageSize() uint64 {
 	return z.zone.HugePageSize()
 }
 
+// Pool is the zone's, see zonecapacity.Zone.
+func (z *ZoneCapacity) Pool() zonecapacity.Pool {
+	return z.zone.Pool()
+}
+
 // Slots is every NUMA slot shape of the zone with its free slots; nil under shared placement.
 func (z *ZoneCapacity) Slots() []zonecapacity.SlotOffer {
 	return z.zone.Slots(z.policy)
