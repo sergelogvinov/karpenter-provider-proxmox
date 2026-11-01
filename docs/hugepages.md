@@ -1,8 +1,10 @@
-# Hugepage templates without root
+# Hugepage templates
 
-NUMA VMs in a zone with a [hugepage pool](noderesource.md#hugepage-pool) run on hugepages of the pool's page size.
-As root the controller sets `hugepages` on each launch. Without root (any API token, or a user other than `root@pam`, see [Permissions](permission.md)) it may not.
-The clone then inherits `hugepages` from the VM template, so the template decides which instance types a NodeClass can launch in such a zone ([ADR 0003](adr/0003-unprivileged-controller.md)):
+In a zone with a [hugepage pool](noderesource.md#hugepage-pool), NUMA VMs run on hugepages of the pool's page size, and so may non-NUMA VMs.
+Whether a VM gets `hugepages` from the controller or from its VM template depends on whether the controller is root ([ADR 0003](adr/0003-unprivileged-controller.md)).
+As root it sets `hugepages` on each launch, so any template serves, see [As root](#as-root).
+Without root (any API token, or a user other than `root@pam`, see [Permissions](permission.md)) it may not.
+The clone then inherits `hugepages` from the VM template, so the template decides which instance types a NodeClass can launch in such a zone:
 
 | Template `hugepages`                 | NUMA types | Non-NUMA types, one NUMA node | Non-NUMA types, 2+ NUMA nodes |
 |--------------------------------------|------------|-------------------------------|-------------------------------|
@@ -20,6 +22,20 @@ The controller launches such a VM with `numa: 1` and one `numa0` holding all its
 With two or more NUMA nodes, a non-NUMA VM with `hugepages` would draw from the pool, which zone capacity does not track per node for it, so non-NUMA types keep a template without `hugepages`.
 
 Zones without a hugepage pool, and regions where the controller is root, are not affected: their offerings are not filtered by the template.
+
+## As root
+
+As root the controller sets `hugepages` itself, so any template serves every instance type and one NodeClass is enough. In a hugepage zone:
+
+| Instance types | Pool on one NUMA node | Pool on 2+ NUMA nodes |
+|----------------|-----------------------|-----------------------|
+| NUMA types     | offered, `hugepages` of the pool and the slot's `numaN` | offered, `hugepages` of the pool and the slot's `numaN` |
+| Non-NUMA types | offered, `hugepages` of the pool, `numa: 1`, `sockets: 1` and one `numa0` bound to the zone's NUMA node, in place of any `numaN` on the template | not offered; a clone that still lands there has the template's `hugepages` deleted |
+
+So every VM in a hugepage zone draws from the pool, which is the zone's capacity.
+A zone whose pool spans two or more NUMA nodes serves NUMA types only, whatever the template, and no `TemplateCompatible` condition reports it: the zone never offers non-NUMA types, for any NodeClass.
+Under shared placement such a zone offers no types at all, since it has no NUMA slots and non-NUMA types are not offered.
+A non-NUMA clone in a hugepage zone whose NUMA node count is not known also has the template's `hugepages` deleted.
 
 So in hugepage zones of two or more NUMA nodes without root, NUMA NodePools and non-NUMA NodePools need separate NodeClasses, each with its own template.
 

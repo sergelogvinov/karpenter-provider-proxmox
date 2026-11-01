@@ -55,7 +55,7 @@ A VM template whose `hugepages` is the page size of a hugepage pool, so that, wi
 _Avoid_: NUMA template (an instance types file entry), hugepages-enabled template
 
 **Dropped offering**:
-An offering of an instance type that a node class does not list in a zone because, without root, its template cannot launch the instance type there. Dropping one never drifts a NodeClaim already running on it.
+An offering of an instance type that a node class does not list in a zone because, without root, its template cannot launch the instance type there. Dropping one never drifts a NodeClaim already running on it. Not the root rule that offers no non-NUMA type in a hugepage zone of two or more NUMA nodes: that offering is never created, for any node class.
 _Avoid_: unavailable offering (an unavailable offering is still listed), filtered offering
 
 **Template placement**:
@@ -192,7 +192,7 @@ The memory a zone holds as preallocated hugepages of one size, per NUMA node; wh
 _Avoid_: hugepages memory, reserved memory
 
 **Hugepage zone**:
-A zone with a hugepage pool.
+A zone with a hugepage pool. Its capacity is the pool, so every VM launched there draws from the pool: as root a non-NUMA type gets the pool's hugepages with one guest NUMA node bound to the zone's NUMA node when the pool spans one NUMA node, and is not offered at all when it spans two or more.
 _Avoid_: NUMA zone
 
 **Node-capacity guest**:

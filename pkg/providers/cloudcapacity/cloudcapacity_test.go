@@ -18,6 +18,7 @@ package cloudcapacity_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
@@ -61,6 +63,17 @@ func newProviderWithPolicy(t *testing.T, policy string) (context.Context, *fakea
 func newProviderWithSettings(t *testing.T, policy, settings string) (context.Context, *fakeapi.Cluster, *cloudcapacity.DefaultProvider) {
 	t.Helper()
 
+	ctx, cluster, p := newProviderWithRoot(t, policy, settings, false)
+	require.True(t, fits(p, 8, 15*gib), "empty zone fits 8 CPUs and 15GiB")
+
+	return ctx, cluster, p
+}
+
+// newProviderWithRoot returns a synced provider for one 8-CPU, 16GiB zone under policy and the node settings file
+// settings, whose controller logs in as root@pam when root is set.
+func newProviderWithRoot(t *testing.T, policy, settings string, root bool) (context.Context, *fakeapi.Cluster, *cloudcapacity.DefaultProvider) {
+	t.Helper()
+
 	settingsFile := filepath.Join(t.TempDir(), "nodes.json")
 	require.NoError(t, os.WriteFile(settingsFile, []byte(settings), 0o600))
 
@@ -82,9 +95,8 @@ func newProviderWithSettings(t *testing.T, policy, settings string) (context.Con
 	require.NoError(t, err)
 	pool.Set(region, cluster.Client(t))
 
-	p := cloudcapacity.NewProvider(ctx, pool, nil)
+	p := cloudcapacity.NewProvider(ctx, pool, config.Privileges{region: root})
 	require.NoError(t, p.SyncNodeCapacity(ctx))
-	require.True(t, fits(p, 8, 15*gib), "empty zone fits 8 CPUs and 15GiB")
 
 	return ctx, cluster, p
 }
@@ -350,4 +362,72 @@ func TestZonePoolOfUnknownZone(t *testing.T) {
 
 	_, _, p := newProviderWithSettings(t, "simple", hugepageSettings)
 	require.Zero(t, p.ZonePool(region, "pve-9"))
+}
+
+// TestRootOffersNoNonNUMATypeInPoolOfTwoNUMANodes checks that as root a zone whose hugepage pool spans two or
+// more NUMA nodes does not offer a non-NUMA VM, static or CPU share: it serves NUMA types only, so its
+// capacity stays the pool's (ADR 0003). A pool on one NUMA node, a zone without a pool, a NUMA slot and a
+// controller without root are unchanged.
+func TestRootOffersNoNonNUMATypeInPoolOfTwoNUMANodes(t *testing.T) {
+	t.Parallel()
+
+	static := resources.VMResources{CPUs: 2, Memory: 2 * gib}
+	cpuShare := resources.VMResources{CPUs: 2, Memory: 2 * gib, CPUShare: 2}
+	slot := resources.VMResources{CPUs: 4, Memory: 8 * gib, Slot: &zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 8 * gib}}
+
+	for _, tc := range []struct {
+		name       string
+		settings   string
+		root       bool
+		req        resources.VMResources
+		notOffered bool
+	}{
+		{name: "root, two-node pool, static", settings: twoNodeHugepageSettings, root: true, req: static, notOffered: true},
+		{name: "root, two-node pool, CPU share", settings: twoNodeHugepageSettings, root: true, req: cpuShare, notOffered: true},
+		{name: "root, two-node pool, NUMA slot", settings: twoNodeHugepageSettings, root: true, req: slot},
+		{name: "root, one-node pool, static", settings: hugepageSettings, root: true, req: static},
+		{name: "root, no pool, static", settings: nodeSettings, root: true, req: static},
+		{name: "without root, two-node pool, static", settings: twoNodeHugepageSettings, req: static},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, p := newProviderWithRoot(t, "static", tc.settings, tc.root)
+			err := p.FitInZone(region, zone, tc.req)
+
+			if tc.notOffered {
+				require.ErrorIs(t, err, zonecapacity.ErrNotOffered)
+
+				return
+			}
+
+			require.False(t, errors.Is(err, zonecapacity.ErrNotOffered), "offered, got %v", err)
+		})
+	}
+}
+
+// TestRootChoosesNoPoolOfTwoNUMANodesForNonNUMAType checks that as root zone choice does not place a non-NUMA
+// VM in a zone whose hugepage pool spans two or more NUMA nodes, where FitInZone does not offer it, while a
+// NUMA slot and a controller without root still get the zone.
+func TestRootChoosesNoPoolOfTwoNUMANodesForNonNUMAType(t *testing.T) {
+	t.Parallel()
+
+	static := resources.VMResources{ID: 101, CPUs: 2, Memory: 2 * gib}
+	slot := resources.VMResources{ID: 102, CPUs: 4, Memory: 8 * gib, Slot: &zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 8 * gib}}
+
+	ctx, _, p := newProviderWithRoot(t, "static", twoNodeHugepageSettings, true)
+
+	_, _, err := p.ChooseZone(ctx, region, []string{zone}, nil, static)
+	require.ErrorIs(t, err, cloudcapacity.ErrNoZoneFits)
+	require.ErrorIs(t, err, zonecapacity.ErrNotOffered)
+
+	chosen, _, err := p.ChooseZone(ctx, region, []string{zone}, nil, slot)
+	require.NoError(t, err)
+	require.Equal(t, zone, chosen)
+
+	ctx, _, p = newProviderWithRoot(t, "static", twoNodeHugepageSettings, false)
+
+	chosen, _, err = p.ChooseZone(ctx, region, []string{zone}, nil, static)
+	require.NoError(t, err)
+	require.Equal(t, zone, chosen)
 }

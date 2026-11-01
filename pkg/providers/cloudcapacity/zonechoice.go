@@ -75,7 +75,13 @@ func (p *DefaultProvider) ChooseZone(ctx context.Context, region string, zones [
 			continue
 		}
 
-		fit, err := info.Capacity.Fit(req)
+		err := p.notOfferedAsRoot(region, zone, req)
+
+		var fit zonecapacity.Fit
+		if err == nil {
+			fit, err = info.Capacity.Fit(req)
+		}
+
 		if err != nil {
 			if err := failed(zone, err); err != nil {
 				return "", resources.VMResources{}, err

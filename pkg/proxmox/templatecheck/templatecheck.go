@@ -295,12 +295,12 @@ func oneReason(reasons []string, mixed string) string {
 // and hugepages is the pool's page size (ADR 0003). hugepagesRule offers non-NUMA types from such a template,
 // and without root their launch gets one guest NUMA node bound to host node 0, so the two must agree.
 func NonNUMAInPool(pool zonecapacity.Pool, hugepages string) bool {
-	return pool.PageSize > 0 && pool.NUMANodes == 1 && hugepages == pageSizeMiB(pool)
+	return pool.OnOneNUMANode() && hugepages == pageSizeMiB(pool)
 }
 
 // pageSizeMiB is pool's page size in MiB, as a template's hugepages gives it.
 func pageSizeMiB(pool zonecapacity.Pool) string {
-	return strconv.FormatUint(pool.PageSize/zonecapacity.MiB, 10)
+	return strconv.FormatUint(pool.PageSizeMiB(), 10)
 }
 
 // hugepagesRule: in a zone with a hugepage pool, NUMA types need the template's hugepages to be the pool's
