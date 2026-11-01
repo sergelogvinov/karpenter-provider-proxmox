@@ -25,6 +25,7 @@ import (
 
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"k8s.io/utils/cpuset"
 )
@@ -153,6 +154,146 @@ func TestCloneConfigOverridesWithoutRoot(t *testing.T) {
 	assert.Equal(t, 4, *update.Cores)
 	assert.True(t, *update.NUMAEnabled)
 	assert.Equal(t, "cpus=0-3,hostnodes=1,memory=8192,policy=bind", update.NUMA[0].String())
+}
+
+var (
+	// oneNodePool and twoNodePool are hugepage pools of 1GiB pages, hugepageTemplate's page size, in a zone of
+	// one and of two NUMA nodes.
+	oneNodePool = zonecapacity.Pool{PageSize: 1 << 30, NUMANodes: 1}
+	twoNodePool = zonecapacity.Pool{PageSize: 1 << 30, NUMANodes: 2}
+)
+
+// hugepageTemplate is the cloned config of a hugepage template of 1GiB pages that carries its own NUMA
+// config of two guest NUMA nodes, one per socket.
+func hugepageTemplate() *qemu.Config {
+	return &qemu.Config{
+		Hugepages:   new("1024"),
+		NUMAEnabled: new(true),
+		Sockets:     new(2),
+		NUMA: map[int]qemu.NUMA{
+			0: {CPUIDs: []string{"0-1"}, HostNodes: []string{"0"}, Memory: new(4096), Policy: "preferred"},
+			1: {CPUIDs: []string{"2-3"}, HostNodes: []string{"1"}, Memory: new(4096), Policy: "preferred"},
+		},
+	}
+}
+
+// TestCloneConfigOverridesNonNUMATypeFromHugepageTemplate checks that without root a non-NUMA type launched
+// from a hugepage template in a zone of one NUMA node gets one guest NUMA node holding all its vCPUs and
+// memory, bound to host node 0, in place of the template's NUMA config: Proxmox needs numa for hugepages, and
+// its default per-socket split would want a host node per socket.
+func TestCloneConfigOverridesNonNUMATypeFromHugepageTemplate(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		opt  *resources.VMResources
+		numa string
+	}{
+		{
+			name: "shared",
+			opt:  &resources.VMResources{CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New()},
+			numa: "cpus=0-3,hostnodes=0,memory=8192,policy=bind",
+		},
+		{
+			name: "CPU share",
+			opt:  &resources.VMResources{CPUs: 2, Memory: 2 << 30, CPUShare: 2, CPUSet: cpuset.New()},
+			numa: "cpus=0-1,hostnodes=0,memory=2048,policy=bind",
+		},
+		{
+			name: "pinned",
+			opt: &resources.VMResources{
+				CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New(4, 5, 6, 7),
+				NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0-3", Memory: 8192, Policy: "bind"}},
+			},
+			numa: "cpus=0-3,hostnodes=0,memory=8192,policy=bind",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			update := cloneConfigOverrides(cloneVMParams{resources: tc.opt, zonePool: oneNodePool}, 123, hugepageTemplate())
+
+			assert.True(t, *update.NUMAEnabled)
+			assert.Equal(t, new(1), update.Sockets, "one guest NUMA node is one socket, in place of the template's two")
+			assert.Equal(t, new(tc.opt.CPUs), update.Cores, "the vCPUs are the instance type's")
+			assert.Len(t, update.NUMA, 1)
+			assert.Equal(t, tc.numa, update.NUMA[0].String())
+			assert.Equal(t, []string{"numa1"}, update.Delete, "the template's other guest NUMA nodes are removed")
+			assert.Nil(t, update.Hugepages, "hugepages come from the template")
+			assert.Empty(t, update.Affinity)
+		})
+	}
+}
+
+// TestCloneConfigOverridesNonNUMATypeBindsZoneNUMANode checks that the one guest NUMA node is bound to the
+// zone's only host NUMA node, whatever its number.
+func TestCloneConfigOverridesNonNUMATypeBindsZoneNUMANode(t *testing.T) {
+	t.Parallel()
+
+	pool := zonecapacity.Pool{PageSize: 1 << 30, NUMANodes: 1, HostNode: 1}
+	opt := &resources.VMResources{CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New()}
+
+	update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: pool}, 123, hugepageTemplate())
+
+	assert.Equal(t, "cpus=0-1,hostnodes=1,memory=4096,policy=bind", update.NUMA[0].String())
+}
+
+// TestCloneConfigOverridesOtherLaunchesUnchanged checks that only a non-root launch of a non-NUMA type from a
+// hugepage template of the pool's page size in a zone of one NUMA node gets the one guest NUMA node: where the
+// template offers non-NUMA types.
+func TestCloneConfigOverridesOtherLaunchesUnchanged(t *testing.T) {
+	t.Parallel()
+
+	shared := func() *resources.VMResources {
+		return &resources.VMResources{CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New()}
+	}
+
+	otherPageSize := hugepageTemplate()
+	otherPageSize.Hugepages = new("2")
+
+	for _, tc := range []struct {
+		name   string
+		params cloneVMParams
+		cfg    *qemu.Config
+	}{
+		{name: "two NUMA nodes", params: cloneVMParams{resources: shared(), zonePool: twoNodePool}, cfg: hugepageTemplate()},
+		{name: "NUMA nodes not known", params: cloneVMParams{resources: shared()}, cfg: hugepageTemplate()},
+		{
+			name:   "one NUMA node without a pool",
+			params: cloneVMParams{resources: shared(), zonePool: zonecapacity.Pool{NUMANodes: 1}}, cfg: hugepageTemplate(),
+		},
+		{name: "template of another page size", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: otherPageSize},
+		{name: "template without hugepages", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: &qemu.Config{}},
+		{name: "root", params: cloneVMParams{resources: shared(), zonePool: oneNodePool, root: true}, cfg: hugepageTemplate()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			update := cloneConfigOverrides(tc.params, 123, tc.cfg)
+
+			assert.Nil(t, update.Sockets)
+			assert.Nil(t, update.NUMAEnabled)
+			assert.Empty(t, update.NUMA)
+			assert.Empty(t, update.Delete)
+		})
+	}
+
+	t.Run("NUMA type", func(t *testing.T) {
+		t.Parallel()
+
+		opt := &resources.VMResources{
+			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3), HugePageSize: 1 << 30,
+			Slot:      &zonecapacity.SlotShape{CPUs: 2, Memory: 4 << 30},
+			NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0-1", Memory: 4096, Policy: "bind"}},
+		}
+
+		update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: oneNodePool}, 123, hugepageTemplate())
+
+		assert.True(t, *update.NUMAEnabled)
+		assert.Len(t, update.NUMA, 1)
+		assert.Equal(t, "cpus=0-1,hostnodes=0,memory=4096,policy=bind", update.NUMA[0].String())
+		assert.Empty(t, update.Delete)
+	})
 }
 
 func TestCloneConfigOverridesSMBiosAlreadyBase64(t *testing.T) {

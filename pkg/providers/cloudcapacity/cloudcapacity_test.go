@@ -30,6 +30,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
 
 const (
@@ -280,26 +281,50 @@ func TestReleaseOnOmittedZone(t *testing.T) {
 	require.True(t, fits(p, 8, 15*gib), "the release while omitted sticks")
 }
 
-// hugepageSettings is nodeSettings with a pool of 1GiB hugepages.
+// hugepageSettings is nodeSettings with a pool of 1GiB hugepages on one NUMA node.
 const hugepageSettings = `{"region-1": {"pve-1": {"hugepagesize": 1073741824, "nodes": {"0": {"cpus": "0-7", "memsize": 17179869184}}}}}`
 
-// TestHugePageSizeKeptWhileZoneUnavailable checks that a zone missing from a sync, with or without pending
-// reservations, keeps reporting the page size of its hugepage pool, while it stays unavailable for placement.
-func TestHugePageSizeKeptWhileZoneUnavailable(t *testing.T) {
+// nodeOneHugepageSettings is hugepageSettings with the zone's only NUMA node numbered 1.
+const nodeOneHugepageSettings = `{"region-1": {"pve-1": {"hugepagesize": 1073741824, "nodes": {"1": {"cpus": "0-7", "memsize": 17179869184}}}}}`
+
+// twoNodeHugepageSettings is nodeSettings with a pool of 2MiB hugepages on two NUMA nodes.
+const twoNodeHugepageSettings = `{"region-1": {"pve-1": {"hugepagesize": 2097152, "nodes": {` +
+	`"0": {"cpus": "0-3", "memsize": 8589934592}, "1": {"cpus": "4-7", "memsize": 8589934592}}}}}`
+
+// TestZonePoolKeptWhileZoneUnavailable checks that a zone missing from a sync, with or without pending
+// reservations, keeps reporting the page size of its hugepage pool and its NUMA node count, both as of the
+// last sync that saw it, while it stays unavailable for placement.
+func TestZonePoolKeptWhileZoneUnavailable(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name    string
-		pending bool
+		name     string
+		settings string
+		pending  bool
+		pool     zonecapacity.Pool
 	}{
-		{name: "zone without reservations"},
-		{name: "zone with a pending reservation", pending: true},
+		{name: "zone without reservations", settings: hugepageSettings, pool: zonecapacity.Pool{PageSize: gib, NUMANodes: 1}},
+		{
+			name: "zone with a pending reservation", settings: hugepageSettings, pending: true,
+			pool: zonecapacity.Pool{PageSize: gib, NUMANodes: 1},
+		},
+		{
+			name: "zone whose only NUMA node is 1", settings: nodeOneHugepageSettings,
+			pool: zonecapacity.Pool{PageSize: gib, NUMANodes: 1, HostNode: 1},
+		},
+		{name: "zone of two NUMA nodes", settings: twoNodeHugepageSettings, pool: zonecapacity.Pool{PageSize: 2 << 20, NUMANodes: 2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			ctx, cluster, p := newProviderWithSettings(t, "simple", hugepageSettings)
-			require.Equal(t, gib, p.HugePageSize(region, zone))
+			ctx, cluster, p := newProviderWithSettings(t, "simple", tc.settings)
+			requirePool := func(msg string) {
+				t.Helper()
+
+				require.Equal(t, tc.pool, p.ZonePool(region, zone), msg)
+			}
+
+			requirePool("synced")
 
 			if tc.pending {
 				require.NoError(t, reserve(ctx, p, resources.VMResources{ID: 100, CPUs: 1, Memory: gib}))
@@ -310,19 +335,19 @@ func TestHugePageSizeKeptWhileZoneUnavailable(t *testing.T) {
 
 			require.NotContains(t, p.Zones(region), zone)
 			require.False(t, fits(p, 1, gib), "the zone is unavailable for placement")
-			require.Equal(t, gib, p.HugePageSize(region, zone), "the last known page size is kept")
+			requirePool("the last known pool is kept")
 
 			cluster.RecoverNode(zone)
 			require.NoError(t, p.SyncNodeCapacity(ctx))
-			require.Equal(t, gib, p.HugePageSize(region, zone))
+			requirePool("synced again")
 		})
 	}
 }
 
-// TestHugePageSizeOfUnknownZone checks that a zone never synced has no hugepage pool.
-func TestHugePageSizeOfUnknownZone(t *testing.T) {
+// TestZonePoolOfUnknownZone checks that a zone never synced has no hugepage pool and no NUMA nodes.
+func TestZonePoolOfUnknownZone(t *testing.T) {
 	t.Parallel()
 
 	_, _, p := newProviderWithSettings(t, "simple", hugepageSettings)
-	require.Zero(t, p.HugePageSize(region, "pve-9"))
+	require.Zero(t, p.ZonePool(region, "pve-9"))
 }

@@ -187,3 +187,68 @@ func TestLaunchedVMReadsAsReserved(t *testing.T) {
 		}
 	}
 }
+
+// oneNodeHugepageSettings is one socket, 8 cores with 2 threads on one NUMA node with a 1GiB hugepage pool.
+var oneNodeHugepageSettings = settings.NodeSettings{
+	NumSockets:      1,
+	NumThreads:      2,
+	NumUncoreCaches: 1,
+	NUMANodes:       settings.NUMANodes{0: {CPUs: "0-15", MemSize: 32 << 30}},
+	HugePageSize:    1 << 30,
+}
+
+// TestNonNUMAVMFromHugepageTemplateReadsAsReserved checks that without root a non-NUMA VM launched from a
+// hugepage template in a hugepage zone of one NUMA node, read back with its guest NUMA node bound to host
+// node 0, holds in the zone what its reservation held: the pool is the whole zone budget there (ADR 0003).
+func TestNonNUMAVMFromHugepageTemplateReadsAsReserved(t *testing.T) {
+	t.Parallel()
+
+	static := zonecapacity.Policy{Kind: zonecapacity.PolicyStatic}
+	shared := zonecapacity.Policy{Kind: zonecapacity.PolicySimple}
+
+	newZone := func(t *testing.T, policy zonecapacity.Policy) *resourcemanager.ZoneCapacity {
+		t.Helper()
+
+		zone, err := resourcemanager.NewZoneCapacity(zonecapacity.Host{
+			Topology:     lo.Must(topology.DiscoverFromSettings(&oneNodeHugepageSettings)),
+			HugePageSize: oneNodeHugepageSettings.HugePageSize,
+		}, policy)
+		require.NoError(t, err)
+
+		return zone
+	}
+
+	for _, tc := range []struct {
+		name   string
+		policy zonecapacity.Policy
+		req    resources.VMResources
+	}{
+		{name: "shared", policy: shared, req: resources.VMResources{CPUs: 4, Memory: 4 << 30}},
+		{name: "pinned", policy: static, req: resources.VMResources{CPUs: 4, Memory: 4 << 30}},
+		{name: "cpu share", policy: static, req: resources.VMResources{CPUs: 2, Memory: 2 << 30, CPUShare: 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			reserved := tc.req
+			reserved.ID = 100
+
+			reserving := newZone(t, tc.policy)
+			require.NoError(t, reserving.Reserve(&reserved))
+
+			template := qemu.Config{Sockets: new(1), Cores: new(1), Hugepages: new("1024")}
+			update := cloneConfigOverrides(cloneVMParams{resources: &reserved, zonePool: oneNodePool}, reserved.ID, &template)
+			cfg := launchedConfig(template, update, reserved.DescriptionTokens)
+
+			vm, err := vmconfig.VM(reserved.ID, cfg)
+			require.NoError(t, err)
+			require.Equal(t, map[int]uint64{0: reserved.Memory}, vm.NUMAMemory, "the VM's memory is bound to host node 0")
+
+			tracking := newZone(t, tc.policy)
+			require.NoError(t, tracking.Track(vm))
+
+			require.Equal(t, reserving.Available(), tracking.Available(), "the launched VM holds what was reserved")
+			require.Equal(t, reserving.Slots(), tracking.Slots(), "the launched VM holds the reserved NUMA slots")
+		})
+	}
+}
