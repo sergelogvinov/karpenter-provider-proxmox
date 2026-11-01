@@ -199,6 +199,10 @@ _Avoid_: NUMA zone
 A virtual machine the scheduler keeps on each zone, never started, named `node-capacity` and tagged `karpenter`, whose config describes the zone's CPUs, NUMA nodes, hugepage pool and CPU shape (sockets, SMT threads per core, uncore caches) to the controller; it is never tracked as a workload.
 _Avoid_: discovery VM, topology VM
 
+**Zone settings**:
+A zone's hardware settings (CPU shape, NUMA nodes with their CPUs and memory, hugepage page size, reserved CPUs and memory), resolved from three layers in rising precedence: the guess from the node's CPU model, the node-capacity guest, and the node settings file. A layer that knows the NUMA nodes replaces them whole.
+_Avoid_: node settings (the file format), host settings
+
 **Fit**:
 What placing a virtual machine in a zone would leave the zone with, worked out without reserving: how many NUMA nodes the virtual machine would span, and what share of the zone's scarcer resource, CPU or memory, would stay free. Spanning fewer NUMA nodes is always the better fit.
 _Avoid_: score, load

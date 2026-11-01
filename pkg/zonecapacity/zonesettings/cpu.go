@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package nodesettings
+package zonesettings
 
 import (
 	"fmt"
@@ -37,9 +37,9 @@ type cpuFacts struct {
 	MemoryTotal uint64
 }
 
-// GetNodeSettingByStatus derives NodeSettings from a go-proxmox-rest node
+// guessFromStatus guesses NodeSettings from the CPU model in a node
 // status (GET /nodes/{node}/status).
-func GetNodeSettingByStatus(st *nodes.Status) (*settings.NodeSettings, error) {
+func guessFromStatus(st *nodes.Status) (*settings.NodeSettings, error) {
 	if st == nil {
 		return nil, nil
 	}

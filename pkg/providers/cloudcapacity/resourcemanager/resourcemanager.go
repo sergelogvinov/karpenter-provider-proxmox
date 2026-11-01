@@ -19,17 +19,17 @@ package resourcemanager
 import (
 	"context"
 	"fmt"
-	"maps"
 
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
+	"github.com/sergelogvinov/go-proxmox-rest/nodes"
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/utils/nodesettings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/nodecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/settings"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/topology"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/zonecapacity/zonesettings"
 
 	"k8s.io/utils/cpuset"
 
@@ -52,22 +52,23 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 		return nil, fmt.Errorf("missing options in context")
 	}
 
-	nodeSettings, err := nodeSettingsFromCluster(ctx, cl, zone)
+	status, guest, err := zoneFromCluster(ctx, cl, zone)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get node settings from VM: %w", err)
+		return nil, err
 	}
 
-	if name := opts.NodeSettingFilePath; name != "" {
-		setting, err := settings.LoadNodeSettingsFromFile(name, region, zone)
-		if err != nil {
-			return nil, err
-		}
+	file, err := settings.LoadNodeSettingsFromFile(opts.NodeSettingFilePath, region, zone)
+	if err != nil {
+		return nil, err
+	}
 
-		if setting != nil {
-			nodeSettingsFromFile(&nodeSettings, setting)
+	if file != nil {
+		log.V(1).Info("Loaded node settings from file", "file", opts.NodeSettingFilePath, "settings", file)
+	}
 
-			log.V(1).Info("Loaded node settings from file", "file", name, "settings", nodeSettings)
-		}
+	nodeSettings, err := zonesettings.Resolve(status, guest, file)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the zone settings of node %s: %w", zone, err)
 	}
 
 	sysTopology, err := topology.DiscoverFromSettings(&nodeSettings)
@@ -103,24 +104,12 @@ func ZoneCapacityFromCluster(ctx context.Context, cl *proxmoxrest.Client, region
 	return capacity, nil
 }
 
-func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone string) (settings.NodeSettings, error) {
-	nodeSettings := settings.NodeSettings{
-		ReservedMemory: 1024 * 1024 * 1024, // 1GiB
-	}
-
-	n, err := cl.Nodes(zone).Status(ctx)
+// zoneFromCluster reads what Proxmox says of a zone: its node status and, when the
+// scheduler keeps one there, the node-capacity guest's config.
+func zoneFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone string) (*nodes.Status, *qemu.Config, error) {
+	status, err := cl.Nodes(zone).Status(ctx)
 	if err != nil {
-		return nodeSettings, fmt.Errorf("failed to get node %s: %w", zone, err)
-	}
-
-	st, err := nodesettings.GetNodeSettingByStatus(n)
-	if err != nil {
-		return nodeSettings, fmt.Errorf("getting node settings: %w", err)
-	}
-
-	if st != nil {
-		nodeSettings = *st
-		nodeSettings.ReservedMemory = 1024 * 1024 * 1024 // 1GiB
+		return nil, nil, fmt.Errorf("failed to get node %s: %w", zone, err)
 	}
 
 	vmrs, err := cl.Cluster().Resources().List(ctx, cluster.ListFilter{
@@ -133,107 +122,17 @@ func nodeSettingsFromCluster(ctx context.Context, cl *proxmoxrest.Client, zone s
 		},
 	})
 	if err != nil {
-		return nodeSettings, fmt.Errorf("failed to get VM by filter for node settings: %w", err)
+		return nil, nil, fmt.Errorf("failed to get VM by filter for node settings: %w", err)
 	}
 
 	if len(vmrs) == 0 {
-		return nodeSettings, nil
+		return status, nil, nil
 	}
 
 	cfg, err := cl.Nodes(vmrs[0].Node).Qemu().Config(ctx, vmrs[0].VMID, nil)
 	if err != nil {
-		return nodeSettings, fmt.Errorf("failed to get VM config for node settings: %w", err)
+		return nil, nil, fmt.Errorf("failed to get VM config for node settings: %w", err)
 	}
 
-	err = nodeSettingsFromGuest(cfg, &nodeSettings)
-	if err != nil {
-		return nodeSettings, fmt.Errorf("failed to get node settings from VM: %w", err)
-	}
-
-	return nodeSettings, nil
-}
-
-// nodeSettingsFromFile merges the node settings file's entry for the zone into
-// nodeSettings: each field the file sets wins over the node-capacity guest and the
-// guess from the node status.
-func nodeSettingsFromFile(nodeSettings *settings.NodeSettings, setting *settings.NodeSettings) {
-	if setting == nil {
-		return
-	}
-
-	if setting.NumSockets != 0 {
-		nodeSettings.NumSockets = setting.NumSockets
-	}
-
-	if setting.NumThreads != 0 {
-		nodeSettings.NumThreads = setting.NumThreads
-	}
-
-	if setting.NumUncoreCaches != 0 {
-		nodeSettings.NumUncoreCaches = setting.NumUncoreCaches
-	}
-
-	if len(setting.ReservedCPUs) != 0 {
-		nodeSettings.ReservedCPUs = setting.ReservedCPUs
-	}
-
-	if setting.ReservedMemory != 0 {
-		nodeSettings.ReservedMemory = setting.ReservedMemory
-	}
-
-	if len(setting.NUMANodes) != 0 {
-		nodeSettings.NUMANodes = setting.NUMANodes
-	}
-
-	if setting.HugePageSize != 0 {
-		nodeSettings.HugePageSize = setting.HugePageSize
-	}
-}
-
-// nodeSettingsFromGuest merges what the node-capacity guest says of its zone into
-// nodeSettings. The guest is the source of truth, so a pool it no longer has clears
-// the page size, and a pool takes no host reserve: the host's own memory lies
-// outside it. The guest's CPU shape replaces the guess from the node
-// status wherever the guest knows it.
-func nodeSettingsFromGuest(cfg *qemu.Config, nodeSettings *settings.NodeSettings) error {
-	if cfg == nil || nodeSettings == nil {
-		return fmt.Errorf("invalid input: config and nodeSettings cannot be nil")
-	}
-
-	guest, err := nodecapacity.Decode(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to read the node-capacity guest: %w", err)
-	}
-
-	if nodeSettings.NUMANodes == nil {
-		nodeSettings.NUMANodes = make(settings.NUMANodes, len(guest.NUMANodes))
-	}
-
-	nodeSettings.HugePageSize = guest.HugePageSize
-	if guest.HugePageSize > 0 {
-		nodeSettings.ReservedMemory = 0
-	}
-
-	maps.Copy(nodeSettings.NUMANodes, guest.NUMANodes)
-
-	if guest.Sockets != 0 {
-		nodeSettings.NumSockets = guest.Sockets
-	}
-
-	if guest.Threads != 0 {
-		nodeSettings.NumThreads = guest.Threads
-	}
-
-	if guest.UncoreCaches != 0 {
-		nodeSettings.NumUncoreCaches = guest.UncoreCaches
-	}
-
-	if len(nodeSettings.NUMANodes) == 0 && !guest.CPUs.IsEmpty() {
-		nodeSettings.NUMANodes[0] = settings.NUMAInfo{
-			CPUs:    guest.CPUs.String(),
-			MemSize: guest.Memory,
-		}
-	}
-
-	return nil
+	return status, cfg, nil
 }
