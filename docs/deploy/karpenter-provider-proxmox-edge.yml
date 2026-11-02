@@ -1066,6 +1066,28 @@ spec:
                   x-kubernetes-int-or-string: true
                 description: Resources is the list of resources that have been provisioned.
                 type: object
+              template:
+                description: |-
+                  Template records the hugepages and affinity keys of the VM
+                  config that the VM templates at the template placements in Zones
+                  share. It is unset while there are no VM templates or the keys of one
+                  are unknown, and when the VM templates disagree, which the
+                  ProxmoxVirtualMachineTemplateConsistent condition reports.
+                  This field is populated by the controller and should not be set manually.
+                properties:
+                  affinity:
+                    description: Affinity reports whether the affinity key of the
+                      VM config is set.
+                    type: boolean
+                  hugepages:
+                    description: |-
+                      Hugepages is the hugepages key of the VM config: the page size
+                      in MiB ("2" or "1024"), or "any". Missing or empty means the VM
+                      template has no hugepages.
+                    type: string
+                required:
+                - affinity
+                type: object
               zones:
                 description: |-
                   Zones is a list of nodes that VM template was prepared.
@@ -1232,6 +1254,28 @@ spec:
                   pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                   x-kubernetes-int-or-string: true
                 description: Resources is the list of resources that have been provisioned.
+                type: object
+              template:
+                description: |-
+                  Template records the hugepages and affinity keys of the VM
+                  config that the VM templates at the template placements in Zones
+                  share. It is unset while there are no VM templates or the keys of one
+                  are unknown, and when the VM templates disagree, which the
+                  ProxmoxVirtualMachineTemplateConsistent condition reports.
+                  This field is populated by the controller and should not be set manually.
+                properties:
+                  affinity:
+                    description: Affinity reports whether the affinity key of the
+                      VM config is set.
+                    type: boolean
+                  hugepages:
+                    description: |-
+                      Hugepages is the hugepages key of the VM config: the page size
+                      in MiB ("2" or "1024"), or "any". Missing or empty means the VM
+                      template has no hugepages.
+                    type: string
+                required:
+                - affinity
                 type: object
               zones:
                 description: |-
@@ -2445,10 +2489,10 @@ kind: ServiceAccount
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
   namespace: kube-system
 
@@ -2459,10 +2503,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2511,10 +2555,10 @@ kind: ClusterRole
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 rules:
   # Read
@@ -2543,10 +2587,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox-core
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2564,10 +2608,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2585,10 +2629,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-node-bootstrapper
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2606,10 +2650,10 @@ kind: ClusterRoleBinding
 metadata:
   name: karpenter-provider-proxmox:bootstrap-approve-node-client-csr
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -2628,10 +2672,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2679,10 +2723,10 @@ metadata:
   name: karpenter-provider-proxmox:bootstrap
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 rules:
 - apiGroups:
@@ -2738,10 +2782,10 @@ metadata:
   name: karpenter-provider-proxmox
   namespace: kube-system
   labels:
-    helm.sh/chart: karpenter-provider-proxmox-0.5.0
+    helm.sh/chart: karpenter-provider-proxmox-0.5.1
     app.kubernetes.io/name: karpenter-provider-proxmox
     app.kubernetes.io/instance: karpenter-provider-proxmox
-    app.kubernetes.io/version: "v0.15.0"
+    app.kubernetes.io/version: "v0.16.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   replicas: 1
