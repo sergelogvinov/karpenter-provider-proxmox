@@ -31,6 +31,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
@@ -372,8 +373,8 @@ func TestRootOffersNoNonNUMATypeInPoolOfTwoNUMANodes(t *testing.T) {
 	t.Parallel()
 
 	static := resources.VMResources{CPUs: 2, Memory: 2 * gib}
-	cpuShare := resources.VMResources{CPUs: 2, Memory: 2 * gib, CPUShare: 2}
-	slot := resources.VMResources{CPUs: 4, Memory: 8 * gib, Slot: &zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 8 * gib}}
+	cpuShare := resources.VMResources{CPUs: 2, Memory: 2 * gib, Profile: launchrule.CPUShareType(2)}
+	slot := resources.VMResources{CPUs: 4, Memory: 8 * gib, Profile: launchrule.NUMAType(1)}
 
 	for _, tc := range []struct {
 		name       string
@@ -413,7 +414,7 @@ func TestRootChoosesNoPoolOfTwoNUMANodesForNonNUMAType(t *testing.T) {
 	t.Parallel()
 
 	static := resources.VMResources{ID: 101, CPUs: 2, Memory: 2 * gib}
-	slot := resources.VMResources{ID: 102, CPUs: 4, Memory: 8 * gib, Slot: &zonecapacity.SlotShape{Fraction: 1, CPUs: 4, Memory: 8 * gib}}
+	slot := resources.VMResources{ID: 102, CPUs: 4, Memory: 8 * gib, Profile: launchrule.NUMAType(1)}
 
 	ctx, _, p := newProviderWithRoot(t, "static", twoNodeHugepageSettings, true)
 

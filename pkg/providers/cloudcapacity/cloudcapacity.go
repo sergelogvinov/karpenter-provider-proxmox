@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
@@ -64,8 +65,8 @@ type Provider interface {
 	Zones(region string) []string
 
 	// FitInZone reports whether req has a fit in the zone now: nil when it fits, an error wrapping
-	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, or, as root, when it is a
-	// non-NUMA VM and the zone's hugepage pool spans two or more NUMA nodes (ADR 0003), any other error otherwise.
+	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, or, as root, when the launch
+	// decision for req's launch profile drops it (launchrule, ADR 0003), any other error otherwise.
 	FitInZone(region, zone string, req resources.VMResources) error
 	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
 	// or under shared placement, which offers no NUMA slot.
@@ -561,17 +562,18 @@ func (p *DefaultProvider) Root(region string) bool {
 	return p.privileges.Root(region)
 }
 
-// notOfferedAsRoot returns an error wrapping zonecapacity.ErrNotOffered when, as root, req is a non-NUMA VM and the
-// zone's hugepage pool spans two or more NUMA nodes; nil otherwise. The caller holds muCapacityInfo.
-//
-// Such a VM cannot draw from the pool there bound to one NUMA node, as in a zone of one NUMA node, and on host
-// memory it would spend what the zone does not track, its capacity being the pool. Root keeps the split
-// templatecheck makes without root, so such a zone serves NUMA types only (ADR 0003). A launch that still
-// lands there clears the template's hugepages, see instance.cloneConfigOverrides.
+// notOfferedAsRoot returns an error wrapping zonecapacity.ErrNotOffered when, as root, the launch decision for
+// req's launch profile in the zone drops it; nil otherwise. As root the decision does not depend on the
+// template, which the controller overrides. Without root the template check drops offerings instead
+// (templatecheck). The caller holds muCapacityInfo.
 func (p *DefaultProvider) notOfferedAsRoot(region, zone string, req resources.VMResources) error {
-	if pool := p.zonePools[zoneKey(region, zone)]; req.Slot == nil && p.privileges.Root(region) && pool.SpansNUMANodes() {
-		return fmt.Errorf("%w: non-NUMA VM as root in zone %s/%s, whose hugepage pool spans %d NUMA nodes",
-			zonecapacity.ErrNotOffered, region, zone, pool.NUMANodes)
+	if !p.privileges.Root(region) {
+		return nil
+	}
+
+	d := launchrule.Decide(req.Profile, launchrule.Template{}, launchrule.NewZone(p.zonePools[zoneKey(region, zone)], true))
+	if !d.Offered {
+		return fmt.Errorf("%w: zone %s/%s, %s", zonecapacity.ErrNotOffered, region, zone, d.Drop.Message)
 	}
 
 	return nil

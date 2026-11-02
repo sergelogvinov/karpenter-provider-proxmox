@@ -32,6 +32,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
@@ -50,13 +51,10 @@ type Provider interface {
 	List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error)
 	ListWithFilter(ctx context.Context, filter func(*cloudprovider.InstanceType) bool) []*cloudprovider.InstanceType
 	Get(ctx context.Context, name string) (*cloudprovider.InstanceType, error)
-	// CPUShare is the number of VMs that share the CPUs of instance type name: 2, 3 or 4.
-	// Zero means dedicated CPUs, or an unknown instance type.
-	CPUShare(name string) int
-	// SlotFraction is the slot fraction of NUMA type name: 1, 2 or 4, from the NUMA template of its family.
-	// It holds while the template is configured, whether or not the type is generated at the moment.
-	// Zero means any other instance type, or an unknown one.
-	SlotFraction(name string) int
+	// Profile is the launch profile of instance type name. A NUMA type's is its NUMA template's, which holds
+	// while the template is configured, whether or not the type is generated at the moment. An unknown
+	// instance type is a dedicated type without a hugepage request.
+	Profile(name string) launchrule.Profile
 
 	UpdateInstanceTypes(context.Context) error
 	UpdateInstanceTypeOfferings(context.Context) error
@@ -77,10 +75,10 @@ type DefaultProvider struct {
 	numaTemplates []*InstanceTypeStatic
 	// staticNames are the names of the static types.
 	staticNames map[string]bool
-	// cpuShares are the CPU shares of the instance types that have one, by name.
-	cpuShares map[string]int
-	// slotFractions are the slot fractions of the NUMA templates, by family.
-	slotFractions map[string]int
+	// profiles are the launch profiles of the static types, by name.
+	profiles map[string]launchrule.Profile
+	// numaProfiles are the launch profiles of the NUMA types of each NUMA template, by family.
+	numaProfiles map[string]launchrule.Profile
 	// nodeClaimUses are the instance types the NodeClaims used when they were last listed.
 	nodeClaimUses []nodeClaimUse
 
@@ -111,7 +109,7 @@ func NewDefaultProvider(ctx context.Context, cloudCapacityProvider cloudcapacity
 }
 
 // List is every instance type with the offerings nodeClass can launch: without root, the offerings in a zone
-// where nodeClass's template cannot launch the instance type's kind are dropped (templatecheck).
+// where nodeClass's template cannot launch the instance type are dropped (templatecheck).
 // A nodeClass without template placements has no offerings; a nil nodeClass keeps every offering.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxNodeClass) ([]*cloudprovider.InstanceType, error) {
 	instanceTypes := p.ListWithFilter(ctx, func(_ *cloudprovider.InstanceType) bool {
@@ -138,13 +136,13 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 	}
 
 	for _, it := range instanceTypes {
-		kind := lo.Ternary(p.SlotFraction(it.Name) != 0, templatecheck.NUMATypes, templatecheck.NonNUMATypes)
+		profile := p.Profile(it.Name)
 
 		it.Offerings = lo.Filter(it.Offerings, func(o *cloudprovider.Offering, _ int) bool {
 			return checked.Offers(templatecheck.ZoneID{
 				Region: o.Requirements.Get(corev1.LabelTopologyRegion).Any(),
 				Zone:   o.Requirements.Get(corev1.LabelTopologyZone).Any(),
-			}, kind)
+			}, profile)
 		})
 		it.Requirements = computeRequirements(it.Name, it.Offerings, p.cloudCapacityProvider.Regions())
 	}
@@ -201,40 +199,31 @@ func (p *DefaultProvider) Get(ctx context.Context, name string) (*cloudprovider.
 	return filtered[0], nil
 }
 
-func (p *DefaultProvider) CPUShare(name string) int {
-	p.muInstanceTypes.RLock()
-	defer p.muInstanceTypes.RUnlock()
-
-	return p.cpuShares[name]
-}
-
-func (p *DefaultProvider) SlotFraction(name string) int {
+func (p *DefaultProvider) Profile(name string) launchrule.Profile {
 	p.muInstanceTypes.RLock()
 	defer p.muInstanceTypes.RUnlock()
 
 	// A static type keeps its name, even in the family of a NUMA template.
-	if p.staticNames[name] {
-		return 0
+	if profile, ok := p.profiles[name]; ok {
+		return profile
 	}
 
-	return p.slotFractions[instanceFamily(name)]
+	return p.numaProfiles[instanceFamily(name)]
 }
 
-// VMRequest is the VM request for an instance type of capacity, seated in a CPU share group
-// of cpuShare seats unless it is 0, and in a strict NUMA slot of slotFraction unless it is 0:
-// a NUMA type's slot shape is its slot fraction with its CPUs and memory.
-func VMRequest(capacity corev1.ResourceList, cpuShare, slotFraction int) resources.VMResources {
-	req := resources.VMResources{
-		CPUs:     int(capacity.Cpu().Value()),
-		Memory:   uint64(capacity.Memory().Value()),
-		CPUShare: cpuShare,
+// VMRequest is the VM request for an instance type of capacity and launch profile: seated in a CPU share
+// group of a CPU share type, or in a strict NUMA slot of a NUMA type.
+func VMRequest(capacity corev1.ResourceList, profile launchrule.Profile) resources.VMResources {
+	return resources.VMResources{
+		CPUs:    int(capacity.Cpu().Value()),
+		Memory:  uint64(capacity.Memory().Value()),
+		Profile: profile,
 	}
+}
 
-	if slotFraction != 0 {
-		req.Slot = &zonecapacity.SlotShape{Fraction: slotFraction, CPUs: req.CPUs, Memory: req.Memory}
-	}
-
-	return req
+// profileOf is the launch profile of an instance types file entry, or of a NUMA type generated from one.
+func profileOf(it *InstanceTypeStatic) launchrule.Profile {
+	return launchrule.ProfileOf(it.NUMA, it.CPUShare, it.Capacity)
 }
 
 // instanceFamily is the family of instance type name, the part before the first dot.
@@ -320,30 +309,27 @@ func offeringsReport(instanceTypes []*InstanceTypeStatic) (available, unavailabl
 	return available, unavailable, offers
 }
 
-// setInstanceTypes replaces the instance types and NUMA templates, with the lookups of the static names,
-// their CPU shares, and the templates' slot fractions.
+// setInstanceTypes replaces the instance types and NUMA templates, with the lookups of the static names
+// and the launch profiles of the static types and of each NUMA template's types.
 // The NUMA types are generated on the next offerings refresh. The caller holds the lock.
 func (p *DefaultProvider) setInstanceTypes(instanceTypes []*InstanceTypeStatic) {
 	p.staticTypes = []*InstanceTypeStatic{}
 	p.numaTemplates = []*InstanceTypeStatic{}
 	p.staticNames = make(map[string]bool, len(instanceTypes))
-	p.cpuShares = make(map[string]int, len(instanceTypes))
-	p.slotFractions = map[string]int{}
+	p.profiles = make(map[string]launchrule.Profile, len(instanceTypes))
+	p.numaProfiles = map[string]launchrule.Profile{}
 
 	for _, item := range instanceTypes {
 		if item.NUMA != 0 {
 			p.numaTemplates = append(p.numaTemplates, item)
-			p.slotFractions[item.Name] = item.NUMA
+			p.numaProfiles[item.Name] = profileOf(item)
 
 			continue
 		}
 
 		p.staticTypes = append(p.staticTypes, item)
 		p.staticNames[item.Name] = true
-
-		if item.CPUShare != 0 {
-			p.cpuShares[item.Name] = item.CPUShare
-		}
+		p.profiles[item.Name] = profileOf(item)
 	}
 
 	p.instanceTypesInfo = slices.Clone(p.staticTypes)
@@ -382,7 +368,7 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
-			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, opts.CPUShare, 0))
+			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, p.profiles[opts.Name]))
 			if errors.Is(err, zonecapacity.ErrNotOffered) {
 				continue
 			}

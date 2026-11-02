@@ -22,18 +22,22 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 )
 
-// TestZoneOfferingNothingIsIncompatible checks that intended splits which together drop every kind in a zone
-// make the condition false. The hugepages rule alone never does this; a later rule can.
+// TestZoneOfferingNothingIsIncompatible checks that intended splits which together drop both the NUMA and the non-NUMA types in a zone
+// make the condition false. The launch rules never do this today; the condition still guards against it.
 func TestZoneOfferingNothingIsIncompatible(t *testing.T) {
 	t.Parallel()
 
 	id := ZoneID{Region: "region-1", Zone: "pve-1"}
-	r := Result{drops: []Drop{
-		{Zone: id, Kind: NUMATypes, Reason: ReasonHugepagesUnset, Split: true, Message: "a"},
-		{Zone: id, Kind: NonNUMATypes, Reason: "SomeOtherSplit", Split: true, Message: "b"},
-	}}
+	r := Result{
+		drops: []Drop{
+			{Zone: id, Types: launchrule.NUMATypes, Reason: launchrule.ReasonHugepagesUnset, Split: true, Message: "a"},
+			{Zone: id, Types: launchrule.NonNUMATypes, Reason: "SomeOtherSplit", Split: true, Message: "b"},
+		},
+		offerNothing: []ZoneID{id},
+	}
 
 	nodeClass := &v1alpha1.ProxmoxNodeClass{}
 	r.SetCondition(nodeClass)

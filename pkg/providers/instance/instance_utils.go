@@ -36,8 +36,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/cloudinit"
 	provider "github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instance/provider"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetemplate"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
-	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	corev1 "k8s.io/api/core/v1"
@@ -324,6 +324,11 @@ func cloneAndConfigureVM(ctx context.Context, px *proxmoxrest.Client, zone strin
 		return fmt.Errorf("failed to resize disk %s for vm %d: %v", bootDisk, newID, err)
 	}
 
+	// The type was offered from the template's status; a clone that the launch rule drops would not start as offered.
+	if d := launchDecision(params, cfg); !d.Offered {
+		return fmt.Errorf("vm %d cannot launch as cloned from template %d: %s", newID, vmTemplateID, d.Drop.Message)
+	}
+
 	vmConfig := cloneConfigOverrides(params, newID, cfg)
 
 	if err = px.Nodes(zone).Qemu().UpdateConfig(ctx, newID, vmConfig); err != nil {
@@ -362,18 +367,12 @@ func detectBootDisk(cfg *qemu.Config) string {
 // (params.root false) neither is written: a pinned VM's host CPUs travel only in the `affinity=`
 // description token, which the proxmox-scheduler applies, and hugepages come
 // from the template. numaN, hostnodes and policy included, needs no root and
-// is written either way. Without root, a non-NUMA type cloned from a template
-// whose hugepages draw from the zone's pool on one NUMA node (params.zonePool,
-// templatecheck.NonNUMAInPool, the rule that offers it) gets one guest NUMA
-// node bound to the zone's host NUMA node, see singleNUMANode.
+// is written either way.
 //
-// As root, a non-NUMA type in a zone whose hugepage pool is on one NUMA node
-// gets the pool's hugepages and that one bound guest NUMA node, whatever the
-// template has, so it draws from the pool, the zone's capacity. In a zone whose
-// pool spans two or more NUMA nodes it is not offered
-// (cloudcapacity.Provider.FitInZone); a clone that still lands there, or in a
-// hugepage zone whose NUMA node count is not known, has its inherited hugepages
-// deleted, as Proxmox refuses hugepages without numa.
+// The hugepages and the guest NUMA options beyond the grant's are the launch
+// decision's (launchrule) for the instance type's launch profile, the template's
+// hugepages as the clone has them, and the zone (params.zonePool, params.root):
+// the same decision that offered the type, so it launches as offered.
 func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qemu.Config {
 	opt := params.resources
 	update := &qemu.Config{}
@@ -412,23 +411,7 @@ func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qem
 		}
 	}
 
-	if pool := params.zonePool; opt.Slot == nil {
-		switch {
-		case !params.root:
-			if cfg.Hugepages != nil && templatecheck.NonNUMAInPool(pool, *cfg.Hugepages) {
-				singleNUMANode(update, opt, cfg, pool.HostNode)
-			}
-		case pool.OnOneNUMANode():
-			update.Hugepages = new(strconv.FormatUint(pool.PageSizeMiB(), 10))
-			singleNUMANode(update, opt, cfg, pool.HostNode)
-		case pool.PageSize > 0 && cfg.Hugepages != nil:
-			update.Delete = append(update.Delete, "hugepages")
-		}
-	}
-
-	if params.root && opt.HugePageSize > 0 {
-		update.Hugepages = new(strconv.FormatUint(opt.HugePageSize/zonecapacity.MiB, 10))
-	}
+	applyLaunchDecision(update, opt, cfg, launchDecision(params, cfg))
 
 	if len(params.tags) > 0 {
 		vmTags := qemu.Tags(params.tags)
@@ -466,6 +449,34 @@ func cloneConfigOverrides(params cloneVMParams, vmid int, cfg *qemu.Config) *qem
 	}
 
 	return update
+}
+
+// launchDecision is the launch decision for the VM of params cloned from the template whose config is cfg.
+func launchDecision(params cloneVMParams, cfg *qemu.Config) launchrule.Decision {
+	template := launchrule.KnownTemplate("")
+	if cfg.Hugepages != nil {
+		template = launchrule.KnownTemplate(*cfg.Hugepages)
+	}
+
+	return launchrule.Decide(params.resources.Profile, template, launchrule.NewZone(params.zonePool, params.root))
+}
+
+// applyLaunchDecision writes into update the hugepages and guest NUMA options of d for the VM of opt cloned from
+// the template whose config is cfg.
+func applyLaunchDecision(update *qemu.Config, opt *resources.VMResources, cfg *qemu.Config, d launchrule.Decision) {
+	switch d.Hugepages {
+	case launchrule.SetHugepages:
+		update.Hugepages = new(d.HugepagesValue)
+	case launchrule.DeleteHugepages:
+		if cfg.Hugepages != nil {
+			update.Delete = append(update.Delete, "hugepages")
+		}
+	case launchrule.KeepHugepages:
+	}
+
+	if d.GuestNUMA == launchrule.GuestNUMAOneNode {
+		singleNUMANode(update, opt, cfg, d.HostNode)
+	}
 }
 
 // singleNUMANode writes into update one guest NUMA node holding all of opt's vCPUs and memory, bound to host

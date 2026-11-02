@@ -27,6 +27,7 @@ import (
 
 	proxmoxrest "github.com/sergelogvinov/go-proxmox-rest"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/operator/options"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 )
@@ -101,7 +102,7 @@ func TestNodePolicySelection(t *testing.T) {
 			capacity, err := ZoneCapacityFromCluster(ctx, client, "test", "test")
 			require.NoError(t, err)
 
-			request := &resources.VMResources{ID: 1, CPUs: 2, Memory: 1 << 30, CPUShare: 2}
+			request := &resources.VMResources{ID: 1, CPUs: 2, Memory: 1 << 30, Profile: launchrule.CPUShareType(2)}
 			err = capacity.Reserve(request)
 			if !tc.offered {
 				require.ErrorIs(t, err, zonecapacity.ErrNotOffered)

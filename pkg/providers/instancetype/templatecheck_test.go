@@ -105,9 +105,9 @@ func TestListFiltersByTemplateHugepages(t *testing.T) {
 		nonNUMA, numa []string
 	}{
 		{
-			name:       "matching hugepages offer every type in the hugepage zone of one NUMA node",
+			name:       "matching hugepages offer every type in the hugepage zone of one NUMA node, nothing without a pool",
 			vmTemplate: &v1alpha1.VMTemplateInfo{Hugepages: "1024"},
-			nonNUMA:    []string{hugepageZone, plainZone}, numa: []string{hugepageZone, plainZone},
+			nonNUMA:    []string{hugepageZone}, numa: []string{hugepageZone},
 		},
 		{
 			name:       "no hugepages offer non-NUMA types only in the hugepage zone",
@@ -115,9 +115,9 @@ func TestListFiltersByTemplateHugepages(t *testing.T) {
 			nonNUMA:    []string{hugepageZone, plainZone}, numa: []string{plainZone},
 		},
 		{
-			name:       "wrong page size offers nothing in the hugepage zone",
+			name:       "wrong page size offers nothing, nor does a hugepage template without a pool",
 			vmTemplate: &v1alpha1.VMTemplateInfo{Hugepages: "2"},
-			nonNUMA:    []string{plainZone}, numa: []string{plainZone},
+			nonNUMA:    []string{}, numa: []string{},
 		},
 		{
 			name:    "unknown template offers nothing in the hugepage zone",

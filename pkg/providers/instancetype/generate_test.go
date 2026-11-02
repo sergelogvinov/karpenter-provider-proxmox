@@ -57,7 +57,7 @@ func TestGeneratedCPUShareTypesLoad(t *testing.T) {
 	for _, it := range types {
 		got[it.Name] = loaded{
 			family:   it.Requirements.Get(v1alpha1.LabelInstanceFamily).Any(),
-			cpuShare: p.CPUShare(it.Name),
+			cpuShare: p.Profile(it.Name).CPUShare(),
 		}
 	}
 
