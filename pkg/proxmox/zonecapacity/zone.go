@@ -123,9 +123,6 @@ type Grant struct {
 	CPUSet cpuset.CPUSet
 	// NUMA maps host NUMA nodes to the guest vCPUs and memory bound to them.
 	NUMA map[int]NUMABinding
-	// HugePageSize > 0 means the VM is launched with hugepages of this size, in bytes:
-	// a VM in a NUMA slot of a zone with a hugepage pool.
-	HugePageSize uint64
 	// DescriptionTokens are written into the VM description, e.g. "affinity=8-15" or "cpushare=2".
 	DescriptionTokens []string
 }
@@ -287,17 +284,11 @@ func (z *Zone) Reserve(p Policy, vm VM) (Grant, error) {
 		return Grant{}, nil
 	}
 
-	grant := Grant{
+	return Grant{
 		CPUSet:            rec.cpuSet.Clone(),
 		NUMA:              numa,
 		DescriptionTokens: []string{affinityToken + rec.cpuSet.String()},
-	}
-
-	if vm.Slot != nil {
-		grant.HugePageSize = z.hugePageSize
-	}
-
-	return grant, nil
+	}, nil
 }
 
 // Fit is what reserving vm under p would leave the zone with, without reserving it.

@@ -24,6 +24,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/controllers/nodeclass/status"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/templatecheck"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
@@ -135,19 +136,29 @@ func TestTemplateCompatibleCondition(t *testing.T) {
 	nodeClass := reconcile(t, kubeClient, capacity)
 	cond := nodeClass.StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateCompatible)
 	require.True(t, cond.IsFalse())
-	require.Equal(t, templatecheck.ReasonHugepagesMismatch, cond.Reason)
-	require.Contains(t, cond.Message, region+"/"+hugepageZone)
-	require.NotContains(t, cond.Message, plainZone, "a zone without a hugepage pool is not judged")
+	require.Equal(t, templatecheck.ReasonIncompatible, cond.Reason, "a page size that does not match the pool, and no pool")
+	require.Contains(t, cond.Message, region+"/"+hugepageZone+": NUMA types dropped, the template has hugepages=2 and the zone's hugepage pool")
+	require.Contains(t, cond.Message, region+"/"+plainZone+": NUMA types dropped, the template has hugepages=2 and the zone has no hugepage pool")
 	require.True(t, nodeClass.StatusConditions().Root().IsTrue(), "the condition is not a Ready dependent")
 
-	// The template now has the pool's page size: only the non-NUMA types stay dropped, the intended split.
-	setHugepages(t, kubeClient, &v1alpha1.VMTemplateInfo{Hugepages: "1024"})
+	// The template now has no hugepages: only the NUMA types of the hugepage zone are dropped, the intended split.
+	setHugepages(t, kubeClient, &v1alpha1.VMTemplateInfo{})
 
 	cond = reconcile(t, kubeClient, capacity).StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateCompatible)
 	require.True(t, cond.IsTrue())
-	require.Equal(t, templatecheck.ReasonHugepagesSet, cond.Reason)
-	require.Contains(t, cond.Message, "non-NUMA types dropped")
-	require.NotContains(t, cond.Message, " NUMA types dropped")
+	require.Equal(t, launchrule.ReasonHugepagesUnset, cond.Reason)
+	require.Contains(t, cond.Message, region+"/"+hugepageZone+": NUMA types dropped")
+	require.NotContains(t, cond.Message, plainZone, "a zone without a hugepage pool offers a template without hugepages")
+
+	// The template now has the pool's page size: the split drops non-NUMA types in the hugepage zone, and the zone
+	// without a pool offers nothing, a problem of the template (#321).
+	setHugepages(t, kubeClient, &v1alpha1.VMTemplateInfo{Hugepages: "1024"})
+
+	cond = reconcile(t, kubeClient, capacity).StatusConditions().Get(v1alpha1.ConditionNodeClassTemplateCompatible)
+	require.True(t, cond.IsFalse())
+	require.Equal(t, launchrule.ReasonHugepagesNoPool, cond.Reason)
+	require.Contains(t, cond.Message, region+"/"+hugepageZone+": non-NUMA types dropped")
+	require.NotContains(t, cond.Message, region+"/"+hugepageZone+": NUMA types dropped")
 
 	// As root nothing is dropped.
 	capacity.root = true

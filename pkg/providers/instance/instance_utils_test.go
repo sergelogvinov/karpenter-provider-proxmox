@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
@@ -138,16 +139,18 @@ func TestCloneConfigOverridesWithoutRoot(t *testing.T) {
 	t.Parallel()
 
 	opt := &resources.VMResources{
-		CPUs:         4,
-		Memory:       8192 * 1024 * 1024,
-		CPUSet:       cpuset.New(0, 1, 8, 9),
-		HugePageSize: 2 * 1024 * 1024,
+		CPUs:    4,
+		Memory:  8192 * 1024 * 1024,
+		CPUSet:  cpuset.New(0, 1, 8, 9),
+		Profile: launchrule.NUMAType(1),
 		NUMANodes: map[int]resources.NUMANodeState{
 			1: {CPUs: "0-3", Memory: 8192, Policy: "bind"},
 		},
 	}
 
-	update := cloneConfigOverrides(cloneVMParams{resources: opt, instanceTypeName: "cx4.medium", vmName: "node-1"}, 123, &qemu.Config{})
+	pool := zonecapacity.Pool{PageSize: 2 << 20, NUMANodes: 2}
+
+	update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: pool, instanceTypeName: "cx4.medium", vmName: "node-1"}, 123, &qemu.Config{})
 
 	assert.Empty(t, update.Affinity, "only root@pam may set affinity")
 	assert.Nil(t, update.Hugepages, "only root@pam may set hugepages")
@@ -196,7 +199,7 @@ func TestCloneConfigOverridesNonNUMATypeFromHugepageTemplate(t *testing.T) {
 		},
 		{
 			name: "CPU share",
-			opt:  &resources.VMResources{CPUs: 2, Memory: 2 << 30, CPUShare: 2, CPUSet: cpuset.New()},
+			opt:  &resources.VMResources{CPUs: 2, Memory: 2 << 30, Profile: launchrule.CPUShareType(2), CPUSet: cpuset.New()},
 			numa: "cpus=0-1,hostnodes=0,memory=2048,policy=bind",
 		},
 		{
@@ -265,10 +268,9 @@ func TestCloneConfigOverridesOtherLaunchesUnchanged(t *testing.T) {
 		{name: "template of another page size", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: otherPageSize},
 		{name: "template without hugepages", params: cloneVMParams{resources: shared(), zonePool: oneNodePool}, cfg: &qemu.Config{}},
 		{
-			name:   "root, one NUMA node without a pool",
-			params: cloneVMParams{resources: shared(), zonePool: zonecapacity.Pool{NUMANodes: 1}, root: true}, cfg: hugepageTemplate(),
+			name:   "root, one NUMA node without a pool, template without hugepages",
+			params: cloneVMParams{resources: shared(), zonePool: zonecapacity.Pool{NUMANodes: 1}, root: true}, cfg: &qemu.Config{},
 		},
-		{name: "root, without a pool", params: cloneVMParams{resources: shared(), root: true}, cfg: hugepageTemplate()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -286,8 +288,8 @@ func TestCloneConfigOverridesOtherLaunchesUnchanged(t *testing.T) {
 		t.Parallel()
 
 		opt := &resources.VMResources{
-			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3), HugePageSize: 1 << 30,
-			Slot:      &zonecapacity.SlotShape{CPUs: 2, Memory: 4 << 30},
+			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3),
+			Profile:   launchrule.NUMAType(1),
 			NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0-1", Memory: 4096, Policy: "bind"}},
 		}
 
@@ -379,6 +381,27 @@ func TestCloneConfigOverridesRootNonNUMATypeInPoolNotOnOneNUMANode(t *testing.T)
 	}
 }
 
+// TestCloneConfigOverridesRootWithoutPoolDeletesHugepages checks that as root any type launched in a zone
+// without a hugepage pool deletes the hugepages it inherits, which it would have no pool to draw from (#321).
+func TestCloneConfigOverridesRootWithoutPoolDeletesHugepages(t *testing.T) {
+	t.Parallel()
+
+	numa := &resources.VMResources{
+		CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3), Profile: launchrule.NUMAType(1),
+		NUMANodes: map[int]resources.NUMANodeState{0: {CPUs: "0-1", Memory: 4096, Policy: "bind"}},
+	}
+	shared := &resources.VMResources{CPUs: 4, Memory: 8 << 30, CPUSet: cpuset.New()}
+
+	for _, opt := range []*resources.VMResources{numa, shared} {
+		for _, pool := range []zonecapacity.Pool{{NUMANodes: 1}, {}} {
+			update := cloneConfigOverrides(cloneVMParams{resources: opt, zonePool: pool, root: true}, 123, hugepageTemplate())
+
+			assert.Equal(t, []string{"hugepages"}, update.Delete)
+			assert.Nil(t, update.Hugepages)
+		}
+	}
+}
+
 // TestCloneConfigOverridesRootNUMATypeInPoolUnchanged checks that as root a NUMA type launched in a hugepage
 // zone keeps its slot's NUMA config and gets its grant's hugepages, in a pool of one or of two NUMA nodes.
 func TestCloneConfigOverridesRootNUMATypeInPoolUnchanged(t *testing.T) {
@@ -386,8 +409,8 @@ func TestCloneConfigOverridesRootNUMATypeInPoolUnchanged(t *testing.T) {
 
 	for _, pool := range []zonecapacity.Pool{oneNodePool, twoNodePool} {
 		opt := &resources.VMResources{
-			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3), HugePageSize: 1 << 30,
-			Slot:      &zonecapacity.SlotShape{CPUs: 2, Memory: 4 << 30},
+			CPUs: 2, Memory: 4 << 30, CPUSet: cpuset.New(2, 3),
+			Profile:   launchrule.NUMAType(1),
 			NUMANodes: map[int]resources.NUMANodeState{1: {CPUs: "0-1", Memory: 4096, Policy: "bind"}},
 		}
 

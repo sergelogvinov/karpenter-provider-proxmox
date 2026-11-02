@@ -21,7 +21,8 @@ The pool is the whole zone budget there, so a non-NUMA VM drawing from it keeps 
 The controller launches such a VM with `numa: 1` and one `numa0` holding all its vCPUs and memory, bound (`hostnodes`, `policy=bind`) to the zone's NUMA node, in place of any `numaN` on the template.
 With two or more NUMA nodes, a non-NUMA VM with `hugepages` would draw from the pool, which zone capacity does not track per node for it, so non-NUMA types keep a template without `hugepages`.
 
-Zones without a hugepage pool, and regions where the controller is root, are not affected: their offerings are not filtered by the template.
+Regions where the controller is root are not affected: their offerings are not filtered by the template.
+A zone without a hugepage pool offers every type for a template without `hugepages`, and nothing for a template with `hugepages`, see [The TemplateCompatible condition](#the-templatecompatible-condition).
 
 ## As root
 
@@ -133,16 +134,18 @@ Whenever offerings are dropped, its message names each zone, the kind of instanc
 
 | Status  | Reason                      | Dropped                 | Cause                                                                    |
 |---------|-----------------------------|-------------------------|--------------------------------------------------------------------------|
-| `True`  | `TemplateCompatible`        | nothing                 | every kind is offered in every zone                                      |
+| `True`  | `TemplateCompatible`        | nothing                 | every instance type is offered in every zone                             |
 | `True`  | `TemplateHugepagesSet`      | non-NUMA types          | the template has the pool's page size on 2+ NUMA nodes: a NodeClass for NUMA types |
 | `True`  | `TemplateHugepagesUnset`    | NUMA types              | the template has no `hugepages`: a NodeClass for non-NUMA types          |
 | `True`  | `OfferingsDropped`          | as in the message       | intended splits of more than one reason                                  |
 | `False` | `TemplateHugepagesMismatch` | both                    | the template's `hugepages` is another page size, or `any`                |
+| `False` | `TemplateHugepagesNoPool`   | both                    | the template has `hugepages` and the zone has no hugepage pool           |
 | `False` | `TemplateStatusUnknown`     | both                    | the template's `status.template` is unset, or the template cannot be read |
 | `False` | `TemplateOffersNothing`     | both                    | the NodeClass offers nothing in a zone                                   |
 | `False` | `TemplateIncompatible`      | as in the message       | problems of more than one reason                                         |
 
 The condition is not part of `Ready`.
+A template with `hugepages` launches nothing in a zone without a hugepage pool, where its VMs could not start, so give a hugepage NodeClass template placements only on hugepage zones.
 With a `True` condition, read the message to check that the dropped kind is the one the NodeClass's NodePool does not use.
 The controller rechecks every 15 seconds, so the condition follows changes to the template.
 While a hugepage zone is out of the controller's view, for example when its Proxmox node is unreachable, the check keeps the page size of its pool and its NUMA node count as last seen, so the condition does not flip; the zone launches nothing until it is back.

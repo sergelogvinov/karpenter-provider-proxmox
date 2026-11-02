@@ -17,6 +17,7 @@ limitations under the License.
 package resources
 
 import (
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 
 	"k8s.io/utils/cpuset"
@@ -38,11 +39,10 @@ type VMResources struct {
 	Affinity string
 	// Memory is the amount of memory in bytes assigned to the VM.
 	Memory uint64
-	// CPUShare is the number of VMs that share the VM's CPUs in a CPU share group: 2, 3 or 4.
-	// Zero means the VM does not sit in a CPU share group.
-	CPUShare int
-	// Slot asks for a strict NUMA slot of this shape: the VM of a NUMA type. Nil asks for none.
-	Slot *zonecapacity.SlotShape
+	// Profile is the launch profile of the VM's instance type, which the launch decision is made for. A CPU
+	// share type's VM sits in a CPU share group of its seats, and a NUMA type's asks for a strict NUMA slot
+	// (Slot); the zero profile is a dedicated type's.
+	Profile launchrule.Profile
 	// DiskGBytes is the amount of system disk in gigabytes assigned to the VM.
 	DiskGBytes uint64
 	// StorageID is the ID of the storage where the VM's disk is located.
@@ -52,8 +52,17 @@ type VMResources struct {
 	CPUSet cpuset.CPUSet
 	// NUMANodes represents the topology on the Host assigned to the VM.
 	NUMANodes map[int]NUMANodeState
-	// HugePageSize > 0 launches the VM with hugepages of this size, in bytes.
-	HugePageSize uint64
 	// DescriptionTokens are written into the VM description at launch, e.g. "affinity=8-15" or "cpushare=2".
 	DescriptionTokens []string
+}
+
+// Slot is the strict NUMA slot the VM of a NUMA type asks for: its slot fraction, sized exactly as the VM. Nil
+// for any other VM, which asks for none.
+func (r VMResources) Slot() *zonecapacity.SlotShape {
+	fraction := r.Profile.SlotFraction()
+	if fraction == 0 {
+		return nil
+	}
+
+	return &zonecapacity.SlotShape{Fraction: fraction, CPUs: r.CPUs, Memory: r.Memory}
 }

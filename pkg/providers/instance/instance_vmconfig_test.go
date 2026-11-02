@@ -26,6 +26,7 @@ import (
 
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/zonecapacity/settings"
@@ -127,14 +128,14 @@ func TestLaunchedVMReadsAsReserved(t *testing.T) {
 			req: func(t *testing.T) resources.VMResources {
 				s := slot(t)
 
-				return resources.VMResources{CPUs: s.CPUs, Memory: s.Memory, Slot: s}
+				return resources.VMResources{CPUs: s.CPUs, Memory: s.Memory, Profile: launchrule.NUMAType(s.Fraction)}
 			},
 		},
 		{
 			name:   "cpu share",
 			policy: static,
 			req: func(*testing.T) resources.VMResources {
-				return resources.VMResources{CPUs: 2, Memory: 2 << 30, CPUShare: 2}
+				return resources.VMResources{CPUs: 2, Memory: 2 << 30, Profile: launchrule.CPUShareType(2)}
 			},
 		},
 	} {
@@ -225,7 +226,7 @@ func TestNonNUMAVMFromHugepageTemplateReadsAsReserved(t *testing.T) {
 	}{
 		{name: "shared", policy: shared, req: resources.VMResources{CPUs: 4, Memory: 4 << 30}},
 		{name: "pinned", policy: static, req: resources.VMResources{CPUs: 4, Memory: 4 << 30}},
-		{name: "cpu share", policy: static, req: resources.VMResources{CPUs: 2, Memory: 2 << 30, CPUShare: 2}},
+		{name: "cpu share", policy: static, req: resources.VMResources{CPUs: 2, Memory: 2 << 30, Profile: launchrule.CPUShareType(2)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

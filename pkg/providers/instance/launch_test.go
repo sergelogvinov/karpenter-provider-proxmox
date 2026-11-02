@@ -99,6 +99,8 @@ type launchSetup struct {
 	hugePages bool
 	// nonRoot makes the region's credentials something other than root@pam, such as an API token.
 	nonRoot bool
+	// staleTemplate leaves out of each VM template the hugepages its status.template still gives.
+	staleTemplate bool
 }
 
 // numaZoneSettings is the node settings file of launchSetup.numa: two NUMA nodes of 4 CPUs and 8GiB.
@@ -170,14 +172,21 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 		}
 
 		template := true
+
+		var hugepages *string
+		if setup.hugePages && !setup.staleTemplate {
+			hugepages = new("2")
+		}
+
 		node.AddVM(templateID, &qemu.Config{
-			Name:     "talos",
-			Template: &template,
-			SCSI:     map[int]qemu.Drive{0: {File: disk, Size: "2G"}},
-			IDE:      map[int]qemu.Drive{0: {File: cloudInitDrive, Media: "cdrom"}},
-			Net:      map[int]qemu.Net{0: {Model: "virtio", MACAddr: "BC:24:11:00:00:01", Bridge: "vmbr0"}},
-			IPConfig: map[int]qemu.IPConfig{0: {IPv4: setup.subnet, GatewayIPv4: "10.0.0.1"}},
-			SMBios1:  &qemu.SMBios1{UUID: "00000000-0000-0000-0000-000000000001"},
+			Hugepages: hugepages,
+			Name:      "talos",
+			Template:  &template,
+			SCSI:      map[int]qemu.Drive{0: {File: disk, Size: "2G"}},
+			IDE:       map[int]qemu.Drive{0: {File: cloudInitDrive, Media: "cdrom"}},
+			Net:       map[int]qemu.Net{0: {Model: "virtio", MACAddr: "BC:24:11:00:00:01", Bridge: "vmbr0"}},
+			IPConfig:  map[int]qemu.IPConfig{0: {IPv4: setup.subnet, GatewayIPv4: "10.0.0.1"}},
+			SMBios1:   &qemu.SMBios1{UUID: "00000000-0000-0000-0000-000000000001"},
 		})
 
 		placements = append(placements, fmt.Sprintf("%s/%s/%d", testRegion, zone, templateID))
@@ -728,7 +737,7 @@ func TestCreateWithoutRootNUMASlot(t *testing.T) {
 
 		cfg := f.vmConfig(node)
 		assert.Empty(t, cfg.Affinity, "only root@pam may set affinity")
-		assert.Nil(t, cfg.Hugepages, "only root@pam may set hugepages")
+		assert.Equal(t, "2", lo.FromPtr(cfg.Hugepages), "the template's hugepages, as only root@pam may set them")
 		assert.True(t, strings.HasSuffix(cfg.Description, ", affinity="+tc.affinity), "description %q carries the affinity token", cfg.Description)
 		require.NotNil(t, cfg.NUMAEnabled)
 		assert.True(t, *cfg.NUMAEnabled)
@@ -746,6 +755,20 @@ func TestCreateWithoutRootNUMASlot(t *testing.T) {
 		{Shape: zonecapacity.SlotShape{Fraction: 2, CPUs: 2, Memory: 4 << 30}, Free: 1},
 		{Shape: zonecapacity.SlotShape{Fraction: 4, CPUs: 1, Memory: 2 << 30}, Free: 2},
 	}, synced.Slots(testRegion, "pve1"), "three of the four halves are taken")
+}
+
+// TestCreateWithoutRootRefusesStaleTemplate launches from a VM template that lost the hugepages its status.template
+// gave when the type was offered, and checks the launch rule refuses the clone before it is configured or started.
+func TestCreateWithoutRootRefusesStaleTemplate(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{nodePolicy: "static", numa: 1, hugePages: true, nonRoot: true, staleTemplate: true})
+
+	_, err := f.create(f.ctx, "node-1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot launch")
+
+	// With the template's hugepages back, the type launches again into the capacity the refused launch released.
+	require.NoError(t, f.client.Nodes("pve1").Qemu().UpdateConfig(f.ctx, 100, &qemu.Config{Hugepages: new("2")}))
+	f.requireNothingLeftOver()
 }
 
 func TestCreateWithoutCloudInitISO(t *testing.T) {

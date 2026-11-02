@@ -204,7 +204,6 @@ func TestZoneReserveSlotWholeNode(t *testing.T) {
 		0: {VCPUs: mustParse(t, "0-29"), Memory: 126 * gib},
 	}, grant.NUMA)
 	require.Equal(t, []string{"affinity=1-15,33-47"}, grant.DescriptionTokens)
-	require.Zero(t, grant.HugePageSize, "a zone without a hugepage pool launches without hugepages")
 }
 
 // TestZoneReserveSlotHalvesFillNode checks that halves land in aligned slots, lowest first, that two halves
@@ -272,25 +271,6 @@ func TestZoneReserveSlotCPUShareGroupsFillZone(t *testing.T) {
 
 	_, err = z.Reserve(static, slotVM(3, numaExampleSlots[3].Shape))
 	require.NoError(t, err, "a half still leaves the group room")
-}
-
-// TestZoneReserveSlotHugePagePool checks that a zone with a hugepage pool launches slot VMs with hugepages
-// of the pool's page size, and other pinned VMs without.
-func TestZoneReserveSlotHugePagePool(t *testing.T) {
-	t.Parallel()
-
-	host := numaExampleHost
-	host.HugePageSize = 2 << 20
-
-	z := newZone(t, host, 0, 32)
-
-	grant, err := z.Reserve(static, slotVM(1, zonecapacity.SlotShape{Fraction: 1, CPUs: 32, Memory: 128 * gib}))
-	require.NoError(t, err)
-	require.Equal(t, uint64(2<<20), grant.HugePageSize)
-
-	grant, err = z.Reserve(static, zonecapacity.VM{ID: 2, CPUs: 2, Memory: gib})
-	require.NoError(t, err)
-	require.Zero(t, grant.HugePageSize)
 }
 
 // TestZoneReserveSlotShapeDrifted checks that a slot request of a shape the zone does not carve, such as

@@ -25,6 +25,7 @@ import (
 
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -83,7 +84,7 @@ func TestNUMATypeKeptWhileNodeClaimsUseIt(t *testing.T) {
 	require.Contains(t, names(t, f.p), "n1.28VCPU-126GB", "the new slot shape is offered")
 	f.notDrifted(nodeClaim)
 	require.Equal(t, map[string]bool{zone: false}, zonesOf(t, f.p, "n1.30VCPU-126GB"), "nothing new launches on the kept NUMA type")
-	require.Equal(t, 1, f.p.SlotFraction("n1.30VCPU-126GB"))
+	require.Equal(t, launchrule.NUMAType(1), f.p.Profile("n1.30VCPU-126GB"), "a kept NUMA type keeps its launch profile")
 
 	it, err := f.p.Get(f.ctx, "n1.30VCPU-126GB")
 	require.NoError(t, err)

@@ -29,6 +29,7 @@ import (
 	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -226,8 +227,29 @@ func TestNUMATypeNameTakenByStaticEntry(t *testing.T) {
 	it, err := p.Get(context.Background(), "n2.14VCPU-63GB")
 	require.NoError(t, err)
 	require.Equal(t, int64(2), it.Capacity.Cpu().Value(), "the static entry wins")
-	require.Zero(t, p.SlotFraction("n2.14VCPU-63GB"), "the static entry launches without a NUMA slot")
-	require.Equal(t, 2, p.SlotFraction("n2.16VCPU-63GB"))
+	require.Equal(t, launchrule.DedicatedType(), p.Profile("n2.14VCPU-63GB"), "the static entry launches without a NUMA slot")
+	require.Equal(t, launchrule.NUMAType(2), p.Profile("n2.16VCPU-63GB"))
+}
+
+// TestLaunchProfiles checks the launch profile of each kind of instance type the file gives, with its hugepage
+// request, whether or not its NUMA type is generated at the moment.
+func TestLaunchProfiles(t *testing.T) {
+	t.Parallel()
+
+	file := `[
+  {"name": "n2", "numa": 2, "capacity": {"pods": "110", "hugepages-1Gi": "0"}},
+  {"name": "c1.2VCPU-4GB", "capacity": {"cpu": "2", "memory": "4Gi", "pods": "64", "hugepages-2Mi": "4Gi"}},
+  {"name": "e3.2VCPU-4GB", "cpushare": 3, "capacity": {"cpu": "2", "memory": "4Gi", "pods": "64"}}
+]`
+
+	p, err := newProviderOn(t, "static", hosts(map[string]string{zone: numaExampleHost}), file, nil, zone)
+	require.NoError(t, err)
+
+	require.Equal(t, launchrule.NUMAType(2).WithHugepageRequest(1<<30), p.Profile("n2.16VCPU-63GB"))
+	require.Equal(t, launchrule.NUMAType(2).WithHugepageRequest(1<<30), p.Profile("n2.99VCPU-99GB"), "a NUMA type not generated now")
+	require.Equal(t, launchrule.DedicatedType().WithHugepageRequest(2<<20), p.Profile("c1.2VCPU-4GB"))
+	require.Equal(t, launchrule.CPUShareType(3), p.Profile("e3.2VCPU-4GB"))
+	require.Equal(t, launchrule.DedicatedType(), p.Profile("x1.2VCPU-4GB"), "an unknown type")
 }
 
 // TestNUMATypesSkipLowMemoryShapes checks that a slot shape with less than 1GiB of memory per vCPU is not offered,
