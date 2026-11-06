@@ -59,7 +59,7 @@ func Slaac(mac string, cidr string) (string, error) {
 		return "", fmt.Errorf("slaac generator requires a mask of /64 to /112")
 	}
 
-	eui64 := net.IPv6zero
+	eui64 := make(net.IP, net.IPv6len)
 	copy(eui64, ipnet.IP.To16())
 
 	copy(eui64[8:11], hw[0:3])
