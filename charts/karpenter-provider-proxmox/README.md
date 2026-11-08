@@ -1,6 +1,6 @@
 # karpenter-provider-proxmox
 
-![Version: 0.5.1](https://img.shields.io/badge/Version-0.5.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.16.0](https://img.shields.io/badge/AppVersion-v0.16.0-informational?style=flat-square)
+![Version: 0.6.0](https://img.shields.io/badge/Version-0.6.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v0.16.0](https://img.shields.io/badge/AppVersion-v0.16.0-informational?style=flat-square)
 
 Karpenter for Proxmox VE.
 
@@ -75,6 +75,9 @@ helm upgrade -i --namespace=kube-system -f karpenter-provider-proxmox.yaml \
 | existingConfigSecretKey | string | `"config.yaml"` | Proxmox cluster config stored in secrets key. |
 | configFile | string | `"/etc/proxmox/config.yaml"` | Proxmox cluster config path. |
 | config | object | `{"clusters":[]}` | Proxmox cluster config. ref: https://github.com/sergelogvinov/karpenter-provider-proxmox/blob/main/docs/install.md |
+| instanceTypes | string | `nil` | Proxmox Instance Types as an array or JSON string. Ignored when existingInstanceTypesConfigmap is set. |
+| existingInstanceTypesConfigmap | string | `nil` | Proxmox Instance Types ConfigMap. |
+| existingInstanceTypesConfigmapKey | string | `"instance-types.json"` | Proxmox Instance Types ConfigMap key. |
 | settings.cpuOvercommitRatio | float | `1` | CPU overcommit ratio for the simple-with-cpu-overcommit node policy. Reserved/affinity CPUs and memory are not overcommitted. |
 | settings.batchMaxDuration | string | `"10s"` | The maximum length of a batch window. The longer this is, the more pods we can consider for provisioning at one time which usually results in fewer but larger nodes. |
 | settings.batchIdleDuration | string | `"1s"` | The maximum amount of time with no new ending pods that if exceeded ends the current batching window. If pods arrive faster than this time, the batching window will be extended up to the maxDuration. If they arrive slower, the pods will be batched separately. |

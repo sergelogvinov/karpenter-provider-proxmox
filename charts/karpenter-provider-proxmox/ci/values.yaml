@@ -10,6 +10,22 @@ config:
       token_secret: "secret"
       region: cluster-1
 
+# instanceTypes: |
+#   [
+#     {
+#       "name": "n2",
+#       "capacity": {
+#         "ephemeral-storage": "30Gi",
+#         "pods": "110"
+#       },
+#       "capacitytype": "on-demand",
+#       "numa": 2
+#     }
+#   ]
+
+existingInstanceTypesConfigmap: instance-types
+existingInstanceTypesConfigmapKey: types.json
+
 extraVolumes:
   - name: ca
     secret:

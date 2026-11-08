@@ -52,6 +52,36 @@ config:
   #     token_secret: "secret"
   #     region: cluster-1
 
+# -- Proxmox Instance Types as an array or JSON string.
+# Ignored when existingInstanceTypesConfigmap is set.
+instanceTypes:
+  ~
+  # [
+  #   {
+  #     "name": "n2",
+  #     "capacity": {
+  #       "ephemeral-storage": "30Gi",
+  #       "pods": "110"
+  #     },
+  #     "capacitytype": "on-demand",
+  #     "numa": 2
+  #   },
+  #   {
+  #     "name": "n4",
+  #     "capacity": {
+  #       "ephemeral-storage": "30Gi",
+  #       "pods": "110"
+  #     },
+  #     "capacitytype": "on-demand",
+  #     "numa": 4
+  #   }
+  # ]
+
+# -- Proxmox Instance Types ConfigMap.
+existingInstanceTypesConfigmap: ~
+# -- Proxmox Instance Types ConfigMap key.
+existingInstanceTypesConfigmapKey: instance-types.json
+
 settings:
   # -- (float) CPU overcommit ratio for the simple-with-cpu-overcommit node policy. Reserved/affinity CPUs and memory are not overcommitted.
   cpuOvercommitRatio: 1
@@ -92,8 +122,7 @@ settings:
 
 # -- Add additional init containers for the CSI controller pods.
 # ref: https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
-initContainers:
-  []
+initContainers: []
   # - name: loadbalancer
   #   restartPolicy: Always
   #   image: ghcr.io/sergelogvinov/haproxy:2.8.3-alpine3.18
@@ -116,8 +145,7 @@ initContainers:
 
 # -- hostAliases Deployment pod host aliases
 # ref: https://kubernetes.io/docs/tasks/network/customize-hosts-file-for-pods/
-hostAliases:
-  []
+hostAliases: []
   # - ip: 127.0.0.1
   #   hostnames:
   #     - proxmox.domain.com
@@ -168,8 +196,7 @@ metrics:
 
 # -- Node labels for controller assignment.
 # ref: https://kubernetes.io/docs/user-guide/node-selection/
-nodeSelector:
-  {}
+nodeSelector: {}
   # node-role.kubernetes.io/control-plane: ""
 
 # -- Tolerations for controller assignment.
@@ -187,8 +214,7 @@ tolerations:
 affinity: {}
 
 # -- Any extra environments for Karpenter
-extraEnvs:
-  []
+extraEnvs: []
   # - name: KUBERNETES_SERVICE_HOST
   #   value: 127.0.0.1
 
@@ -196,15 +222,13 @@ extraEnvs:
 extraArgs: []
 
 # -- Additional volumes for Pods
-extraVolumes:
-  []
+extraVolumes: []
   # - name: ca
   #   secret:
   #     secretName: my-ca
 
 # -- Additional volume mounts for Pods
-extraVolumeMounts:
-  []
+extraVolumeMounts: []
   # - mountPath: /etc/ssl/certs/ca-certificates.crt
   #   name: ca
   #   subPath: ca.crt
