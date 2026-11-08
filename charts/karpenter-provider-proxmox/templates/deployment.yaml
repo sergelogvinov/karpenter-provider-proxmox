@@ -18,6 +18,11 @@ spec:
       {{- if .Values.config }}
         checksum/config: {{ toJson .Values.config | sha256sum }}
       {{- end }}
+      {{- if .Values.existingInstanceTypesConfigmap }}
+        checksum/instancetype: {{ toJson .Values.existingInstanceTypesConfigmap | sha256sum }}
+      {{- else if .Values.instanceTypes }}
+        checksum/instancetype: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      {{- end }}
       {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -48,6 +53,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - -cloud-config=/etc/proxmox/config.yaml
+          {{- if or .Values.instanceTypes .Values.existingInstanceTypesConfigmap }}
+            - -instance-types-file=/etc/proxmox/instance-types/{{ .Values.existingInstanceTypesConfigmapKey }}
+          {{- end }}
             - -log-level={{ .Values.logVerbosityLevel }}
             - -leader-election-name=proxmox-karpenter-leader-election
           {{- if .Values.metrics.enabled }}
@@ -123,6 +131,11 @@ spec:
             - name: cloud-config
               mountPath: /etc/proxmox
               readOnly: true
+            {{- if or .Values.instanceTypes .Values.existingInstanceTypesConfigmap }}
+            - name: instance-types
+              mountPath: /etc/proxmox/instance-types
+              readOnly: true
+            {{- end }}
             {{- with .Values.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -170,6 +183,11 @@ spec:
           secret:
             secretName: {{ include "karpenter-provider-proxmox.fullname" . }}
             defaultMode: 416
+        {{- end }}
+        {{- if or .Values.instanceTypes .Values.existingInstanceTypesConfigmap }}
+        - name: instance-types
+          configMap:
+            name: {{ .Values.existingInstanceTypesConfigmap | default (include "karpenter-provider-proxmox.fullname" .) }}
         {{- end }}
         {{- with .Values.extraVolumes }}
         {{- toYaml . | nindent 8 }}

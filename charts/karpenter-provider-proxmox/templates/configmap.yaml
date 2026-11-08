@@ -1,0 +1,16 @@
+{{- if and .Values.instanceTypes (not .Values.existingInstanceTypesConfigmap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "karpenter-provider-proxmox.fullname" . }}
+  labels:
+    {{- include "karpenter-provider-proxmox.labels" . | nindent 4 }}
+  namespace: {{ .Release.Namespace }}
+data:
+  {{ .Values.existingInstanceTypesConfigmapKey }}: |-
+    {{- if kindIs "string" .Values.instanceTypes }}
+    {{- .Values.instanceTypes | nindent 4 }}
+    {{- else }}
+    {{- toJson .Values.instanceTypes | nindent 4 }}
+    {{- end }}
+{{- end }}
