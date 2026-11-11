@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sergelogvinov/go-proxmox-rest/nodes/qemu"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
@@ -159,4 +160,79 @@ func TestDay2VMGone(t *testing.T) {
 			assert.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "got %v", err)
 		})
 	}
+}
+
+// TestDay2VMIDTakenByAnotherVM puts another VM at the VM id of the
+// NodeClaim's provider ID, as when Proxmox hands the id out again, and
+// checks every day-2 operation reports the NodeClaim not found and leaves
+// that VM as it was.
+func TestDay2VMIDTakenByAnotherVM(t *testing.T) {
+	t.Parallel()
+
+	for _, op := range day2Operations {
+		t.Run(op.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := newLaunchFixture(t, launchSetup{})
+
+			nodeClaim, _ := f.launched()
+
+			vm := f.client.Nodes("pve1").Qemu()
+
+			stop, err := vm.Stop(f.ctx, firstVMID, nil)
+			require.NoError(t, err)
+			require.NoError(t, stop.Wait(f.ctx, nil))
+
+			del, err := vm.Delete(f.ctx, firstVMID, nil)
+			require.NoError(t, err)
+			require.NoError(t, del.Wait(f.ctx, nil))
+
+			const otherVM = "node-2"
+
+			f.cluster.Node("pve1").AddVM(firstVMID, &qemu.Config{Name: otherVM, Tags: &qemu.Tags{"other"}})
+
+			before, err := vm.Config(f.ctx, firstVMID, nil)
+			require.NoError(t, err)
+
+			err = op.call(f, nodeClaim)
+			assert.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "got %v", err)
+			assert.ErrorContains(t, err, fmt.Sprintf("%q", otherVM))
+
+			after, err := vm.Config(f.ctx, firstVMID, nil)
+			require.NoError(t, err, "the other VM still exists")
+			assert.Equal(t, before, after, "the other VM is unchanged")
+
+			rules, err := vm.Firewall().Rules(firstVMID).List(f.ctx)
+			require.NoError(t, err)
+			assert.Empty(t, rules, "the other VM has no firewall rules")
+
+			pool, err := f.client.Pools().Get(f.ctx, "karpenter")
+			require.NoError(t, err)
+			assert.Empty(t, pool.Members, "the other VM is not put in a pool")
+		})
+	}
+}
+
+// TestDeleteAfterVMIDReused deletes node-1, launches node-2 on the VM id
+// node-1 had, as once the pool's VM id reservation is gone, and checks
+// that Karpenter deleting node-1 again leaves node-2's VM alone.
+func TestDeleteAfterVMIDReused(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{})
+
+	nodeClaim, _ := f.launched()
+	// node-1 registered, so its cloud-init ISO is gone.
+	require.NoError(t, f.provider.DetachCloudInit(f.ctx, nodeClaim))
+	require.NoError(t, f.provider.Delete(f.ctx, nodeClaim))
+
+	restarted := f.restarted()
+
+	node, err := restarted.create(restarted.ctx, "node-2")
+	require.NoError(t, err)
+	require.Equal(t, nodeClaim.Status.ProviderID, node.Spec.ProviderID, "node-2 reuses node-1's VM id")
+
+	err = restarted.provider.Delete(restarted.ctx, nodeClaim)
+	assert.True(t, cloudprovider.IsNodeClaimNotFoundError(err), "got %v", err)
+
+	assert.Equal(t, map[string][]int{"pve1": {firstVMID}}, restarted.guests(), "node-2's VM survives")
+	assert.Equal(t, "node-2", restarted.vmConfig(node).Name)
 }

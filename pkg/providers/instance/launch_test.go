@@ -153,10 +153,8 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 
 	cl := fakeapi.NewCluster(t, opts...)
 
-	placements := []string{}
-
 	for i, zone := range setup.zones {
-		templateID := 100 * (i + 1)
+		templateID := zoneTemplateID(i)
 		disk := fmt.Sprintf("local-lvm:base-%d-disk-0", templateID)
 		cloudInitDrive := fmt.Sprintf("local-lvm:vm-%d-cloudinit", templateID)
 
@@ -188,8 +186,24 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 			IPConfig:  map[int]qemu.IPConfig{0: {IPv4: setup.subnet, GatewayIPv4: "10.0.0.1"}},
 			SMBios1:   &qemu.SMBios1{UUID: "00000000-0000-0000-0000-000000000001"},
 		})
+	}
 
-		placements = append(placements, fmt.Sprintf("%s/%s/%d", testRegion, zone, templateID))
+	return startLaunchFixture(t, setup, cl)
+}
+
+// zoneTemplateID is the VM id of the template seeded in the i-th zone.
+func zoneTemplateID(i int) int {
+	return 100 * (i + 1)
+}
+
+// startLaunchFixture starts an instance provider, with its own pool and
+// zone capacity, against the fake cluster cl that newLaunchFixture seeded.
+func startLaunchFixture(t *testing.T, setup launchSetup, cl *fakeapi.Cluster) *launchFixture {
+	t.Helper()
+
+	placements := []string{}
+	for i, zone := range setup.zones {
+		placements = append(placements, fmt.Sprintf("%s/%s/%d", testRegion, zone, zoneTemplateID(i)))
 	}
 
 	pool, err := pxpool.NewProxmoxPool([]*pxpool.ClusterConfig{{Region: testRegion}})
@@ -330,6 +344,14 @@ func newLaunchFixture(t *testing.T, setup launchSetup) *launchFixture {
 		nodeClass:    nodeClass,
 		instanceType: instanceType,
 	}
+}
+
+// restarted starts a new instance provider against f's fake cluster, as
+// after an operator restart: the pool has no VM id reserved any more.
+func (f *launchFixture) restarted() *launchFixture {
+	f.t.Helper()
+
+	return startLaunchFixture(f.t, f.setup, f.cluster)
 }
 
 func (f *launchFixture) nodeClaim(name string) *karpv1.NodeClaim {

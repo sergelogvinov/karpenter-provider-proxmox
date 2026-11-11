@@ -47,7 +47,8 @@ type vmLocation struct {
 // region label when the provider ID has none. The zone comes from Proxmox,
 // not the zone label, which goes stale once the VM migrates; the label is
 // used only if Proxmox reports no node. A VM Proxmox doesn't know is a
-// NodeClaimNotFoundError.
+// NodeClaimNotFoundError, and so is a VM whose name is not the NodeClaim's:
+// Proxmox handed the VM id of the NodeClaim's deleted VM to another VM.
 func (p *DefaultProvider) locate(ctx context.Context, nodeClaim *karpv1.NodeClaim) (vmLocation, error) {
 	vmid, region, err := provider.ParseProviderID(nodeClaim.Status.ProviderID)
 	if err != nil {
@@ -70,6 +71,11 @@ func (p *DefaultProvider) locate(ctx context.Context, nodeClaim *karpv1.NodeClai
 		}
 
 		return vmLocation{}, fmt.Errorf("failed to get vm %d in region %s: %w", vmid, region, err)
+	}
+
+	if vm.Name != nodeClaim.Name {
+		return vmLocation{}, cloudprovider.NewNodeClaimNotFoundError(
+			fmt.Errorf("vm id %d in region %s is now vm %q, not nodeclaim %q", vmid, region, vm.Name, nodeClaim.Name))
 	}
 
 	zone := vm.Node
