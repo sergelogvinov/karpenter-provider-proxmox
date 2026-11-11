@@ -26,6 +26,26 @@ The predefined list also has the `e2` [CPU share types](#cpu-share-types) of the
 and the `n1` and `n2` [NUMA templates](#numa-templates),
 so hosts with the `static` node policy offer whole and half NUMA node types (see [NUMA types](#numa-types)).
 
+### Select instance types by size
+
+Every instance type, of any family, carries its size as labels:
+* `karpenter.proxmox.sinextra.dev/instance-cpu`: the number of vCPUs, e.g. `4`.
+* `karpenter.proxmox.sinextra.dev/instance-memory`: the memory in MiB, e.g. `8192`.
+
+NodePools select instance types by size with `Gt` and `Lt`, without listing names:
+
+```yaml
+      requirements:
+        - key: karpenter.proxmox.sinextra.dev/instance-cpu
+          operator: Gt
+          values: ["2"]
+        - key: karpenter.proxmox.sinextra.dev/instance-memory
+          operator: Lt
+          values: ["32768"]
+```
+
+Nodes created before these labels existed do not have them, until they are replaced.
+
 ## CPU share types
 
 A CPU share type gives a VM CPUs that it shares with up to N−1 other VMs of the same size, instead of CPUs of its own.

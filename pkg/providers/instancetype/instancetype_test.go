@@ -33,6 +33,7 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -42,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 const (
@@ -271,4 +273,46 @@ func TestCPUShareOfferings(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSizeLabels checks that every instance type carries its vCPUs and memory in MiB as requirements,
+// so that a NodePool selects types by size with Gt and Lt.
+func TestSizeLabels(t *testing.T) {
+	t.Parallel()
+
+	p, err := newProvider(t, "simple", instanceTypes)
+	require.NoError(t, err)
+
+	instanceTypes, err := p.List(context.Background(), nil)
+	require.NoError(t, err)
+
+	sizes := map[string][2]string{}
+	for _, it := range instanceTypes {
+		sizes[it.Name] = [2]string{
+			it.Requirements.Get(v1alpha1.LabelInstanceCPU).Any(),
+			it.Requirements.Get(v1alpha1.LabelInstanceMemory).Any(),
+		}
+	}
+
+	require.Equal(t, map[string][2]string{
+		"c1.1VCPU-4GB": {"1", "4096"},
+		"e2.2VCPU-4GB": {"2", "4096"},
+		"e4.4VCPU-4GB": {"4", "4096"},
+	}, sizes)
+
+	nodePool := scheduling.NewNodeSelectorRequirements(
+		corev1.NodeSelectorRequirement{Key: v1alpha1.LabelInstanceCPU, Operator: corev1.NodeSelectorOpGt, Values: []string{"1"}},
+		corev1.NodeSelectorRequirement{Key: v1alpha1.LabelInstanceCPU, Operator: corev1.NodeSelectorOpLt, Values: []string{"4"}},
+		corev1.NodeSelectorRequirement{Key: v1alpha1.LabelInstanceMemory, Operator: corev1.NodeSelectorOpGt, Values: []string{"2048"}},
+	)
+
+	compatible := []string{}
+
+	for _, it := range instanceTypes {
+		if it.Requirements.Compatible(nodePool, scheduling.AllowUndefinedWellKnownLabels) == nil {
+			compatible = append(compatible, it.Name)
+		}
+	}
+
+	require.Equal(t, []string{"e2.2VCPU-4GB"}, compatible)
 }

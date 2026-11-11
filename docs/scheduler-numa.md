@@ -153,8 +153,9 @@ Each distinct `(family, slot shape)` becomes one Karpenter instance type, named 
   the slot shape is skipped in every NUMA family.
 - **Offerings.** Each type has an offering only in the zones that have that slot shape. The offering is available
   when that zone has at least one free slot of that shape (§5).
-- **Labels.** Requirements carry the usual `instance-type`, `instance-family`, region, zone and capacity type. No
-  new label is added (see [ADR 0002](adr/0002-family-digit-encodes-fraction.md)). NodePools select on the family:
+- **Labels.** Requirements carry the usual `instance-type`, `instance-family`, `instance-cpu`, `instance-memory`,
+  region, zone and capacity type. No NUMA label is added (see [ADR 0002](adr/0002-family-digit-encodes-fraction.md)).
+  NodePools select on the family:
 
   ```yaml
   requirements:

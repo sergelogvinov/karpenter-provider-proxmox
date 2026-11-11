@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -124,7 +125,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 	if len(nodeClass.TemplatePlacements("")) == 0 {
 		for _, it := range instanceTypes {
 			it.Offerings = cloudprovider.Offerings{}
-			it.Requirements = computeRequirements(it.Name, it.Offerings, p.cloudCapacityProvider.Regions())
+			it.Requirements = computeRequirements(it, p.cloudCapacityProvider.Regions())
 		}
 
 		return instanceTypes, nil
@@ -144,7 +145,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ProxmoxN
 				Zone:   o.Requirements.Get(corev1.LabelTopologyZone).Any(),
 			}, profile)
 		})
-		it.Requirements = computeRequirements(it.Name, it.Offerings, p.cloudCapacityProvider.Regions())
+		it.Requirements = computeRequirements(it, p.cloudCapacityProvider.Regions())
 	}
 
 	return instanceTypes, nil
@@ -165,7 +166,7 @@ func (p *DefaultProvider) ListWithFilter(ctx context.Context, filter func(*cloud
 		}
 
 		if filter(instanceType) {
-			instanceType.Requirements = computeRequirements(item.Name, instanceType.Offerings, p.cloudCapacityProvider.Regions())
+			instanceType.Requirements = computeRequirements(instanceType, p.cloudCapacityProvider.Regions())
 
 			filtered = append(filtered, instanceType)
 		}
@@ -407,10 +408,11 @@ func zoneOffering(it *InstanceTypeStatic, region, zone, ct string, available boo
 	}
 }
 
-func computeRequirements(instanceTypeName string, offerings cloudprovider.Offerings, regions []string) scheduling.Requirements {
+// computeRequirements are the requirements of instance type it with its offerings in regions.
+func computeRequirements(it *cloudprovider.InstanceType, regions []string) scheduling.Requirements {
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
-		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, instanceTypeName),
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, it.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, string(karpv1.ArchitectureAmd64)),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
 		scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, regions...),
@@ -419,17 +421,24 @@ func computeRequirements(instanceTypeName string, offerings cloudprovider.Offeri
 		// })...),
 
 		// Well Known to Karpenter
-		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(it.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
 		})...),
 
 		// Well Known to Proxmox
-		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, instanceFamily(instanceTypeName)),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, instanceFamily(it.Name)),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceCPUType, corev1.NodeSelectorOpDoesNotExist),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceCPU, corev1.NodeSelectorOpIn, strconv.FormatInt(it.Capacity.Cpu().Value(), 10)),
+		scheduling.NewRequirement(v1alpha1.LabelInstanceMemory, corev1.NodeSelectorOpIn, strconv.FormatUint(memoryMiB(it.Capacity), 10)),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceImageID, corev1.NodeSelectorOpDoesNotExist),
 	)
 
 	return requirements
+}
+
+// memoryMiB is the memory of capacity in whole MiB.
+func memoryMiB(capacity corev1.ResourceList) uint64 {
+	return uint64(capacity.Memory().Value()) / zonecapacity.MiB
 }
 
 func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {

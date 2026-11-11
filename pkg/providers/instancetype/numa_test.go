@@ -110,6 +110,8 @@ func TestNUMATypesWorkedExample(t *testing.T) {
 	require.Equal(t, int64(30<<30), it.Capacity.StorageEphemeral().Value())
 	require.NotEmpty(t, it.Overhead.KubeReserved, "the overhead is computed from the slot's capacity")
 	require.Equal(t, []string{"n2"}, it.Requirements.Get(v1alpha1.LabelInstanceFamily).Values())
+	require.Equal(t, []string{"14"}, it.Requirements.Get(v1alpha1.LabelInstanceCPU).Values())
+	require.Equal(t, []string{"64512"}, it.Requirements.Get(v1alpha1.LabelInstanceMemory).Values())
 	require.Equal(t, map[string]bool{zone: true}, zonesOf(t, p, "n2.14VCPU-63GB"))
 }
 

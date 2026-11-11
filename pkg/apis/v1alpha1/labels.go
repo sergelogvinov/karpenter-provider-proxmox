@@ -29,6 +29,10 @@ const (
 	LabelInstanceFamily = apis.Group + "/instance-family" // c1, s1, m1, e2
 	// LabelInstanceCPUType is the CPU type, e.g. host, kvm64, Broadwell, Skylake
 	LabelInstanceCPUType = apis.Group + "/instance-cpu-type" // host, kvm64, Broadwell, Skylake
+	// LabelInstanceCPU is the number of vCPUs
+	LabelInstanceCPU = apis.Group + "/instance-cpu" // 2, 4, 8, ...
+	// LabelInstanceMemory is the amount of memory in MiB
+	LabelInstanceMemory = apis.Group + "/instance-memory" // 2048, 4096, 8192, ... (in MiB)
 	// LabelInstanceImageID is the image ID
 	LabelInstanceImageID = apis.Group + "/instance-image-id" // image ID
 
@@ -44,6 +48,8 @@ func init() {
 	karpv1.WellKnownLabels = karpv1.WellKnownLabels.Insert(
 		LabelInstanceFamily,
 		LabelInstanceCPUType,
+		LabelInstanceCPU,
+		LabelInstanceMemory,
 		LabelInstanceImageID,
 	)
 }
