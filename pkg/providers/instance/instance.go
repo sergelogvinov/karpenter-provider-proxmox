@@ -128,7 +128,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClai
 				zones = p.cloudCapacityProvider.Zones(region)
 			}
 
-			zones = getValuesByKey(instanceType, corev1.LabelTopologyZone, zones)
+			zones = offeredZones(instanceType, requirements, region, zones)
 			if len(zones) == 0 {
 				log.Error(ErrNoZoneFound, "No zones available in region for instanceType", "region", region, "instanceType", instanceType.Name)
 

@@ -17,6 +17,7 @@ limitations under the License.
 package instancetype
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -281,10 +282,10 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	return listErr
 }
 
-// offeringsReport returns the zones where each instance type is available and, for the instance types available
-// nowhere, the zones where they are offered, both sorted, with the number of available offerings.
-func offeringsReport(instanceTypes []*InstanceTypeStatic) (available, unavailable map[string][]string, offers int) {
-	available = make(map[string][]string, len(instanceTypes))
+// offeringsReport returns the zones where each instance type is available, by capacity type, and, for the instance
+// types available nowhere, the zones where they are offered, all sorted, with the number of available offerings.
+func offeringsReport(instanceTypes []*InstanceTypeStatic) (available map[string]map[string][]string, unavailable map[string][]string, offers int) {
+	available = map[string]map[string][]string{}
 	unavailable = map[string][]string{}
 
 	zones := func(offerings cloudprovider.Offerings) []string {
@@ -300,10 +301,22 @@ func offeringsReport(instanceTypes []*InstanceTypeStatic) (available, unavailabl
 		offerings := item.Offerings.Available()
 		offers += len(offerings)
 
-		if len(offerings) > 0 {
-			available[item.Name] = zones(offerings)
-		} else {
+		if len(offerings) == 0 {
 			unavailable[item.Name] = zones(item.Offerings)
+
+			continue
+		}
+
+		byCapacityType := lo.GroupBy(offerings, func(o *cloudprovider.Offering) string {
+			return o.Requirements.Get(karpv1.CapacityTypeLabelKey).Any()
+		})
+
+		for ct, ctOfferings := range byCapacityType {
+			if available[ct] == nil {
+				available[ct] = map[string][]string{}
+			}
+
+			available[ct][item.Name] = zones(ctOfferings)
 		}
 	}
 
@@ -369,41 +382,80 @@ func (p *DefaultProvider) createOfferings(opts *InstanceTypeStatic, regions []st
 
 	for _, region := range regions {
 		for _, zone := range p.cloudCapacityProvider.Zones(region) {
-			err := p.cloudCapacityProvider.FitInZone(region, zone, VMRequest(opts.Capacity, p.profiles[opts.Name]))
+			req := VMRequest(opts.Capacity, p.profiles[opts.Name])
+
+			err := p.cloudCapacityProvider.FitInZone(region, zone, req)
 			if errors.Is(err, zonecapacity.ErrNotOffered) {
 				continue
 			}
 
-			opts.Offerings = append(opts.Offerings, zoneOfferings(opts, region, zone, err == nil)...)
+			opts.Offerings = append(opts.Offerings, p.zoneOfferings(opts, region, zone, req, err)...)
 		}
 	}
 }
 
-// zoneOfferings are the offerings of instance type it in one zone, one per capacity type.
-func zoneOfferings(it *InstanceTypeStatic, region, zone string, available bool) []*cloudprovider.Offering {
+// zoneOfferings are the offerings of instance type it in one zone, one per capacity type, for VMs like req.
+// fit is why one more such VM does not fit in the zone, nil when it fits.
+// An on-demand or spot offering is available where the VM fits. A reserved offering is available also where fit
+// wraps zonecapacity.ErrNoRoom, and its reservation capacity is how many more such VMs the zone admits, at most
+// cloudcapacity.CountLimit, so a full zone's reserved offering stays listed but is not launchable.
+func (p *DefaultProvider) zoneOfferings(it *InstanceTypeStatic, region, zone string, req resources.VMResources, fit error) []*cloudprovider.Offering {
 	offerings := []*cloudprovider.Offering{}
 
 	// We use capacityType array to allow multiple capacity types per instance type in the future
 	for _, ct := range lo.Uniq([]string{it.CapacityType}) {
-		offerings = append(offerings, zoneOffering(it, region, zone, ct, available))
+		o := zoneOffering(it, region, zone, ct)
+		o.Available = fit == nil
+
+		if ct == karpv1.CapacityTypeReserved {
+			o.Available = fit == nil || errors.Is(fit, zonecapacity.ErrNoRoom)
+			if fit == nil {
+				o.ReservationCapacity = p.cloudCapacityProvider.CountInZone(region, zone, req, cloudcapacity.CountLimit)
+			}
+		}
+
+		offerings = append(offerings, o)
 	}
 
 	return offerings
 }
 
-// zoneOffering is the offering of instance type it in one zone for capacity type ct.
-func zoneOffering(it *InstanceTypeStatic, region, zone, ct string, available bool) *cloudprovider.Offering {
-	price := priceOf(it)
+// capacityTypePriceFactor is the price of an offering of each capacity type, relative to the instance type's
+// price: reserved < spot < on-demand, so that Karpenter launches reserved first and never consolidates it away.
+var capacityTypePriceFactor = map[string]float64{
+	karpv1.CapacityTypeOnDemand: 1,
+	karpv1.CapacityTypeSpot:     0.5,
+	karpv1.CapacityTypeReserved: 0.25,
+}
+
+// capacityTypeChoices are the capacity types of capacityTypePriceFactor, most expensive first:
+// "on-demand, spot or reserved".
+func capacityTypeChoices() string {
+	types := lo.Keys(capacityTypePriceFactor)
+	slices.SortFunc(types, func(a, b string) int {
+		return cmp.Compare(capacityTypePriceFactor[b], capacityTypePriceFactor[a])
+	})
+
+	return strings.Join(types[:len(types)-1], ", ") + " or " + types[len(types)-1]
+}
+
+// zoneOffering is the offering of instance type it in one zone for capacity type ct. It is unavailable, with no
+// reservation capacity, until the caller says otherwise.
+func zoneOffering(it *InstanceTypeStatic, region, zone, ct string) *cloudprovider.Offering {
+	reservation := scheduling.NewRequirement(v1alpha1.LabelReservationID, corev1.NodeSelectorOpDoesNotExist)
+	if ct == karpv1.CapacityTypeReserved {
+		reservation = scheduling.NewRequirement(v1alpha1.LabelReservationID, corev1.NodeSelectorOpIn, v1alpha1.ReservationID(region, zone, it.Name))
+	}
 
 	return &cloudprovider.Offering{
-		Price:     lo.Ternary(ct == karpv1.CapacityTypeSpot, price*.5, price),
-		Available: available,
+		Price: priceOf(it) * capacityTypePriceFactor[ct],
 		Requirements: scheduling.NewRequirements(
 			scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, it.Name),
 			scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
 			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
 			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, ct),
 			scheduling.NewRequirement(v1alpha1.LabelInstanceFamily, corev1.NodeSelectorOpIn, instanceFamily(it.Name)),
+			reservation,
 		),
 	}
 }
@@ -478,6 +530,10 @@ func loadInstanceTypesFromFile(name string) ([]*InstanceTypeStatic, error) {
 
 		if i.CapacityType == "" {
 			i.CapacityType = karpv1.CapacityTypeOnDemand
+		}
+
+		if _, ok := capacityTypePriceFactor[i.CapacityType]; !ok {
+			return nil, fmt.Errorf("instance type %s in %s: capacitytype %q must be %s", i.Name, name, i.CapacityType, capacityTypeChoices())
 		}
 	}
 

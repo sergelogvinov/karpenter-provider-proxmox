@@ -155,6 +155,14 @@ _Avoid_: regular type (a regular VM is never a CPU share VM)
 A NUMA type that stays listed, with unavailable offerings, in a zone or capacity type it is no longer generated for, because a NodeClaim there still uses it; when its slot shape is gone from every zone it is rebuilt from its name and its family's NUMA template. It is dropped with its last NodeClaim.
 _Avoid_: stale type, orphan type
 
+**Reserved instance type**:
+An instance type whose offerings Karpenter prefers over on-demand and spot. It is limited to the VMs that still fit in each zone.
+_Avoid_: reservation (for zone capacity Reserve)
+
+**Reservation ID**:
+The label value naming one reserved offering by its region, zone and instance type, ending in a hash of the three that keeps it unique; Karpenter's term, by which it tells reserved offerings apart. It names no reservation of zone capacity: that is Reserve, and a pending reservation, for one virtual machine.
+_Avoid_: reservation (alone, for the reserved offering)
+
 **Launch profile**:
 What an instance type itself says about how it launches: whether it is a NUMA type (with its slot fraction), a CPU share type (with its seats) or a dedicated type, and its hugepage request. It says nothing of placement, which follows from the profile together with the node policy.
 _Avoid_: type kind, placement (for the profile)

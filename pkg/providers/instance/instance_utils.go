@@ -221,6 +221,10 @@ func (p *DefaultProvider) instanceCreate(ctx context.Context,
 		},
 	}
 
+	if capacityType == karpv1.CapacityTypeReserved {
+		node.Labels[v1alpha1.LabelReservationID] = v1alpha1.ReservationID(region, zone, instanceType.Name)
+	}
+
 	return node, nil
 }
 

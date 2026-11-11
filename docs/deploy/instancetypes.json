@@ -431,7 +431,7 @@
       "ephemeral-storage": "50Gi",
       "pods": "110"
     },
-    "capacitytype": "on-demand",
+    "capacitytype": "reserved",
     "numa": 1
   },
   {
@@ -440,7 +440,7 @@
       "ephemeral-storage": "50Gi",
       "pods": "110"
     },
-    "capacitytype": "on-demand",
+    "capacitytype": "reserved",
     "numa": 2
   }
 ]
