@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.16.0...v0.17.0) (2026-11-11)
+
+
+### Features
+
+* add instance-cpu and instance-memory labels ([601fd4f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/601fd4f59dbf0ea02fca021bcf7a51d758714fe1))
+* **chart:** add instance-types config map ([ee7d216](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/ee7d216819457fed6280c6e6d233de4c1290e869))
+* support reserved capacity type ([#341](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/341)) ([941cd95](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/941cd95e96f9c8e3052850944cc6e35833c4b6e0)), closes [#340](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/340)
+
+
+### Bug Fixes
+
+* ignore a VM whose name is not the NodeClaim's in locate ([b9fb54f](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/b9fb54f74c65d99791e1e34a78eb0c6425a57b6b)), closes [#337](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/337)
+* stop slaac from writing into net.IPv6zero ([#334](https://github.com/sergelogvinov/karpenter-provider-proxmox/issues/334)) ([e895d69](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e895d6949497784b399a5b0cf1f93c611a8cc172))
+
 ## [0.16.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.15.0...v0.16.0) (2026-11-02)
 
 
