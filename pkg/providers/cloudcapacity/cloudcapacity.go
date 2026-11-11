@@ -28,6 +28,7 @@ import (
 	pxpool "github.com/sergelogvinov/go-proxmox-pool"
 	"github.com/sergelogvinov/go-proxmox-rest/cluster"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/apis/v1alpha1"
+	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/cloudcapacity/resourcemanager"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/config"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/launchrule"
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/proxmox/resources"
@@ -35,6 +36,10 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
+
+// CountLimit is the most VMs CountInZone is asked to count, so that counting stays cheap however
+// big a zone is.
+const CountLimit = 32
 
 type Provider interface {
 	// Reserve admits a new VM into the zone's capacity if the zone has room for it.
@@ -68,6 +73,10 @@ type Provider interface {
 	// zonecapacity.ErrNotOffered when the zone's node policy never offers it, or, as root, when the launch
 	// decision for req's launch profile drops it (launchrule, ADR 0003), any other error otherwise.
 	FitInZone(region, zone string, req resources.VMResources) error
+	// CountInZone is how many more VMs like req the zone would admit one after another, at most limit,
+	// without reserving any. It is 0 wherever FitInZone fails before fitting: an unavailable zone, or a
+	// request not offered as root.
+	CountInZone(region, zone string, req resources.VMResources, limit int) int
 	// Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
 	// or under shared placement, which offers no NUMA slot.
 	Slots(region, zone string) []zonecapacity.SlotOffer
@@ -521,18 +530,27 @@ func (p *DefaultProvider) FitInZone(region, zone string, req resources.VMResourc
 	p.muCapacityInfo.RLock()
 	defer p.muCapacityInfo.RUnlock()
 
-	info, ok := p.capacityInfo[zoneKey(region, zone)]
-	if !ok || info.Capacity == nil || info.omitted {
-		return fmt.Errorf("zone %s/%s is unavailable", region, zone)
-	}
-
-	if err := p.notOfferedAsRoot(region, zone, req); err != nil {
+	capacity, err := p.offeringZone(region, zone, req)
+	if err != nil {
 		return err
 	}
 
-	_, err := info.Capacity.Fit(req)
+	_, err = capacity.Fit(req)
 
 	return err
+}
+
+// CountInZone implements Provider.CountInZone.
+func (p *DefaultProvider) CountInZone(region, zone string, req resources.VMResources, limit int) int {
+	p.muCapacityInfo.RLock()
+	defer p.muCapacityInfo.RUnlock()
+
+	capacity, err := p.offeringZone(region, zone, req)
+	if err != nil {
+		return 0
+	}
+
+	return capacity.Count(req, limit)
 }
 
 // Slots is every NUMA slot shape of the zone with its free slots; nil when the zone is unavailable
@@ -560,6 +578,21 @@ func (p *DefaultProvider) ZonePool(region, zone string) zonecapacity.Pool {
 // Root reports whether the controller logs in as root@pam in region.
 func (p *DefaultProvider) Root(region string) bool {
 	return p.privileges.Root(region)
+}
+
+// offeringZone is the capacity of a zone that may offer req: an available zone where req is offered as root.
+// It runs under muCapacityInfo.
+func (p *DefaultProvider) offeringZone(region, zone string, req resources.VMResources) (*resourcemanager.ZoneCapacity, error) {
+	info, ok := p.capacityInfo[zoneKey(region, zone)]
+	if !ok || info.Capacity == nil || info.omitted {
+		return nil, fmt.Errorf("zone %s/%s is unavailable", region, zone)
+	}
+
+	if err := p.notOfferedAsRoot(region, zone, req); err != nil {
+		return nil, err
+	}
+
+	return info.Capacity, nil
 }
 
 // notOfferedAsRoot returns an error wrapping zonecapacity.ErrNotOffered when, as root, the launch decision for

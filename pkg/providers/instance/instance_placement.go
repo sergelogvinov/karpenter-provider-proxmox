@@ -75,6 +75,22 @@ func getValuesByKey(instanceType *cloudprovider.InstanceType, key string, defaul
 	return lo.Uniq(lo.Flatten(res))
 }
 
+// offeredZones are the zones, of zones in region, where instanceType has an available offering compatible with
+// requirements. requirements are the NodeClaim's in full, so a NodeClaim that Karpenter reserved against an offering,
+// by its capacity type and reservation ID, only gets that offering's zone. A full zone's reserved offering stays
+// available, so zone choice, not this, finds the zone has no room.
+func offeredZones(instanceType *cloudprovider.InstanceType, requirements scheduling.Requirements, region string, zones []string) []string {
+	reqs := scheduling.NewRequirements(requirements.Values()...)
+	reqs.Add(scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region))
+	reqs.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zones...))
+
+	offerings := instanceType.Offerings.Available().Compatible(reqs)
+
+	return lo.Uniq(lo.FlatMap(offerings, func(o *cloudprovider.Offering, _ int) []string {
+		return o.Requirements.Get(corev1.LabelTopologyZone).Values()
+	}))
+}
+
 func getCapacityType(nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.InstanceType, region, zone string) string {
 	requirements := scheduling.NewNodeSelectorRequirementsWithMinValues(nodeClaim.Spec.Requirements...)
 	requirements[corev1.LabelTopologyRegion] = scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region)
@@ -87,6 +103,8 @@ func getCapacityType(nodeClaim *karpv1.NodeClaim, instanceType *cloudprovider.In
 		}
 
 		requirements[karpv1.CapacityTypeLabelKey] = scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType)
+		// Available, not Launchable: the zone has already reserved room for the VM, so a reserved offering whose
+		// reservation capacity was used up at the last offerings refresh still holds it.
 		if len(instanceType.Offerings.Available().Compatible(requirements)) != 0 {
 			return capacityType
 		}

@@ -272,6 +272,8 @@ The file structure looks like this:
   Omit it, or set it to `0`, for dedicated CPUs. The controller rejects the file if it has any other value.
   This field, not the name, makes an instance type a CPU share type, so the family can be called anything.
 * `numa` (optional): The slot fraction of a NUMA template: `1`, `2` or `4` (see [NUMA templates](#numa-templates)).
+* `capacitytype` (optional): The `karpenter.sh/capacity-type` of the instance type: `on-demand` (the default), `spot` or `reserved`
+  (see [Capacity types](#capacity-types)). The controller rejects the file if it has any other value.
 * `capacity`: The resource capacity of the instance type.
   * `cpu`: The number of virtual CPUs.
   * `ephemeral-storage`: The boot disk size.
@@ -307,6 +309,47 @@ A CPU share type is an entry with the `cpushare` field:
 ```
 
 `capacity.cpu` is the full vCPU count the guest sees, not the vCPU/N share it is accounted as.
+
+### Capacity types
+
+Each entry has one capacity type, set by `capacitytype`, and its offerings carry it as `karpenter.sh/capacity-type`:
+
+* `on-demand` (the default when `capacitytype` is empty or omitted).
+* `spot`.
+* `reserved`: a reserved instance type, which Karpenter launches before on-demand and spot types.
+
+The price of an offering is the instance type's price times a factor of its capacity type:
+`reserved` 0.25, `spot` 0.5 and `on-demand` 1, so reserved < spot < on-demand.
+Provisioning picks a reserved type first, and consolidation never replaces a reserved node with a spot or on-demand one.
+
+A reserved instance type is not a fixed pool.
+In each zone its reserved capacity is however many more VMs of the type still fit in the zone, up to 32 per scheduling pass.
+When the zone is full, the reserved offering stays listed but is not launched, and Karpenter falls back to other offerings.
+To keep pods scheduling when reserved capacity runs out, add a separate `on-demand` entry of the same size as a fallback:
+
+```json
+[
+  {"name": "r1.4VCPU-8GB", "capacitytype": "reserved", "capacity": {"cpu": "4", "memory": "8Gi", "ephemeral-storage": "30Gi", "pods": "64"}},
+  {"name": "c1.4VCPU-8GB", "capacity": {"cpu": "4", "memory": "8Gi", "ephemeral-storage": "30Gi", "pods": "64"}}
+]
+```
+
+A NodePool launches reserved nodes only if its `karpenter.sh/capacity-type` requirement allows `reserved`.
+`capacitytype: reserved` works on dedicated, CPU share and NUMA template entries alike;
+a reserved NUMA template makes every NUMA type made from it reserved.
+
+Each reserved offering has a reservation ID per region, zone and instance type: `<region>-<zone>-<instancetype>-<hash>`,
+where `<hash>` is the first 8 hex characters of the SHA-256 of `<region>/<zone>/<instancetype>`.
+Names may contain `-` and `.`, so the hash keeps IDs apart whose readable parts are the same
+(region `prod-us` with zone `west`, and region `prod` with zone `us-west`).
+When the ID would be longer than 63 characters, the longest label value, its readable part is cut short and the hash kept.
+Nodes launched on a reserved offering carry it as the label `karpenter.proxmox.sinextra.dev/reservation-id`.
+NodePools that allow the same reserved instance type share its reserved capacity in each zone.
+The label is registered as a well-known Karpenter label, Karpenter's reservation ID label,
+so that offerings with it stay compatible with NodePool and NodeClaim requirements; on-demand and spot offerings require it not to exist.
+
+Changing the `capacitytype` of an entry leaves its existing nodes without an offering of their capacity type,
+so Karpenter drifts and replaces them. A kept NUMA type keeps the capacity type of its NodeClaims (see [Kept NUMA types](#kept-numa-types)).
 
 ## Generate instance types
 

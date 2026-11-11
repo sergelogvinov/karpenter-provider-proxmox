@@ -294,6 +294,29 @@ func TestReleaseOnOmittedZone(t *testing.T) {
 	require.True(t, fits(p, 8, 15*gib), "the release while omitted sticks")
 }
 
+// TestCountInZone checks that CountInZone is how many more VMs like req fit in the zone, and 0
+// wherever FitInZone fails before fitting: an unknown or omitted zone, or a request not offered as root.
+func TestCountInZone(t *testing.T) {
+	t.Parallel()
+
+	ctx, cluster, p := newProvider(t)
+	req := resources.VMResources{CPUs: 2, Memory: gib}
+
+	require.Equal(t, 4, p.CountInZone(region, zone, req, cloudcapacity.CountLimit), "8 CPUs over 2 CPUs a VM")
+	require.Equal(t, 3, p.CountInZone(region, zone, req, 3))
+	require.Zero(t, p.CountInZone(region, "pve-2", req, cloudcapacity.CountLimit), "unknown zone")
+
+	require.NoError(t, reserve(ctx, p, resources.VMResources{ID: 100, CPUs: 6, Memory: gib}))
+	require.Equal(t, 1, p.CountInZone(region, zone, req, cloudcapacity.CountLimit), "the reservation holds 6 CPUs")
+
+	cluster.FailNode(zone, fakeapi.FailureUnreachable)
+	require.NoError(t, p.SyncNodeCapacity(ctx))
+	require.Zero(t, p.CountInZone(region, zone, req, cloudcapacity.CountLimit), "omitted zone")
+
+	_, _, root := newProviderWithRoot(t, "static", twoNodeHugepageSettings, true)
+	require.Zero(t, root.CountInZone(region, zone, req, cloudcapacity.CountLimit), "not offered as root")
+}
+
 // hugepageSettings is nodeSettings with a pool of 1GiB hugepages on one NUMA node.
 const hugepageSettings = `{"region-1": {"pve-1": {"hugepagesize": 1073741824, "nodes": {"0": {"cpus": "0-7", "memsize": 17179869184}}}}}`
 

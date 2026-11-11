@@ -100,6 +100,12 @@ func (z *ZoneCapacity) Fit(op resources.VMResources) (zonecapacity.Fit, error) {
 	return z.zone.Fit(z.policy, vmFromRequest(op))
 }
 
+// Count is how many VMs like op the zone would still admit one after another, at most limit,
+// without reserving any. op may have no ID.
+func (z *ZoneCapacity) Count(op resources.VMResources, limit int) int {
+	return z.zone.Count(z.policy, vmFromRequest(op), limit)
+}
+
 // Track records a VM that runs in the zone, replacing any earlier record or reservation.
 // An error wrapping zonecapacity.ErrTokenIgnored is a warning: the VM is tracked.
 func (z *ZoneCapacity) Track(vm zonecapacity.VM) error {

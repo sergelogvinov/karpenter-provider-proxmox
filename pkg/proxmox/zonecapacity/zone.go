@@ -269,7 +269,7 @@ func (z *Zone) Reserve(p Policy, vm VM) (Grant, error) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	rec, numa, err := z.admit(p, vm)
+	rec, numa, err := z.admit(p, vm, false)
 	if err != nil {
 		return Grant{}, err
 	}
@@ -297,7 +297,7 @@ func (z *Zone) Fit(p Policy, vm VM) (Fit, error) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 
-	rec, numa, err := z.admit(p, vm)
+	rec, numa, err := z.admit(p, vm, false)
 	if err != nil {
 		return Fit{}, err
 	}
@@ -313,6 +313,36 @@ func (z *Zone) Fit(p Policy, vm VM) (Fit, error) {
 		NUMANodes: len(numa),
 		Leftover:  scarcerShare(left.CPUs, z.sharedCapacity(usage{}, ratio), left.Memory, z.memory),
 	}, nil
+}
+
+// Count is how many VMs like vm the zone would still admit under p one after another, at most limit.
+// Each admitted VM is held under a temporary negative ID so the next one sees it, and all are
+// removed before Count returns, so the zone is left unchanged. vm's own ID is not used; it may have none.
+func (z *Zone) Count(p Policy, vm VM, limit int) int {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+
+	n := 0
+
+	defer func() {
+		for id := -1; id >= -n; id-- {
+			delete(z.vms, id)
+		}
+	}()
+
+	for n < limit {
+		vm.ID = -(n + 1)
+
+		rec, _, err := z.admit(p, vm, true)
+		if err != nil {
+			break
+		}
+
+		z.vms[vm.ID] = rec
+		n++
+	}
+
+	return n
 }
 
 // HugePageSize is hugePageSize, in bytes.
@@ -400,9 +430,10 @@ func (z *Zone) ratio(p Policy) (float64, error) {
 }
 
 // admit places vm under p and checks the zone has room for it, without recording it.
-func (z *Zone) admit(p Policy, vm VM) (record, map[int]NUMABinding, error) {
-	// A zero ID is a VM that Fit is asked about before it has one; Reserve rejects it.
-	if vm.ID < 0 || vm.CPUs <= 0 || vm.Memory == 0 {
+// vm's ID is a temporary negative one of Count when temporary is set, and otherwise 0 or more: a zero ID is a VM
+// that Fit is asked about before it has one, which Reserve rejects before admitting it.
+func (z *Zone) admit(p Policy, vm VM, temporary bool) (record, map[int]NUMABinding, error) {
+	if temporary != (vm.ID < 0) || vm.CPUs <= 0 || vm.Memory == 0 {
 		return record{}, nil, fmt.Errorf("%w: %s", ErrInvalid, errRequired)
 	}
 

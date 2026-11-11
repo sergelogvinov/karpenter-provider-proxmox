@@ -60,7 +60,7 @@ func (p *DefaultProvider) keepNUMATypesInUse(byName map[string]*InstanceTypeStat
 				o.Requirements.Get(karpv1.CapacityTypeLabelKey).Has(capacityType)
 		})
 		if !offered {
-			it.Offerings = append(it.Offerings, zoneOffering(it, use.region, use.zone, capacityType, false))
+			it.Offerings = append(it.Offerings, zoneOffering(it, use.region, use.zone, capacityType))
 		}
 	}
 
@@ -142,7 +142,14 @@ func (p *DefaultProvider) numaTypes(regions []string) map[string]*InstanceTypeSt
 						byName[name] = it
 					}
 
-					it.Offerings = append(it.Offerings, zoneOfferings(it, region, zone, offer.Free > 0)...)
+					// The zone has the slot shape, so it only lacks room for the type when no slot of it is free.
+					var fit error
+					if offer.Free == 0 {
+						fit = zonecapacity.ErrNoRoom
+					}
+
+					req := VMRequest(it.Capacity, p.numaProfiles[family])
+					it.Offerings = append(it.Offerings, p.zoneOfferings(it, region, zone, req, fit)...)
 				}
 			}
 		}

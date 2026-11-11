@@ -101,6 +101,8 @@ type launchSetup struct {
 	nonRoot bool
 	// staleTemplate leaves out of each VM template the hugepages its status.template still gives.
 	staleTemplate bool
+	// reserved gives the instance type a reserved offering in each zone, next to the on-demand one.
+	reserved bool
 }
 
 // numaZoneSettings is the node settings file of launchSetup.numa: two NUMA nodes of 4 CPUs and 8GiB.
@@ -306,8 +308,24 @@ func startLaunchFixture(t *testing.T, setup launchSetup, cl *fakeapi.Cluster) *l
 				scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, testRegion),
 				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
 				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+				scheduling.NewRequirement(v1alpha1.LabelReservationID, corev1.NodeSelectorOpDoesNotExist),
 			),
 		})
+
+		if setup.reserved {
+			offerings = append(offerings, &cloudprovider.Offering{
+				Available:           true,
+				Price:               0.25,
+				ReservationCapacity: 1,
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, testRegion),
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeReserved),
+					scheduling.NewRequirement(v1alpha1.LabelReservationID, corev1.NodeSelectorOpIn,
+						v1alpha1.ReservationID(testRegion, zone, instanceTypeName)),
+				),
+			})
+		}
 	}
 
 	instanceType := &cloudprovider.InstanceType{
@@ -508,6 +526,65 @@ func TestCreate(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, pool.Members, 1)
 	assert.Equal(t, firstVMID, pool.Members[0].VMID)
+}
+
+// TestCreateReserved checks that a NodeClaim allowing reserved capacity, launched on a reserved offering, gets a
+// node of capacity type reserved with the reservation ID of its region, zone and instance type.
+func TestCreateReserved(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{reserved: true})
+
+	nodeClaim := f.nodeClaim("node-1")
+	nodeClaim.Spec.Requirements = append(nodeClaim.Spec.Requirements, karpv1.NodeSelectorRequirementWithMinValues{
+		Key: karpv1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn,
+		Values: []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeOnDemand},
+	})
+
+	node, err := f.provider.Create(f.ctx, nodeClaim, f.nodeClass, []*cloudprovider.InstanceType{f.instanceType})
+	require.NoError(t, err)
+
+	assert.Equal(t, karpv1.CapacityTypeReserved, node.Labels[karpv1.CapacityTypeLabelKey])
+	assert.Equal(t, v1alpha1.ReservationID(testRegion, "pve1", f.instanceType.Name), node.Labels[v1alpha1.LabelReservationID])
+	assert.Contains(t, f.vmConfig(node).Description, "capacity-type=reserved")
+}
+
+// TestCreateReservedInItsZone checks that a NodeClaim reserved against one zone, as Karpenter core leaves it with
+// its capacity type narrowed to reserved and its reservation ID, launches in that zone, though it has no zone
+// requirement and another zone fits too.
+func TestCreateReservedInItsZone(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{zones: []string{"pve1", "pve2"}, reserved: true})
+
+	nodeClaim := &karpv1.NodeClaim{
+		Name: "node-1",
+		Spec: karpv1.NodeClaimSpec{
+			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+				{Key: karpv1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{karpv1.CapacityTypeReserved}},
+				{Key: v1alpha1.LabelReservationID, Operator: corev1.NodeSelectorOpIn, Values: []string{v1alpha1.ReservationID(testRegion, "pve2", f.instanceType.Name)}},
+			},
+		},
+	}
+
+	node, err := f.provider.Create(f.ctx, nodeClaim, f.nodeClass, []*cloudprovider.InstanceType{f.instanceType})
+	require.NoError(t, err)
+
+	assert.Equal(t, "pve2", node.Labels[corev1.LabelTopologyZone])
+	assert.Equal(t, v1alpha1.ReservationID(testRegion, "pve2", f.instanceType.Name), node.Labels[v1alpha1.LabelReservationID])
+}
+
+// TestCreateOnDemandBesideReserved checks that a NodeClaim allowing only on-demand capacity gets an on-demand node
+// without a reservation ID, though the instance type has a reserved offering too.
+func TestCreateOnDemandBesideReserved(t *testing.T) {
+	f := newLaunchFixture(t, launchSetup{reserved: true})
+
+	nodeClaim := f.nodeClaim("node-1")
+	nodeClaim.Spec.Requirements = append(nodeClaim.Spec.Requirements, karpv1.NodeSelectorRequirementWithMinValues{
+		Key: karpv1.CapacityTypeLabelKey, Operator: corev1.NodeSelectorOpIn, Values: []string{karpv1.CapacityTypeOnDemand},
+	})
+
+	node, err := f.provider.Create(f.ctx, nodeClaim, f.nodeClass, []*cloudprovider.InstanceType{f.instanceType})
+	require.NoError(t, err)
+
+	assert.Equal(t, karpv1.CapacityTypeOnDemand, node.Labels[karpv1.CapacityTypeLabelKey])
+	assert.NotContains(t, node.Labels, v1alpha1.LabelReservationID)
 }
 
 func TestCreateWritesGrantTokensIntoDescription(t *testing.T) {

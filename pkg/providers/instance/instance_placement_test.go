@@ -283,8 +283,44 @@ func TestGetCapacityType(t *testing.T) {
 						),
 					},
 					&cloudprovider.Offering{
+						Available:           true,
+						Price:               1.0,
+						ReservationCapacity: 1,
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, opIn, karpv1.CapacityTypeReserved),
+						),
+					},
+				},
+			},
+			region: "us-west-1",
+			zone:   "us-west-1a",
+			expect: karpv1.CapacityTypeReserved,
+		},
+		{
+			name: "reserved-stale-count-still-reserved",
+			nodeClaim: &karpv1.NodeClaim{
+				Spec: karpv1.NodeClaimSpec{
+					Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+						{Key: corev1.LabelTopologyRegion, Operator: opIn, Values: []string{"us-west-1"}},
+						{Key: corev1.LabelTopologyZone, Operator: opIn, Values: []string{"us-west-1a", "us-west-1b"}},
+						{Key: karpv1.CapacityTypeLabelKey, Operator: opIn, Values: []string{karpv1.CapacityTypeReserved, karpv1.CapacityTypeSpot}},
+					},
+				},
+			},
+			instanceType: &cloudprovider.InstanceType{
+				Name: "type-1",
+				Offerings: cloudprovider.Offerings{
+					&cloudprovider.Offering{
 						Available: true,
 						Price:     1.0,
+						Requirements: scheduling.NewRequirements(
+							scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, opIn, karpv1.CapacityTypeSpot),
+						),
+					},
+					&cloudprovider.Offering{
+						Available:           true,
+						Price:               1.0,
+						ReservationCapacity: 0,
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, opIn, karpv1.CapacityTypeReserved),
 						),
