@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.17.0...v0.17.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **chart:** update crd ([e6dde12](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e6dde12ecccbaf95d397097adaca727c93fced25))
+
 ## [0.17.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.16.0...v0.17.0) (2026-11-11)
 
 
