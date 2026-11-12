@@ -83,7 +83,7 @@ clean: ## Clean
 
 .PHONY: tools
 tools:
-	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.21.0
 	go install github.com/google/go-licenses@latest
 
 .PHONY: vendor
