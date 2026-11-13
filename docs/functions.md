@@ -166,7 +166,7 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `hasKey` - the function to return true if the map has the specified key.
 
   ```yaml
-  {{ hasKey (dict "a" 1 "b" 2) "a" }} -> true
+  {{ hasKey .Values "SSHAuthorizedKeys" }} -> true
   ```
 
 * `hasTag` - the function to return true if the string slice contains the specified tag.

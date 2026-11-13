@@ -67,3 +67,34 @@ func TestFuncs(t *testing.T) {
 		assert.Equal(t, tt.expect, res, tt.name)
 	}
 }
+
+func TestHasKey(t *testing.T) {
+	data := map[string]any{
+		"Values": map[string]string{"SSHAuthorizedKeys": "ssh-ed25519 AAAA"},
+		"Any":    map[string]any{"a": 1},
+		"Empty":  map[string]string{},
+		"Nil":    map[string]string(nil),
+		"Slice":  []string{"a"},
+	}
+
+	tests := []struct {
+		name   string
+		tpl    string
+		expect string
+	}{
+		{name: "string map with key", tpl: `{{ hasKey .Values "SSHAuthorizedKeys" }}`, expect: "true"},
+		{name: "string map without key", tpl: `{{ hasKey .Values "missing" }}`, expect: "false"},
+		{name: "any map", tpl: `{{ hasKey .Any "a" }} {{ hasKey .Any "b" }}`, expect: "true false"},
+		{name: "empty map", tpl: `{{ hasKey .Empty "a" }}`, expect: "false"},
+		{name: "nil map", tpl: `{{ hasKey .Nil "a" }}`, expect: "false"},
+		{name: "not a map", tpl: `{{ hasKey .Slice "a" }}`, expect: "false"},
+		{name: "with if", tpl: `{{ if hasKey .Values "SSHAuthorizedKeys" }}keys: {{ get .Values "SSHAuthorizedKeys" }}{{ end }}`, expect: "keys: ssh-ed25519 AAAA"},
+	}
+
+	for _, tt := range tests {
+		res, err := ExecuteTemplate(tt.tpl, data)
+
+		assert.NoError(t, err, tt.name)
+		assert.Equal(t, tt.expect, res, tt.name)
+	}
+}
