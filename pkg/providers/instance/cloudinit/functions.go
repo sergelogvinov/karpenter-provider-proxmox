@@ -277,9 +277,10 @@ func get(m map[string]string, key string) string {
 // getValue returns the value for the given key in a semicolon-separated key=value string.
 func getValue(source string, key string) string {
 	for part := range strings.SplitSeq(source, ";") {
-		kv := strings.Split(part, "=")
-		if kv[0] == key {
-			return kv[1]
+		// Split on the first "=" only, so a value can contain "=" (base64 padding, URL query).
+		k, v, _ := strings.Cut(part, "=")
+		if k == key {
+			return v
 		}
 	}
 

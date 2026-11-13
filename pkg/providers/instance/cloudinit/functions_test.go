@@ -54,6 +54,21 @@ func TestFuncs(t *testing.T) {
 			expect: `ipv4: 192.168.1.5`,
 		},
 		{
+			name:   "getValue",
+			tpl:    `{{ getValue "ds=nocloud;i=1234" "i" }}`,
+			expect: `1234`,
+		},
+		{
+			name:   "getValue with = in the value",
+			tpl:    `{{ getValue "ds=nocloud;s=http://10.0.0.1/?a=b;t=YWJjZA==" "s" }} {{ getValue "ds=nocloud;t=YWJjZA==" "t" }}`,
+			expect: `http://10.0.0.1/?a=b YWJjZA==`,
+		},
+		{
+			name:   "getValue with a key without value",
+			tpl:    `[{{ getValue "flag;i=1234" "flag" }}] [{{ getValue "flag;i=1234" "i" }}] [{{ getValue "i=1234" "missing" }}]`,
+			expect: `[] [1234] []`,
+		},
+		{
 			name:   "cidrhost with host number",
 			tpl:    `ipv4: {{ cidrhost "192.168.1.5/24" 15 }}`,
 			expect: `ipv4: 192.168.1.15`,
