@@ -192,14 +192,14 @@ func toYamlPretty(v any) string {
 }
 
 // hasKey returns true if the given map has the given key.
-func hasKey(m map[string]any, key string) bool {
-	if empty(m) {
+// It accepts any map with string keys, such as .Values (map[string]string).
+func hasKey(v any, key string) bool {
+	g := reflect.ValueOf(v)
+	if !g.IsValid() || g.Kind() != reflect.Map || g.Type().Key().Kind() != reflect.String {
 		return false
 	}
 
-	_, ok := m[key]
-
-	return ok
+	return g.MapIndex(reflect.ValueOf(key).Convert(g.Type().Key())).IsValid()
 }
 
 func hasTag(tags []string, tag string) bool {
