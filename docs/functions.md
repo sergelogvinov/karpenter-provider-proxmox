@@ -78,13 +78,13 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `trimSuffix` - the function to remove the suffix from the string.
 
   ```yaml
-  {{ trimSuffix "hello" "lo" }} -> hel
+  {{ trimSuffix "lo" "hello" }} -> hel
   ```
 
 * `trimPrefix` - the function to remove the prefix from the string.
 
   ```yaml
-  {{ trimPrefix "hello" "he" }} -> llo
+  {{ trimPrefix "he" "hello" }} -> llo
   ```
 
 * `split` - the function to split the string by the given separator and return a slice of strings.
@@ -96,13 +96,13 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `join` - the function to join a slice of strings with the given separator.
 
   ```yaml
-  {{ join (list "a" "b" "c") "," }} -> a,b,c
+  {{ join (split "a,b,c" ",") "-" }} -> a-b-c
   ```
 
 * `replace` - the function to replace all occurrences of the old string with the new string.
 
   ```yaml
-  {{ replace "hello" "l" "L" }} -> heLLo
+  {{ replace "l" "L" "hello" }} -> heLLo
   ```
 
 * `regexFind` - return the first (left most) match of the regular expression in the input string.
@@ -125,13 +125,13 @@ The Cloud-Init provider supports several template functions that can be used to 
 
 ### String slice functions
 
-* `get` - the function to get the value from the string slice by index.
+* `get` - the function to get the value for the key from a string map, or an empty string if the key does not exist.
 
   ```yaml
-  {{ get (dict "a" 1 "b" 2) "a" }} -> 1
+  {{ get .Values "SSHAuthorizedKeys" }} -> ssh-ed25519 AAAA...
   ```
 
-* `getValue` - the function to get the value from the map by key.
+* `getValue` - the function to get the value for the key from a semicolon-separated `key=value` string.
 
   ```yaml
   {{ getValue "ds=nocloud;i=1234" "i" }} -> 1234
@@ -148,19 +148,19 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `contains` - the function to return true if the string contains the substring.
 
   ```yaml
-  {{ contains "hello" "lo" }} -> true
+  {{ contains "lo" "hello" }} -> true
   ```
 
 * `hasPrefix` - the function to return true if the string has the specified prefix.
 
   ```yaml
-  {{ hasPrefix "hello" "he" }} -> true
+  {{ hasPrefix "he" "hello" }} -> true
   ```
 
 * `hasSuffix` - the function to return true if the string has the specified suffix.
 
   ```yaml
-  {{ hasSuffix "hello" "lo" }} -> true
+  {{ hasSuffix "lo" "hello" }} -> true
   ```
 
 * `hasKey` - the function to return true if the map has the specified key.
@@ -172,7 +172,7 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `hasTag` - the function to return true if the string slice contains the specified tag.
 
   ```yaml
-  {{ hasTag (list "tag1" "tag2") "tag2" }} -> true
+  {{ hasTag (split "tag1,tag2" ",") "tag2" }} -> true
   ```
 
 ### Encoding functions
@@ -203,7 +203,7 @@ The Cloud-Init provider supports several template functions that can be used to 
 * `cidrslaac` - the function to return the SLAAC address for the given CIDR and MAC address.
 
   ```yaml
-  {{ "2001:db8::/64" | cidrslaac "00:1A:2B:3C:4D:5E" }} -> 2001:db8:1:0:21a:2bff:fe3c:4d5e/64
+  {{ "2001:db8:1::/64" | cidrslaac "00:1A:2B:3C:4D:5E" }} -> 2001:db8:1:0:21a:2bff:fe3c:4d5e/64
   ```
 
   ```yaml
