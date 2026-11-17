@@ -111,7 +111,7 @@ func (o *InstanceTypeOptions) Generate() ([]*InstanceTypeStatic, error) {
 	return instanceTypes, nil
 }
 
-// numaTemplate returns the NUMA template of the n<fraction> family. It has no cpu, memory or overhead: the
+// numaTemplate returns the reserved NUMA template of the n<fraction> family. It has no cpu, memory or overhead: the
 // controller takes the CPUs and memory from each slot shape and computes the overhead of each NUMA type.
 func (o *InstanceTypeOptions) numaTemplate(fraction int) *InstanceTypeStatic {
 	capacity := corev1.ResourceList{
@@ -125,7 +125,7 @@ func (o *InstanceTypeOptions) numaTemplate(fraction int) *InstanceTypeStatic {
 	return &InstanceTypeStatic{
 		Name:         fmt.Sprintf("%s%d", numaFamily, fraction),
 		Capacity:     capacity,
-		CapacityType: karpv1.CapacityTypeOnDemand,
+		CapacityType: karpv1.CapacityTypeReserved,
 		NUMA:         fraction,
 	}
 }

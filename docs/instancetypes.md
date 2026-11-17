@@ -147,7 +147,7 @@ The digit after `n` is the slot fraction, the number a NUMA node is divided by, 
   The [Proxmox Scheduler](scheduler.md) puts new CPU share groups on the NUMA node with the most pinned CPUs for the same reason.
 * **Node policy.** NUMA types are offered with the `static` node policy only.
 * **Pricing.** A NUMA type is priced by its CPUs and memory, as any other type.
-* **Defaults.** The predefined list has the `n1` and `n2` NUMA templates.
+* **Defaults.** The predefined list has the `n1` and `n2` NUMA templates, both `reserved` (see [Capacity types](#capacity-types)).
   An instance types file replaces the predefined list, so it has NUMA types only if it defines NUMA templates (see below).
 
 ### NUMA templates
@@ -367,7 +367,7 @@ bin/instancetypes-amd64 generate --cpus 2,4,8 --memfactor 2,4 --kubelet --system
 * `--cpushare`: Comma-separated list of CPU share group seats, each `2`, `3` or `4`.
   For each value N it adds the `eN` family of the same sizes, with `cpushare` set.
 * `--numa`: Comma-separated list of NUMA slot fractions, each `1`, `2` or `4`.
-  For each value N it adds the `nN` [NUMA template](#numa-templates), with `numa` set,
+  For each value N it adds the `nN` [NUMA template](#numa-templates), with `numa` set, `capacitytype: reserved`,
   the `--storage` size and no `cpu`, `memory` or `overhead`: those come from each slot.
 * `--kubelet`, `--system`, `--eviction`: Add the `overhead` for the kubelet, the OS system daemons and the eviction threshold.
 

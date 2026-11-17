@@ -27,6 +27,8 @@ import (
 	"github.com/sergelogvinov/karpenter-provider-proxmox/pkg/providers/instancetype"
 
 	corev1 "k8s.io/api/core/v1"
+
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 )
 
 // TestGeneratedCPUShareTypesLoad checks that the generator output with CPU shares 2, 3 and 4 loads in the
@@ -94,7 +96,7 @@ func TestGenerateRejectsInvalidCPUShare(t *testing.T) {
 }
 
 // TestGenerateNUMATemplates checks that each slot fraction adds one NUMA template, named after its n<fraction>
-// family, after the instance types, and that the output loads in the controller.
+// family, after the instance types, reserved, and that the output loads in the controller.
 func TestGenerateNUMATemplates(t *testing.T) {
 	t.Parallel()
 
@@ -112,6 +114,7 @@ func TestGenerateNUMATemplates(t *testing.T) {
 
 	n1 := instanceTypes[1]
 	require.Equal(t, "n1", n1.Name)
+	require.Equal(t, karpv1.CapacityTypeReserved, n1.CapacityType, "a generated NUMA template is reserved")
 	require.Equal(t, "30Gi", n1.Capacity.StorageEphemeral().String())
 	require.Equal(t, "110", n1.Capacity.Pods().String())
 	require.NotContains(t, n1.Capacity, corev1.ResourceCPU, "cpu comes from the slot")
