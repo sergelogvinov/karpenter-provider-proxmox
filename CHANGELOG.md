@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.17.1](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.17.0...v0.17.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* accept string maps in the hasKey template function ([7f5b409](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/7f5b4093eaf1ff500cb73612435273ace2d05f08))
+* **chart:** update crd ([e6dde12](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e6dde12ecccbaf95d397097adaca727c93fced25))
+* generate reserved NUMA templates by default ([cc946bf](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/cc946bf8327cab1c127fb1f6566edd92bbacfb23))
+* split getValue pairs on the first equal sign ([e6bd9e0](https://github.com/sergelogvinov/karpenter-provider-proxmox/commit/e6bd9e0677ed4a1d74b537ef722864bd2cfb025b))
+
 ## [0.17.0](https://github.com/sergelogvinov/karpenter-provider-proxmox/compare/v0.16.0...v0.17.0) (2026-11-11)
 
 
